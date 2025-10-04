@@ -19,11 +19,14 @@ USERS_SHEET_NAME = "users"
 SPREADSHEET_URL = st.secrets["connections"]["gsheets"]["spreadsheet"]
 ADMIN_EMAIL_RECIPIENT = "primetroyxs@gmail.com"  # Email tujuan notifikasi
 
-"""Inisialisasi aset visual: logo (branding utama) & icon (favicon/tab)."""
 try:
-    logo_image = Image.open("logo.png")
+    logo_image = Image.open("logo.png")  # untuk sidebar setelah login
 except Exception:
     logo_image = None
+try:
+    login_logo_image = Image.open("logologin.png")  # khusus halaman login
+except Exception:
+    login_logo_image = logo_image  # fallback ke logo utama
 try:
     app_icon_image = Image.open("icon.png")
 except Exception:
@@ -189,8 +192,8 @@ def show_login_page():
         unsafe_allow_html=True
     )
 
-    if logo_image:
-        st.image(logo_image, width=180)
+    if login_logo_image:
+        st.image(login_logo_image, width=220)
     st.markdown("<h2 style='text-align:center;margin-top:0;'>Minama Management System</h2>", unsafe_allow_html=True)
 
     try:
