@@ -10,6 +10,7 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Tuple
+from PIL import Image
 
 # --- 1. KONFIGURASI APLIKASI ---
 # PENTING: Pastikan ID ini berasal dari folder di dalam SHARED DRIVE
@@ -17,7 +18,18 @@ GDRIVE_FOLDER_ID = "1Y98WYhpaqWoYZ2Y5RRGW-KJPXo1nBtAp"
 USERS_SHEET_NAME = "users"
 SPREADSHEET_URL = st.secrets["connections"]["gsheets"]["spreadsheet"]
 ADMIN_EMAIL_RECIPIENT = "primetroyxs@gmail.com"  # Email tujuan notifikasi
-st.set_page_config(page_title="Secure App", page_icon="🔐", layout="centered")
+
+# Muat logo aplikasi dan set konfigurasi halaman dengan logo sebagai icon
+try:
+    logo_image = Image.open("logo.png")
+except Exception:
+    logo_image = None  # fallback bila logo tidak ditemukan
+
+st.set_page_config(
+    page_title="Minama Management System",
+    page_icon=logo_image if logo_image else "�",
+    layout="centered"
+)
 
 
 # --- 2. FUNGSI KONEKSI & AUTENTIKASI ---
@@ -158,9 +170,15 @@ if 'username' not in st.session_state:
 # --- 5. TAMPILAN HALAMAN (UI) ---
 def show_login_page():
     """Menampilkan halaman login dan registrasi."""
-    st.header("🔐 Secure App Login")
+    st.header("Minama Management System")
     
     with st.sidebar:
+        if 'logo_rendered' not in st.session_state:
+            # Pastikan logo hanya dirender sekali per sesi untuk konsistensi
+            st.session_state.logo_rendered = True
+        if logo_image:
+            st.image(logo_image, use_column_width=True)
+        st.markdown("### Minama Management System")
         st.subheader("Pilih Aksi")
         action = st.radio(" ", ["Login", "Register"])
 
@@ -235,7 +253,12 @@ def show_login_page():
 
 def show_main_app():
     """Menampilkan aplikasi utama setelah user berhasil login."""
-    st.sidebar.success(f"Login sebagai: **{st.session_state.username}**")
+    # Sidebar branding + status user
+    with st.sidebar:
+        if logo_image:
+            st.image(logo_image, use_column_width=True)
+        st.markdown("### Minama Management System")
+        st.success(f"Login sebagai: **{st.session_state.username}**")
     if st.sidebar.button("Logout"):
         
         # Kirim notifikasi email saat LOGOUT
@@ -247,7 +270,7 @@ def show_main_app():
         st.session_state.username = ""
         st.rerun()
 
-    st.title("📂 File Management with Google Drive")
+    st.title("📂 File Management - Minama Management System")
 
     st.header("⬆️ Upload File Baru")
     uploaded_file = st.file_uploader("Pilih file untuk diupload ke Google Drive", type=None)
