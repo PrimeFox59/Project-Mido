@@ -19,17 +19,22 @@ USERS_SHEET_NAME = "users"
 SPREADSHEET_URL = st.secrets["connections"]["gsheets"]["spreadsheet"]
 ADMIN_EMAIL_RECIPIENT = "primetroyxs@gmail.com"  # Email tujuan notifikasi
 
-# Muat logo aplikasi
+"""Inisialisasi aset visual: logo (branding utama) & icon (favicon/tab)."""
 try:
     logo_image = Image.open("logo.png")
 except Exception:
-    logo_image = None  # fallback bila logo tidak ditemukan
+    logo_image = None
+try:
+    app_icon_image = Image.open("icon.png")
+except Exception:
+    # fallback ke logo lalu emoji
+    app_icon_image = logo_image if 'logo_image' in locals() and logo_image else "📁"
 
 # Layout dinamis: wide hanya setelah login
 _layout_mode = "wide" if ('logged_in' in st.session_state and st.session_state.get('logged_in')) else "centered"
 st.set_page_config(
     page_title="Minama Management System",
-    page_icon=logo_image if logo_image else "📁",
+    page_icon=app_icon_image,
     layout=_layout_mode
 )
 
