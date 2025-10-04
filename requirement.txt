@@ -1,3 +1,0 @@
-This file is deprecated.
-Use requirements.txt instead.
-It remains only to avoid build confusion if some tooling misreads the filename.
