@@ -27,7 +27,7 @@ except Exception:
 
 st.set_page_config(
     page_title="Minama Management System",
-    page_icon=logo_image if logo_image else "�",
+    page_icon=logo_image if logo_image else "📁",
     layout="centered"
 )
 
@@ -177,7 +177,7 @@ def show_login_page():
             # Pastikan logo hanya dirender sekali per sesi untuk konsistensi
             st.session_state.logo_rendered = True
         if logo_image:
-            st.image(logo_image, use_column_width=True)
+            st.image(logo_image, use_container_width=True)
         st.markdown("### Minama Management System")
         st.subheader("Pilih Aksi")
         action = st.radio(" ", ["Login", "Register"])
@@ -256,7 +256,7 @@ def show_main_app():
     # Sidebar branding + status user
     with st.sidebar:
         if logo_image:
-            st.image(logo_image, use_column_width=True)
+            st.image(logo_image, use_container_width=True)
         st.markdown("### Minama Management System")
         st.success(f"Login sebagai: **{st.session_state.username}**")
     if st.sidebar.button("Logout"):
