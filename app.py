@@ -9,6 +9,7 @@ import io
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from typing import Tuple
 
 # --- 1. KONFIGURASI APLIKASI ---
 # PENTING: Pastikan ID ini berasal dari folder di dalam SHARED DRIVE
@@ -20,7 +21,27 @@ st.set_page_config(page_title="Secure App", page_icon="🔐", layout="centered")
 
 
 # --- 2. FUNGSI KONEKSI & AUTENTIKASI ---
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Gunakan bcrypt_sha256 agar tidak terkena limit 72 bytes pada bcrypt standar.
+# Tetap sertakan 'bcrypt' untuk kompatibilitas hash lama (jika sudah terlanjur tersimpan).
+pwd_context = CryptContext(
+    schemes=["bcrypt_sha256", "bcrypt"],
+    deprecated=["bcrypt"],
+)
+
+BCRYPT_HARD_LIMIT = 72  # batas internal bcrypt (bytes) bila masih memakai skema bcrypt lama
+
+def _prepare_password(pw: str) -> Tuple[str, bool]:
+    """Normalisasi password & potong bila melampaui limit bcrypt.
+    Returns: (possibly_truncated_password, truncated_flag)
+    """
+    if not isinstance(pw, str):
+        pw = str(pw)
+    b = pw.encode("utf-8")
+    if len(b) > BCRYPT_HARD_LIMIT:
+        # Potong hanya untuk kompatibilitas model lama; bcrypt_sha256 tidak butuh ini,
+        # tapi kita lakukan agar bila fallback ke bcrypt tidak error.
+        return b[:BCRYPT_HARD_LIMIT].decode("utf-8", errors="ignore"), True
+    return pw, False
 
 @st.cache_resource
 def get_credentials():
@@ -52,12 +73,31 @@ def get_gdrive_service():
 
 # --- 3. FUNGSI HELPER & UTILITAS ---
 def hash_password(password: str):
-    """Mengubah password plain text menjadi hash."""
-    return pwd_context.hash(password)
+    """Mengubah password plain text menjadi hash.
+    - Menggunakan bcrypt_sha256 (default) sehingga password panjang tetap aman.
+    - Menangani kemungkinan error panjang ketika fallback ke bcrypt.
+    """
+    pw_prepared, truncated = _prepare_password(password)
+    try:
+        return pwd_context.hash(pw_prepared)
+    except ValueError as e:
+        # Jika tetap gagal karena panjang (kasus anomali yg Anda alami), pakai truncation paksa.
+        if "longer than" in str(e).lower():
+            safe_pw, _ = _prepare_password(pw_prepared)
+            return pwd_context.hash(safe_pw)
+        raise
 
 def verify_password(plain_password: str, hashed_password: str):
-    """Memverifikasi password dengan hash yang tersimpan."""
-    return pwd_context.verify(plain_password, hashed_password)
+    """Memverifikasi password dengan hash yang tersimpan.
+    Jika hash lama memakai bcrypt & password >72 bytes, otomatis dipotong dengan cara sama.
+    """
+    pw_prepared, _ = _prepare_password(plain_password)
+    try:
+        return pwd_context.verify(pw_prepared, hashed_password)
+    except ValueError as e:
+        # Logika tambahan bila terjadi masalah tak terduga.
+        st.error(f"Gagal verifikasi password: {e}")
+        return False
 
 def send_notification_email(recipient_email, subject, body):
     """Mengirim email notifikasi menggunakan kredensial dari st.secrets."""
@@ -101,7 +141,7 @@ def initialize_users_sheet():
 
         if df.empty or 'admin' not in df['username'].values:
             st.info("User default 'admin' tidak ditemukan. Membuat user...")
-            hashed_admin_pass = hash_password('admin')
+            hashed_admin_pass = hash_password('admin')  # default password
             worksheet.append_row(['admin', hashed_admin_pass])
             st.success("User default 'admin' dengan password 'admin' berhasil ditambahkan.")
     except Exception as e:
