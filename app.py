@@ -19,16 +19,18 @@ USERS_SHEET_NAME = "users"
 SPREADSHEET_URL = st.secrets["connections"]["gsheets"]["spreadsheet"]
 ADMIN_EMAIL_RECIPIENT = "primetroyxs@gmail.com"  # Email tujuan notifikasi
 
-# Muat logo aplikasi dan set konfigurasi halaman dengan logo sebagai icon
+# Muat logo aplikasi
 try:
     logo_image = Image.open("logo.png")
 except Exception:
     logo_image = None  # fallback bila logo tidak ditemukan
 
+# Layout dinamis: wide hanya setelah login
+_layout_mode = "wide" if ('logged_in' in st.session_state and st.session_state.get('logged_in')) else "centered"
 st.set_page_config(
     page_title="Minama Management System",
     page_icon=logo_image if logo_image else "📁",
-    layout="centered"
+    layout=_layout_mode
 )
 
 
@@ -169,18 +171,22 @@ if 'username' not in st.session_state:
 
 # --- 5. TAMPILAN HALAMAN (UI) ---
 def show_login_page():
-    """Menampilkan halaman login dan registrasi."""
-    st.header("Minama Management System")
-    
-    with st.sidebar:
-        if 'logo_rendered' not in st.session_state:
-            # Pastikan logo hanya dirender sekali per sesi untuk konsistensi
-            st.session_state.logo_rendered = True
-        if logo_image:
-            st.image(logo_image, use_container_width=True)
-        st.markdown("### Minama Management System")
-        st.subheader("Pilih Aksi")
-        action = st.radio(" ", ["Login", "Register"])
+    """Menampilkan halaman login & registrasi dalam tab, tanpa sidebar."""
+    # CSS untuk membatasi lebar konten agar tetap center saat layout 'centered'
+    st.markdown(
+        """
+        <style>
+        .main .block-container {max-width: 480px; padding-top: 2.5rem;}
+        .stTabs [data-baseweb="tab-list"] {justify-content: center;}
+        .stTabs [data-baseweb="tab"] {font-weight: 600;}
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+    if logo_image:
+        st.image(logo_image, width=180)
+    st.markdown("<h2 style='text-align:center;margin-top:0;'>Minama Management System</h2>", unsafe_allow_html=True)
 
     try:
         client = get_gsheets_client()
@@ -190,8 +196,9 @@ def show_login_page():
         st.error(f"Tidak dapat terhubung ke Google Sheet. Pastikan file dibagikan dan URL benar. Error: {e}")
         st.stop()
 
-    if action == "Login":
-        st.subheader("Login")
+    tab_login, tab_register = st.tabs(["Login", "Register"])
+
+    with tab_login:
         with st.form("login_form"):
             username = st.text_input("Username").lower()
             password = st.text_input("Password", type="password")
@@ -201,19 +208,14 @@ def show_login_page():
                 if not username or not password:
                     st.warning("Username dan Password tidak boleh kosong.")
                     return
-
                 users_df = pd.DataFrame(worksheet.get_all_records())
                 user_data = users_df[users_df["username"] == username]
-
                 if not user_data.empty:
                     stored_hash = user_data.iloc[0]["password_hash"]
                     if verify_password(password, stored_hash):
-                        
-                        # Kirim notifikasi email saat LOGIN
                         email_subject = "Notifikasi: User Login"
                         email_body = f"User '{username}' telah berhasil LOGIN ke aplikasi Anda."
                         send_notification_email(ADMIN_EMAIL_RECIPIENT, email_subject, email_body)
-                        
                         st.session_state.logged_in = True
                         st.session_state.username = username
                         st.rerun()
@@ -222,8 +224,7 @@ def show_login_page():
                 else:
                     st.error("Username atau Password salah.")
 
-    elif action == "Register":
-        st.subheader("Buat Akun Baru")
+    with tab_register:
         with st.form("register_form"):
             new_username = st.text_input("Username Baru").lower()
             new_password = st.text_input("Password Baru", type="password")
@@ -237,7 +238,6 @@ def show_login_page():
                 if new_password != confirm_password:
                     st.error("Password tidak cocok.")
                     return
-                
                 users_df = pd.DataFrame(worksheet.get_all_records())
                 if new_username in users_df["username"].values:
                     st.error("Username sudah terdaftar. Silakan pilih yang lain.")
@@ -245,8 +245,6 @@ def show_login_page():
                     hashed_pass = hash_password(new_password)
                     worksheet.append_row([new_username, hashed_pass])
                     st.success("Registrasi berhasil! Silakan login.")
-
-                    # Kirim notifikasi email saat REGISTRASI
                     email_subject = "Notifikasi: User Baru Telah Mendaftar"
                     email_body = f"User baru dengan username '{new_username}' telah berhasil mendaftar di aplikasi Anda."
                     send_notification_email(ADMIN_EMAIL_RECIPIENT, email_subject, email_body)
