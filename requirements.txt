@@ -2,8 +2,8 @@ streamlit
 gspread
 gspread-dataframe
 pandas
-passlib[bcrypt]
+passlib
+bcrypt==3.2.0
 google-api-python-client
-google-auth
 google-auth-httplib2
 google-auth-oauthlib
