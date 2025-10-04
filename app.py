@@ -13,7 +13,7 @@ from typing import Tuple
 
 # --- 1. KONFIGURASI APLIKASI ---
 # PENTING: Pastikan ID ini berasal dari folder di dalam SHARED DRIVE
-GDRIVE_FOLDER_ID = "1CxYo2ZGu8jweKjmEws41nT3cexJju5_1" 
+GDRIVE_FOLDER_ID = "1Y98WYhpaqWoYZ2Y5RRGW-KJPXo1nBtAp" 
 USERS_SHEET_NAME = "users"
 SPREADSHEET_URL = st.secrets["connections"]["gsheets"]["spreadsheet"]
 ADMIN_EMAIL_RECIPIENT = "primetroyxs@gmail.com"  # Email tujuan notifikasi
