@@ -193,7 +193,7 @@ def show_login_page():
     )
 
     if login_logo_image:
-        st.image(login_logo_image, width=220)
+        st.image(login_logo_image, width=1000)
     st.markdown("<h2 style='text-align:center;margin-top:0;'>Minama Management System</h2>", unsafe_allow_html=True)
 
     try:
