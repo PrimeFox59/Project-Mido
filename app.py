@@ -1453,6 +1453,9 @@ def main():
         if st.sidebar.button("🧑‍💼 Supervisor", use_container_width=True):
             st.session_state.page = "Supervisor"
             st.rerun()
+        if st.sidebar.button("🧑‍💻 Tracer", use_container_width=True):
+            st.session_state.page = "Tracer"
+            st.rerun()
         st.sidebar.button(" Logout", on_click=logout_user, use_container_width=True)
         st.sidebar.markdown("---")
     elif st.session_state.page != 'RestoreStatus':
@@ -1488,6 +1491,9 @@ def main():
 
     if st.session_state.page == "Supervisor":
         page_supervisor()
+        return
+    if st.session_state.page == "Tracer":
+        page_tracer()
         return
     if st.session_state.page == "Authentication":
         st.session_state.page = "G Drive"
@@ -1666,6 +1672,81 @@ def page_supervisor():
         else:
             df = pd.DataFrame(rows)
             st.dataframe(df, use_container_width=True, hide_index=True)
+
+def page_tracer():
+    require_login()
+    u = current_user()
+    tracer_name = u.get('name') if u else None
+    st.title("🧑‍💻 Tracer Menu")
+    if not tracer_name:
+        st.error("Tidak dapat menentukan nama tracer. Silakan login ulang.")
+        return
+    st.caption(f"Assignment untuk: {tracer_name}")
+
+    # Fetch rows assigned to this tracer (Assigned_To = user name)
+    rows = fetchall(
+        "SELECT id, TRC_Code, Agreement_No, Debtor_Name, NIK_KTP, EMPLOYMENT_UPDATE, EMPLOYER, Debtor_Legal_Name, Employee_Name, Employee_ID_Number, Debtor_Relation_to_Employee, created_at "
+        "FROM assign_tracer WHERE IFNULL(Assigned_To,'') = ? ORDER BY id DESC LIMIT 500",
+        (tracer_name,)
+    )
+    if not rows:
+        st.info("Belum ada assignment untuk Anda.")
+        return
+
+    st.subheader("Daftar Assignment")
+    # Quick table view of key identifiers
+    df_view = pd.DataFrame([
+        {
+            'ID': r['id'],
+            'TRC Code': r['TRC_Code'],
+            'Agreement No.': r['Agreement_No'],
+            'Debtor Name': r['Debtor_Name'],
+            'NIK KTP': r['NIK_KTP'],
+            'Assigned At': r['created_at'],
+        } for r in rows
+    ])
+    st.dataframe(df_view, use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+    st.subheader("Update Detail Employment")
+    st.caption("Pilih satu baris kemudian isi data yang diperlukan.")
+
+    # Select a row to update
+    id_options = [r['id'] for r in rows]
+    sel_id = st.selectbox("Pilih ID Assignment", id_options, key="tr_sel_id")
+    sel_row = next((r for r in rows if r['id'] == sel_id), None)
+    if not sel_row:
+        st.warning("Data tidak ditemukan.")
+        return
+
+    with st.form("tracer_update_form"):
+        col1, col2 = st.columns(2)
+        with col1:
+            st.text_input("TRC Code", value=sel_row.get('TRC_Code',''), disabled=True, key="tr_v_trc")
+            st.text_input("Agreement No.", value=sel_row.get('Agreement_No',''), disabled=True, key="tr_v_agmt")
+            st.text_input("Debtor Name", value=sel_row.get('Debtor_Name',''), disabled=True, key="tr_v_debtor")
+            st.text_input("NIK KTP", value=sel_row.get('NIK_KTP',''), disabled=True, key="tr_v_nik")
+        with col2:
+            emp_update = st.text_input("EMPLOYMENT UPDATE", value=sel_row.get('EMPLOYMENT_UPDATE',''), key="tr_emp_update")
+            employer = st.text_input("EMPLOYER", value=sel_row.get('EMPLOYER',''), key="tr_employer")
+            debtor_legal = st.text_input("Debtor Legal Name", value=sel_row.get('Debtor_Legal_Name',''), key="tr_debtor_legal")
+            employee_name = st.text_input("Employee Name", value=sel_row.get('Employee_Name',''), key="tr_employee_name")
+            employee_id = st.text_input("Employee ID Number", value=sel_row.get('Employee_ID_Number',''), key="tr_employee_id")
+            relation = st.text_input("Debtor Relation to Employee", value=sel_row.get('Debtor_Relation_to_Employee',''), key="tr_relation")
+
+        submitted = st.form_submit_button("Simpan Perubahan")
+        if submitted:
+            try:
+                execute(
+                    "UPDATE assign_tracer SET EMPLOYMENT_UPDATE=?, EMPLOYER=?, Debtor_Legal_Name=?, Employee_Name=?, Employee_ID_Number=?, Debtor_Relation_to_Employee=? WHERE id=? AND IFNULL(Assigned_To,'')=?",
+                    (
+                        emp_update.strip(), employer.strip(), debtor_legal.strip(), employee_name.strip(), employee_id.strip(), relation.strip(), sel_id, tracer_name
+                    )
+                )
+                st.success("Data berhasil diperbarui.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Gagal update: {e}")
 
 if __name__ == '__main__':
     main()
