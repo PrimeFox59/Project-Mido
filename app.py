@@ -55,6 +55,14 @@ def init_db():
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
     """)
+    # Ensure new column for assigning tracer by name exists
+    try:
+        cols = [r['name'] for r in c.execute("PRAGMA table_info(assign_tracer)").fetchall()]
+        if 'Assigned_To' not in cols:
+            c.execute("ALTER TABLE assign_tracer ADD COLUMN Assigned_To TEXT")
+    except Exception:
+        # Safe to ignore if already exists or PRAGMA failed
+        pass
     # users
     c.execute("""
     CREATE TABLE IF NOT EXISTS users (
@@ -1546,22 +1554,51 @@ def page_supervisor():
         st.subheader("Assign Tracer")
         tracer_fields = [
             "TRC_Code", "Agreement_No", "Debtor_Name", "NIK_KTP", "EMPLOYMENT_UPDATE", "EMPLOYER", "Debtor_Legal_Name", "Employee_Name", "Employee_ID_Number", "Debtor_Relation_to_Employee"
-        ]
+        ]  # base fields from upload/form
+
+        # Build tracer assignee options from approved users
+        user_rows = fetchall("SELECT name FROM users WHERE approved=1 ORDER BY name ASC")
+        tracer_names = [r['name'] for r in user_rows if r.get('name')]
+        assign_options = (tracer_names if tracer_names else []) + ["Other…"]
         tracer_mode = st.radio("Pilih mode input:", ["Manual", "Auto (Upload Excel/CSV)"], key="assign_tracer_mode")
         if tracer_mode == "Manual":
             with st.form("assign_tracer_manual_form"):
                 tracer_values = {}
+                # Choose assignee
+                sel = st.selectbox("Assign ke tracer", options=assign_options, key="assign_to_select_manual")
+                assigned_to = None
+                if sel == "Other…":
+                    custom_name = st.text_input("Nama tracer", key="assign_to_custom_manual")
+                    assigned_to = custom_name.strip()
+                else:
+                    assigned_to = sel
                 for f in tracer_fields:
                     tracer_values[f] = st.text_input(f.replace("_", " "), key=f"tracer_{f}")
                 tracer_submitted = st.form_submit_button("Simpan Data Tracer")
                 if tracer_submitted:
-                    placeholders = ",".join(["?" for _ in tracer_fields])
-                    try:
-                        execute(f"INSERT INTO assign_tracer ({','.join(tracer_fields)}) VALUES ({placeholders})", tuple(tracer_values[f] for f in tracer_fields))
-                        st.success("Data tracer berhasil disimpan.")
-                    except Exception as e:
-                        st.error(f"Gagal simpan: {e}")
+                    if not assigned_to:
+                        st.error("Harap tentukan nama tracer untuk assignment.")
+                    else:
+                        insert_fields = tracer_fields + ["Assigned_To"]
+                        placeholders = ",".join(["?" for _ in insert_fields])
+                        try:
+                            execute(
+                                f"INSERT INTO assign_tracer ({','.join(insert_fields)}) VALUES ({placeholders})",
+                                tuple(tracer_values[f] for f in tracer_fields) + (assigned_to,)
+                            )
+                            st.success("Data tracer berhasil disimpan.")
+                        except Exception as e:
+                            st.error(f"Gagal simpan: {e}")
         else:
+            # Default assignee for all rows (used if file doesn't have Assigned_To column)
+            sel_auto = st.selectbox("Assign semua baris ke tracer", options=assign_options, key="assign_to_select_auto")
+            default_assigned = None
+            if sel_auto == "Other…":
+                custom_auto = st.text_input("Nama tracer (default)", key="assign_to_custom_auto")
+                default_assigned = custom_auto.strip()
+            else:
+                default_assigned = sel_auto
+
             tracer_uploaded = st.file_uploader("Upload file Excel/CSV Tracer", type=["csv", "xlsx"], key="tracer_upload")
             if tracer_uploaded:
                 try:
@@ -1570,14 +1607,25 @@ def page_supervisor():
                         tracer_df = pd.read_csv(tracer_uploaded)
                     else:
                         tracer_df = pd.read_excel(tracer_uploaded)
+                    # Validate base required columns
                     missing = [f for f in tracer_fields if f not in tracer_df.columns]
                     if missing:
                         st.error(f"Kolom berikut tidak ditemukan di file: {missing}")
                     else:
+                        # If Assigned_To column not in file, require a default assignee and fill it
+                        if 'Assigned_To' not in tracer_df.columns:
+                            if not default_assigned:
+                                st.error("File tidak memiliki kolom 'Assigned_To'. Pilih/isi tracer default terlebih dahulu.")
+                                return
+                            tracer_df['Assigned_To'] = default_assigned
                         count = 0
+                        insert_fields = tracer_fields + ["Assigned_To"]
                         for _, row in tracer_df.iterrows():
                             try:
-                                execute(f"INSERT INTO assign_tracer ({','.join(tracer_fields)}) VALUES ({','.join(['?' for _ in tracer_fields])})", tuple(row[f] for f in tracer_fields))
+                                execute(
+                                    f"INSERT INTO assign_tracer ({','.join(insert_fields)}) VALUES ({','.join(['?' for _ in insert_fields])})",
+                                    tuple(row[f] for f in insert_fields)
+                                )
                                 count += 1
                             except Exception as e:
                                 st.warning(f"Baris gagal: {e}")
