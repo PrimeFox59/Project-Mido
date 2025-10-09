@@ -1442,10 +1442,10 @@ def main():
         if st.sidebar.button("📂 G Drive", use_container_width=True, type="primary"):
             st.session_state.page = "G Drive"
             st.rerun()
-        if st.sidebar.button("🧑‍� Supervisor", use_container_width=True):
+        if st.sidebar.button("🧑‍💼 Supervisor", use_container_width=True):
             st.session_state.page = "Supervisor"
             st.rerun()
-        st.sidebar.button("�🚪 Logout", on_click=logout_user, use_container_width=True)
+        st.sidebar.button(" Logout", on_click=logout_user, use_container_width=True)
         st.sidebar.markdown("---")
     elif st.session_state.page != 'RestoreStatus':
         if st.sidebar.button("🔐 Login / Register", use_container_width=True):
@@ -1500,7 +1500,7 @@ def page_supervisor():
     # --- Input Tab ---
     with tabs[0]:
         st.subheader("Input Data Supervisor")
-        mode = st.radio("Pilih mode input:", ["Manual", "Auto (Upload Excel/CSV)"])
+        mode = st.radio("Pilih mode input:", ["Manual", "Auto (Upload Excel/CSV)"], key="supervisor_input_mode")
         field_names = [
             "DT", "Lending_Entity", "Date", "Case_ID", "Task_ID", "Customer_name", "email", "Gender", "Customer_Occupation", "DPD", "Principle_Outstanding", "Principal_Overdue_CURR", "Interest_Overdue_CURR", "Last_Late_Fee", "Return_Date", "Detail", "Loan_Type", "Third_Uid", "Product", "Home_Address", "Province", "City", "Street", "RoomNumber", "Postcode", "Assignment_Date", "Withdrawal_Date", "Phone_Number_1", "Phone_Number_2", "Contact_Type_1", "Contact_Name_1", "Contact_Phone_1", "Contact_Type_2", "Contact_Name_2", "Contact_Phone_2", "Contact_Type_3", "Contact_Name_3", "Contact_Phone_3", "Contact_Type_4", "Contact_Name_4", "Contact_Phone_4", "Contact_Type_5", "Contact_Name_5", "Contact_Phone_5", "Contact_Type_6", "Contact_Name_6", "Contact_Phone_6", "Contact_Type_7", "Contact_Name_7", "Contact_Phone_7", "Contact_Type_8", "Contact_Name_8", "Contact_Phone_8", "Total_debt_in_third_party", "Repayment_on_third_Party", "Remaining_Loan_on_third_Party", "Virtual_Account_Number"
         ]
@@ -1508,7 +1508,7 @@ def page_supervisor():
             with st.form("supervisor_manual_form"):
                 values = {}
                 for f in field_names:
-                    values[f] = st.text_input(f.replace("_", " "))
+                    values[f] = st.text_input(f.replace("_", " "), key=f"sup_{f}")
                 submitted = st.form_submit_button("Simpan Data")
                 if submitted:
                     placeholders = ",".join(["?" for _ in field_names])
@@ -1547,12 +1547,12 @@ def page_supervisor():
         tracer_fields = [
             "TRC_Code", "Agreement_No", "Debtor_Name", "NIK_KTP", "EMPLOYMENT_UPDATE", "EMPLOYER", "Debtor_Legal_Name", "Employee_Name", "Employee_ID_Number", "Debtor_Relation_to_Employee"
         ]
-        tracer_mode = st.radio("Pilih mode input:", ["Manual", "Auto (Upload Excel/CSV)"])
+        tracer_mode = st.radio("Pilih mode input:", ["Manual", "Auto (Upload Excel/CSV)"], key="assign_tracer_mode")
         if tracer_mode == "Manual":
             with st.form("assign_tracer_manual_form"):
                 tracer_values = {}
                 for f in tracer_fields:
-                    tracer_values[f] = st.text_input(f.replace("_", " "))
+                    tracer_values[f] = st.text_input(f.replace("_", " "), key=f"tracer_{f}")
                 tracer_submitted = st.form_submit_button("Simpan Data Tracer")
                 if tracer_submitted:
                     placeholders = ",".join(["?" for _ in tracer_fields])
