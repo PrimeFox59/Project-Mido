@@ -92,6 +92,70 @@ def init_db():
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
     """)
+    # supervisor_data (for Supervisor menu)
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS supervisor_data (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        DT TEXT,
+        Lending_Entity TEXT,
+        Date TEXT,
+        Case_ID TEXT,
+        Task_ID TEXT,
+        Customer_name TEXT,
+        email TEXT,
+        Gender TEXT,
+        Customer_Occupation TEXT,
+        DPD TEXT,
+        Principle_Outstanding TEXT,
+        Principal_Overdue_CURR TEXT,
+        Interest_Overdue_CURR TEXT,
+        Last_Late_Fee TEXT,
+        Return_Date TEXT,
+        Detail TEXT,
+        Loan_Type TEXT,
+        Third_Uid TEXT,
+        Product TEXT,
+        Home_Address TEXT,
+        Province TEXT,
+        City TEXT,
+        Street TEXT,
+        RoomNumber TEXT,
+        Postcode TEXT,
+        Assignment_Date TEXT,
+        Withdrawal_Date TEXT,
+        Phone_Number_1 TEXT,
+        Phone_Number_2 TEXT,
+        Contact_Type_1 TEXT,
+        Contact_Name_1 TEXT,
+        Contact_Phone_1 TEXT,
+        Contact_Type_2 TEXT,
+        Contact_Name_2 TEXT,
+        Contact_Phone_2 TEXT,
+        Contact_Type_3 TEXT,
+        Contact_Name_3 TEXT,
+        Contact_Phone_3 TEXT,
+        Contact_Type_4 TEXT,
+        Contact_Name_4 TEXT,
+        Contact_Phone_4 TEXT,
+        Contact_Type_5 TEXT,
+        Contact_Name_5 TEXT,
+        Contact_Phone_5 TEXT,
+        Contact_Type_6 TEXT,
+        Contact_Name_6 TEXT,
+        Contact_Phone_6 TEXT,
+        Contact_Type_7 TEXT,
+        Contact_Name_7 TEXT,
+        Contact_Phone_7 TEXT,
+        Contact_Type_8 TEXT,
+        Contact_Name_8 TEXT,
+        Contact_Phone_8 TEXT,
+        Total_debt_in_third_party TEXT,
+        Repayment_on_third_Party TEXT,
+        Remaining_Loan_on_third_Party TEXT,
+        Virtual_Account_Number TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
     conn.commit()
 
     # Seed default settings (idempotent)
@@ -1361,7 +1425,10 @@ def main():
         if st.sidebar.button("📂 G Drive", use_container_width=True, type="primary"):
             st.session_state.page = "G Drive"
             st.rerun()
-        st.sidebar.button("🚪 Logout", on_click=logout_user, use_container_width=True)
+        if st.sidebar.button("🧑‍� Supervisor", use_container_width=True):
+            st.session_state.page = "Supervisor"
+            st.rerun()
+        st.sidebar.button("�🚪 Logout", on_click=logout_user, use_container_width=True)
         st.sidebar.markdown("---")
     elif st.session_state.page != 'RestoreStatus':
         if st.sidebar.button("🔐 Login / Register", use_container_width=True):
@@ -1393,12 +1460,103 @@ def main():
         page_auth()
         return
 
+
+    if st.session_state.page == "Supervisor":
+        page_supervisor()
+        return
     if st.session_state.page == "Authentication":
         st.session_state.page = "G Drive"
         st.rerun()
     # Paksa halaman selain Authentication menjadi G Drive
     st.session_state.page = "G Drive"
     page_gdrive()
+
+# -------------------------
+# Supervisor Page
+# -------------------------
+import pandas as pd
+import io
+def page_supervisor():
+    st.title("🧑‍💼 Supervisor Menu")
+    tabs = st.tabs(["Input", "Monitoring"])
+
+    # --- Input Tab ---
+    with tabs[0]:
+        st.subheader("Input Data Supervisor")
+        mode = st.radio("Pilih mode input:", ["Manual", "Auto (Upload Excel/CSV)"])
+        field_names = [
+            "DT", "Lending_Entity", "Date", "Case_ID", "Task_ID", "Customer_name", "email", "Gender", "Customer_Occupation", "DPD", "Principle_Outstanding", "Principal_Overdue_CURR", "Interest_Overdue_CURR", "Last_Late_Fee", "Return_Date", "Detail", "Loan_Type", "Third_Uid", "Product", "Home_Address", "Province", "City", "Street", "RoomNumber", "Postcode", "Assignment_Date", "Withdrawal_Date", "Phone_Number_1", "Phone_Number_2", "Contact_Type_1", "Contact_Name_1", "Contact_Phone_1", "Contact_Type_2", "Contact_Name_2", "Contact_Phone_2", "Contact_Type_3", "Contact_Name_3", "Contact_Phone_3", "Contact_Type_4", "Contact_Name_4", "Contact_Phone_4", "Contact_Type_5", "Contact_Name_5", "Contact_Phone_5", "Contact_Type_6", "Contact_Name_6", "Contact_Phone_6", "Contact_Type_7", "Contact_Name_7", "Contact_Phone_7", "Contact_Type_8", "Contact_Name_8", "Contact_Phone_8", "Total_debt_in_third_party", "Repayment_on_third_Party", "Remaining_Loan_on_third_Party", "Virtual_Account_Number"
+        ]
+        if mode == "Manual":
+            with st.form("supervisor_manual_form"):
+                values = {}
+                for f in field_names:
+                    values[f] = st.text_input(f.replace("_", " "))
+                submitted = st.form_submit_button("Simpan Data")
+                if submitted:
+                    placeholders = ",".join(["?" for _ in field_names])
+                    try:
+                        execute(f"INSERT INTO supervisor_data ({','.join(field_names)}) VALUES ({placeholders})", tuple(values[f] for f in field_names))
+                        st.success("Data supervisor berhasil disimpan.")
+                    except Exception as e:
+                        st.error(f"Gagal simpan: {e}")
+        else:
+            uploaded = st.file_uploader("Upload file Excel/CSV", type=["csv", "xlsx"])
+            if uploaded:
+                try:
+                    if uploaded.name.endswith(".csv"):
+                        df = pd.read_csv(uploaded)
+                    else:
+                        df = pd.read_excel(uploaded)
+                    # Pastikan urutan kolom sesuai field_names
+                    missing = [f for f in field_names if f not in df.columns]
+                    if missing:
+                        st.error(f"Kolom berikut tidak ditemukan di file: {missing}")
+                    else:
+                        count = 0
+                        for _, row in df.iterrows():
+                            try:
+                                execute(f"INSERT INTO supervisor_data ({','.join(field_names)}) VALUES ({','.join(['?' for _ in field_names])})", tuple(row[f] for f in field_names))
+                                count += 1
+                            except Exception as e:
+                                st.warning(f"Baris gagal: {e}")
+                        st.success(f"Berhasil input {count} data supervisor.")
+                except Exception as e:
+                    st.error(f"Gagal membaca file: {e}")
+
+    # --- Monitoring Tab ---
+    with tabs[1]:
+        st.subheader("Monitoring Data Supervisor")
+        # Filter fields
+        filter_fields = [
+            "Lending_Entity", "Date", "Case_ID", "Task_ID", "Customer_name", "email", "Gender", "Customer_Occupation", "DPD", "Principle_Outstanding", "Principal_Overdue_CURR", "Interest_Overdue_CURR", "Last_Late_Fee", "Return_Date", "Detail", "Loan_Type", "Third_Uid", "Product", "Home_Address", "Province", "City", "Street", "RoomNumber", "Assignment_Date"
+        ]
+        search_fields = ["Case_ID", "Task_ID", "Customer_name"]
+        # Filter widgets
+        filters = {}
+        cols = st.columns(min(4, len(filter_fields)))
+        for i, f in enumerate(filter_fields):
+            with cols[i % len(cols)]:
+                filters[f] = st.text_input(f"Filter {f.replace('_',' ')}", key=f"filter_{f}")
+        # Search
+        search_val = st.text_input("Cari (Case ID / Task ID / Customer name)", key="supervisor_search")
+        # Query
+        query = "SELECT * FROM supervisor_data WHERE 1=1"
+        params = []
+        for f in filter_fields:
+            if filters[f]:
+                query += f" AND {f} LIKE ?"
+                params.append(f"%{filters[f]}%")
+        if search_val:
+            query += " AND (" + " OR ".join([f"{sf} LIKE ?" for sf in search_fields]) + ")"
+            params.extend([f"%{search_val}%"] * len(search_fields))
+        query += " ORDER BY id DESC LIMIT 200"
+        rows = fetchall(query, tuple(params))
+        if not rows:
+            st.info("Tidak ada data supervisor ditemukan.")
+        else:
+            df = pd.DataFrame(rows)
+            st.dataframe(df, use_container_width=True, hide_index=True)
 
 if __name__ == '__main__':
     main()
