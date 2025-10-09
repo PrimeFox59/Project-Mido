@@ -36,6 +36,8 @@ def get_db():
     return conn
 
 def init_db():
+    conn = get_db()
+    c = conn.cursor()
     # assign_tracer (for Assign Tracer tab)
     c.execute("""
     CREATE TABLE IF NOT EXISTS assign_tracer (
@@ -53,8 +55,6 @@ def init_db():
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
     """)
-    conn = get_db()
-    c = conn.cursor()
     # users
     c.execute("""
     CREATE TABLE IF NOT EXISTS users (
