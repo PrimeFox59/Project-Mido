@@ -36,6 +36,23 @@ def get_db():
     return conn
 
 def init_db():
+    # assign_tracer (for Assign Tracer tab)
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS assign_tracer (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        TRC_Code TEXT,
+        Agreement_No TEXT,
+        Debtor_Name TEXT,
+        NIK_KTP TEXT,
+        EMPLOYMENT_UPDATE TEXT,
+        EMPLOYER TEXT,
+        Debtor_Legal_Name TEXT,
+        Employee_Name TEXT,
+        Employee_ID_Number TEXT,
+        Debtor_Relation_to_Employee TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
     conn = get_db()
     c = conn.cursor()
     # users
@@ -1478,7 +1495,7 @@ import pandas as pd
 import io
 def page_supervisor():
     st.title("🧑‍💼 Supervisor Menu")
-    tabs = st.tabs(["Input", "Monitoring"])
+    tabs = st.tabs(["Input", "Monitoring", "Assign Tracer"])
 
     # --- Input Tab ---
     with tabs[0]:
@@ -1521,6 +1538,50 @@ def page_supervisor():
                             except Exception as e:
                                 st.warning(f"Baris gagal: {e}")
                         st.success(f"Berhasil input {count} data supervisor.")
+                except Exception as e:
+                    st.error(f"Gagal membaca file: {e}")
+
+    # --- Assign Tracer Tab ---
+    with tabs[2]:
+        st.subheader("Assign Tracer")
+        tracer_fields = [
+            "TRC_Code", "Agreement_No", "Debtor_Name", "NIK_KTP", "EMPLOYMENT_UPDATE", "EMPLOYER", "Debtor_Legal_Name", "Employee_Name", "Employee_ID_Number", "Debtor_Relation_to_Employee"
+        ]
+        tracer_mode = st.radio("Pilih mode input:", ["Manual", "Auto (Upload Excel/CSV)"])
+        if tracer_mode == "Manual":
+            with st.form("assign_tracer_manual_form"):
+                tracer_values = {}
+                for f in tracer_fields:
+                    tracer_values[f] = st.text_input(f.replace("_", " "))
+                tracer_submitted = st.form_submit_button("Simpan Data Tracer")
+                if tracer_submitted:
+                    placeholders = ",".join(["?" for _ in tracer_fields])
+                    try:
+                        execute(f"INSERT INTO assign_tracer ({','.join(tracer_fields)}) VALUES ({placeholders})", tuple(tracer_values[f] for f in tracer_fields))
+                        st.success("Data tracer berhasil disimpan.")
+                    except Exception as e:
+                        st.error(f"Gagal simpan: {e}")
+        else:
+            tracer_uploaded = st.file_uploader("Upload file Excel/CSV Tracer", type=["csv", "xlsx"], key="tracer_upload")
+            if tracer_uploaded:
+                try:
+                    import pandas as pd
+                    if tracer_uploaded.name.endswith(".csv"):
+                        tracer_df = pd.read_csv(tracer_uploaded)
+                    else:
+                        tracer_df = pd.read_excel(tracer_uploaded)
+                    missing = [f for f in tracer_fields if f not in tracer_df.columns]
+                    if missing:
+                        st.error(f"Kolom berikut tidak ditemukan di file: {missing}")
+                    else:
+                        count = 0
+                        for _, row in tracer_df.iterrows():
+                            try:
+                                execute(f"INSERT INTO assign_tracer ({','.join(tracer_fields)}) VALUES ({','.join(['?' for _ in tracer_fields])})", tuple(row[f] for f in tracer_fields))
+                                count += 1
+                            except Exception as e:
+                                st.warning(f"Baris gagal: {e}")
+                        st.success(f"Berhasil input {count} data tracer.")
                 except Exception as e:
                     st.error(f"Gagal membaca file: {e}")
 
