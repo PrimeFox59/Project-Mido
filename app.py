@@ -1447,14 +1447,15 @@ def main():
         st.sidebar.markdown(f"**Role:** {user['role'].capitalize()}")
         st.sidebar.markdown("---")
         # Navigasi utama setelah login
-        if st.sidebar.button("📂 G Drive", use_container_width=True, type="primary"):
-            st.session_state.page = "G Drive"
-            st.rerun()
+
         if st.sidebar.button("🧑‍💼 Supervisor", use_container_width=True):
             st.session_state.page = "Supervisor"
             st.rerun()
         if st.sidebar.button("🧑‍💻 Tracer", use_container_width=True):
             st.session_state.page = "Tracer"
+            st.rerun()
+        if st.sidebar.button("📂 G Drive", use_container_width=True, type="primary"):
+            st.session_state.page = "G Drive"
             st.rerun()
         st.sidebar.button(" Logout", on_click=logout_user, use_container_width=True)
         st.sidebar.markdown("---")
