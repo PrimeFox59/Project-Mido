@@ -361,6 +361,7 @@ def login_user(user_row):
 
 def logout_user():
     # Lakukan backup saat logout (jika kredensial tersedia)
+    user = current_user()
     try:
         if "service_account" in st.secrets:
             service, _ = build_drive_service()
@@ -376,6 +377,12 @@ def logout_user():
             'msg': f'Backup saat logout gagal: {e}',
             'time': datetime.utcnow().isoformat()
         }
+    # Catat audit trail logout
+    if user:
+        try:
+            execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (user.get('id'), "LOGOUT", f"User {user.get('login_id') or user.get('email') or '-'} logout."))
+        except Exception:
+            pass
     # Bersihkan sesi user setelah mencoba backup
     if "user" in st.session_state:
         del st.session_state["user"]
@@ -997,10 +1004,15 @@ def page_auth():
             else:
                 try:
                     # Default role for new registration is Agent (awaiting approval)
-                    execute(
+                    uid = execute(
                         "INSERT INTO users (login_id, full_name, name, email, password_hash, role, approved) VALUES (?,?,?,?,?,?,?)",
                         (reg_id.strip(), full_name.strip(), full_name.strip(), (email_r.strip() or None), hash_password(pw1), "Agent", 0)
                     )
+                    # Audit log registration
+                    try:
+                        execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (uid, "REGISTER", f"User {reg_id.strip()} registered."))
+                    except Exception:
+                        pass
                     st.success("Registrasi berhasil. Tunggu approval Admin.")
                     st.rerun()
                 except Exception as e:
@@ -1314,6 +1326,7 @@ def page_gdrive():
             except Exception:
                 used_now = 0
             cap = get_project_capacity_bytes()
+            user = current_user()
             if used_now >= cap:
                 st.error("Upload dibatalkan: kapasitas maksimum tercapai (exceed/max capacity).")
             elif used_now + len(data) > cap:
@@ -1322,6 +1335,11 @@ def page_gdrive():
                 fid = upload_bytes(service, folder_id, uploaded.name, data, mimetype=uploaded.type or 'application/octet-stream')
                 if fid:
                     st.success(f"File '{uploaded.name}' terupload (ID: {fid})")
+                    # Audit log upload
+                    try:
+                        execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (user.get('id') if user else None, "UPLOAD", f"Uploaded file '{uploaded.name}' to Drive (ID: {fid})"))
+                    except Exception:
+                        pass
 
     # Download Tab
     with tabs[2]:
@@ -1349,9 +1367,15 @@ def page_gdrive():
             name_to_id = {f['name']: f['id'] for f in files_all}
             sel_name = st.selectbox('Pilih file untuk dihapus', list(name_to_id.keys()))
             if st.button('Hapus file'):
+                user = current_user()
                 try:
                     delete_file(service, name_to_id[sel_name])
                     st.success(f"File '{sel_name}' dihapus.")
+                    # Audit log delete
+                    try:
+                        execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (user.get('id') if user else None, "DELETE", f"Deleted file '{sel_name}' from Drive."))
+                    except Exception:
+                        pass
                     st.rerun()
                 except Exception as e:
                     st.error(f"Gagal hapus: {e}")
@@ -1597,6 +1621,15 @@ def main():
         if st.sidebar.button("G Drive", use_container_width=True, type="primary"):
             st.session_state.page = "G Drive"
             st.rerun()
+        # User Setting menu for all users
+        if st.sidebar.button("User Setting", use_container_width=True):
+            st.session_state.page = "User Setting"
+            st.rerun()
+        # Audit Log menu: only for Superuser and Supervisor
+        if user.get('role') in ("Superuser", "Supervisor"):
+            if st.sidebar.button("Audit Log", use_container_width=True):
+                st.session_state.page = "Audit Log"
+                st.rerun()
         st.sidebar.button("Logout", on_click=logout_user, use_container_width=True)
         st.sidebar.markdown("---")
     elif st.session_state.page != 'RestoreStatus':
@@ -1642,6 +1675,118 @@ def main():
     if st.session_state.page == "G Drive":
         page_gdrive()
         return
+    if st.session_state.page == "Audit Log":
+        page_audit_log()
+        return
+    if st.session_state.page == "User Setting":
+        page_user_setting()
+        return
+# -------------------------
+# User Setting Page
+# -------------------------
+def page_user_setting():
+    require_login()
+    u = current_user()
+    st.title("User Setting")
+    st.caption("Update your profile information below.")
+    # Fetch latest user info
+    user_row = fetchone("SELECT * FROM users WHERE id=?", (u.get('id'),))
+    if not user_row:
+        st.error("User not found.")
+        return
+    with st.form("user_setting_form"):
+        full_name = st.text_input("Full Name", value=user_row.get('full_name') or "")
+        email = st.text_input("Email", value=user_row.get('email') or "")
+        pw1 = st.text_input("New Password", type="password", key="user_pw1", placeholder="Leave blank to keep current password")
+        pw2 = st.text_input("Confirm New Password", type="password", key="user_pw2", placeholder="Leave blank to keep current password")
+        submitted = st.form_submit_button("Update Profile")
+        if submitted:
+            updates = []
+            params = []
+            changed = False
+            # Name
+            if full_name.strip() != (user_row.get('full_name') or ""):
+                updates.append("full_name=?")
+                params.append(full_name.strip())
+                changed = True
+            # Email
+            if email.strip() != (user_row.get('email') or ""):
+                updates.append("email=?")
+                params.append(email.strip())
+                changed = True
+            # Password
+            if pw1 or pw2:
+                if pw1 != pw2:
+                    st.error("Password and confirmation do not match.")
+                    return
+                if pw1.strip():
+                    updates.append("password_hash=?")
+                    params.append(hash_password(pw1.strip()))
+                    changed = True
+            if not changed:
+                st.info("No changes to update.")
+                return
+            params.append(u.get('id'))
+            try:
+                execute(f"UPDATE users SET {', '.join(updates)} WHERE id=?", tuple(params))
+                # Update session state
+                updated_user = fetchone("SELECT * FROM users WHERE id=?", (u.get('id'),))
+                login_user(updated_user)
+                # Audit log
+                try:
+                    detail = []
+                    if 'full_name=?' in updates:
+                        detail.append(f"Name changed to '{full_name.strip()}'")
+                    if 'email=?' in updates:
+                        detail.append(f"Email changed to '{email.strip()}'")
+                    if 'password_hash=?' in updates:
+                        detail.append("Password changed")
+                    execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (u.get('id'), "USER_UPDATE", "; ".join(detail)))
+                except Exception:
+                    pass
+                st.success("Profile updated successfully.")
+            except Exception as e:
+                st.error(f"Failed to update profile: {e}")
+# -------------------------
+# Audit Log Page
+# -------------------------
+def page_audit_log():
+    require_login()
+    u = current_user()
+    if u.get('role') not in ("Superuser", "Supervisor"):
+        st.warning("Akses Audit Log hanya untuk Superuser dan Supervisor.")
+        return
+    st.title("📋 Audit Log")
+    st.caption("Semua aktivitas aplikasi direkam di sini. Waktu: GMT+07:00 (WIB)")
+    # Query audit logs with user info
+    rows = fetchall("""
+        SELECT audit_logs.timestamp, COALESCE(users.full_name, users.name, users.login_id) AS user, audit_logs.action, audit_logs.details
+        FROM audit_logs
+        LEFT JOIN users ON audit_logs.user_id = users.id
+        ORDER BY audit_logs.id DESC LIMIT 200
+    """)
+    if not rows:
+        st.info("Belum ada aktivitas yang tercatat.")
+        return
+    import pandas as pd
+    from datetime import datetime, timedelta
+    # Convert UTC to GMT+7
+    def to_gmt7(ts):
+        try:
+            dt = datetime.fromisoformat(ts)
+            dt7 = dt + timedelta(hours=7)
+            return dt7.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return ts
+    df = pd.DataFrame([
+        {
+            "User": r["user"],
+            "Date": to_gmt7(r["timestamp"]),
+            "Action": r["action"],
+            "Detail": r["details"]
+        } for r in rows
+    ])
+    st.dataframe(df, use_container_width=True, hide_index=True)
     if st.session_state.page == "Authentication":
         # After login, land on Supervisor (Monitoring tab)
         st.session_state.page = "Supervisor"
@@ -1732,6 +1877,7 @@ def page_supervisor():
         ]
         uploaded = st.file_uploader("Upload file Excel/CSV", type=["csv", "xlsx"])
         if uploaded:
+            user = current_user()
             try:
                 if uploaded.name.endswith(".csv"):
                     df = pd.read_csv(uploaded)
@@ -1778,6 +1924,11 @@ def page_supervisor():
                         except Exception as e:
                             st.warning(f"Baris gagal: {e}")
                     st.success(f"Berhasil input {count} data supervisor.")
+                    # Audit log supervisor upload
+                    try:
+                        execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (user.get('id') if user else None, "UPLOAD_SUPERVISOR", f"Uploaded supervisor data: {count} rows from '{uploaded.name}'"))
+                    except Exception:
+                        pass
             except Exception as e:
                 st.error(f"Gagal membaca file: {e}")
 
@@ -1803,6 +1954,7 @@ def page_supervisor():
 
         tracer_uploaded = st.file_uploader("Upload file Excel/CSV Tracer", type=["csv", "xlsx"], key="tracer_upload")
         if tracer_uploaded:
+            user = current_user()
             try:
                 if tracer_uploaded.name.endswith(".csv"):
                     tracer_df = pd.read_csv(tracer_uploaded)
@@ -1841,6 +1993,11 @@ def page_supervisor():
                         except Exception as e:
                             st.warning(f"Baris gagal: {e}")
                     st.success(f"Berhasil input {count} data tracer.")
+                    # Audit log tracer upload
+                    try:
+                        execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (user.get('id') if user else None, "UPLOAD_TRACER", f"Uploaded tracer assignment: {count} rows from '{tracer_uploaded.name}'"))
+                    except Exception:
+                        pass
             except Exception as e:
                 st.error(f"Gagal membaca file: {e}")
 
@@ -1916,6 +2073,11 @@ def page_tracer():
                         emp_update.strip(), employer.strip(), debtor_legal.strip(), employee_name.strip(), employee_id.strip(), relation.strip(), sel_id, tracer_name
                     )
                 )
+                # Audit log tracer update
+                try:
+                    execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (u.get('id') if u else None, "TRACER_UPDATE", f"Tracer '{tracer_name}' updated assignment ID {sel_id}"))
+                except Exception:
+                    pass
                 st.success("Data berhasil diperbarui.")
                 st.rerun()
             except Exception as e:
