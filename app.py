@@ -10,6 +10,7 @@ import io
 import math
 import time
 import os
+import re
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
@@ -1538,10 +1539,38 @@ def page_supervisor():
                         df = pd.read_csv(uploaded)
                     else:
                         df = pd.read_excel(uploaded)
+                    # --- Normalize header names to match expected fields ---
+                    def _norm_col(s: str) -> str:
+                        if s is None:
+                            return ""
+                        s = str(s).replace("\ufeff", "").strip()
+                        s = re.sub(r"\s+", " ", s)  # collapse spaces
+                        s = s.replace(" ", "_")
+                        return s.lower()
+
+                    # Known typo mappings (normalized form)
+                    typo_map = {
+                        _norm_col("Repayment_on_thrid_Party"): _norm_col("Repayment_on_third_Party"),
+                    }
+                    # Build map from normalized -> canonical expected name
+                    expected_map = { _norm_col(k): k for k in field_names }
+                    new_cols = []
+                    for c in df.columns:
+                        nc = _norm_col(c)
+                        # Fix known typos first
+                        if nc in typo_map:
+                            nc = typo_map[nc]
+                        # Map to canonical if matches
+                        if nc in expected_map:
+                            new_cols.append(expected_map[nc])
+                        else:
+                            new_cols.append(c)
+                    df.columns = new_cols
                     # Pastikan urutan kolom sesuai field_names
                     missing = [f for f in field_names if f not in df.columns]
                     if missing:
                         st.error(f"Kolom berikut tidak ditemukan di file: {missing}")
+                        st.caption("Tips: header akan dicocokkan tanpa spasi/kapital dan perbaikan typo umum (thrid->third). Pastikan nama kolom sesuai template.")
                     else:
                         count = 0
                         for _, row in df.iterrows():
@@ -1611,6 +1640,16 @@ def page_supervisor():
                         tracer_df = pd.read_csv(tracer_uploaded)
                     else:
                         tracer_df = pd.read_excel(tracer_uploaded)
+                    # Normalize tracer headers (trim/BOM/case-insensitive + spaces to underscores)
+                    def _norm_col2(s: str) -> str:
+                        if s is None:
+                            return ""
+                        s = str(s).replace("\ufeff", "").strip()
+                        s = re.sub(r"\s+", " ", s)
+                        s = s.replace(" ", "_")
+                        return s.lower()
+                    expected_map_tr = { _norm_col2(k): k for k in (tracer_fields + ["Assigned_To"]) }
+                    tracer_df.columns = [ expected_map_tr.get(_norm_col2(c), c) for c in tracer_df.columns ]
                     # Validate base required columns
                     missing = [f for f in tracer_fields if f not in tracer_df.columns]
                     if missing:
