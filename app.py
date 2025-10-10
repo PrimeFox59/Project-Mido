@@ -1882,67 +1882,80 @@ def page_supervisor():
     with tabs[2]:
         # --- Multi Assign (Random & Merata) ---
         st.subheader("Multi Assign (Random & Merata)")
-        st.caption("Pilih beberapa tracer dan bagi rata baris yang belum ter-assign. Urutan baris diacak agar distribusi acak.")
+        st.caption("Bagi rata baris yang belum ter-assign ke beberapa tracer. Gunakan opsi lanjutan untuk batas jumlah dan acak urutan.")
 
         # Info jumlah baris belum ter-assign
         unassigned_rows = fetchall("SELECT id FROM assign_tracer WHERE IFNULL(Assigned_To,'')='' ORDER BY id DESC")
         unassigned_count = len(unassigned_rows)
         st.info(f"Baris belum ter-assign saat ini: {unassigned_count}")
 
-        # Build tracer options in this scope (approved users)
-        _user_rows_ma = fetchall("SELECT COALESCE(full_name, name) AS full_name FROM users WHERE approved=1 ORDER BY COALESCE(full_name,name) ASC")
-        tracer_names = [r['full_name'] for r in _user_rows_ma if r.get('full_name')]
+        if unassigned_count > 0:
+            # Build tracer options in this scope (approved users)
+            _user_rows_ma = fetchall("SELECT COALESCE(full_name, name) AS full_name FROM users WHERE approved=1 ORDER BY COALESCE(full_name,name) ASC")
+            tracer_names = [r['full_name'] for r in _user_rows_ma if r.get('full_name')]
 
-        selected_tracers = st.multiselect(
-            "Pilih tracer (minimal 2)", options=tracer_names, default=[], key="multi_assign_tracers"
-        )
-        col_ma1, col_ma2 = st.columns(2)
-        with col_ma1:
-            limit_n = st.number_input("Jumlah baris yang akan di-assign (0 = semua)", min_value=0, value=0, step=1, key="multi_assign_limit")
-        with col_ma2:
-            do_shuffle = st.checkbox("Acak urutan baris", value=True, key="multi_assign_shuffle")
+            with st.form("multi_assign_form"):
+                selected_tracers = st.multiselect(
+                    "Pilih tracer (minimal 2)", options=tracer_names, default=[], key="multi_assign_tracers"
+                )
+                # Advanced options hidden by default
+                with st.expander("Opsi lanjutan", expanded=False):
+                    col_ma1, col_ma2 = st.columns(2)
+                    with col_ma1:
+                        limit_n = st.number_input("Jumlah baris yang akan di-assign (0 = semua)", min_value=0, value=0, step=1, key="multi_assign_limit")
+                    with col_ma2:
+                        do_shuffle = st.checkbox("Acak urutan baris", value=True, key="multi_assign_shuffle")
 
-        if st.button("Assign Sekarang", type="primary", key="btn_multi_assign"):
-            if not selected_tracers or len(selected_tracers) < 2:
-                st.warning("Pilih minimal 2 tracer.")
-            elif unassigned_count == 0:
-                st.info("Tidak ada baris yang perlu di-assign.")
-            else:
-                ids = [r['id'] for r in unassigned_rows]
-                try:
-                    import random
-                    if do_shuffle:
-                        random.shuffle(ids)
-                    # Batasi sesuai input
-                    if limit_n and limit_n > 0:
-                        ids = ids[: min(limit_n, len(ids))]
-                    # Round-robin distribution
-                    updates = []  # list of tuples (assignee, id)
-                    for idx, rec_id in enumerate(ids):
-                        assignee = selected_tracers[idx % len(selected_tracers)]
-                        updates.append((assignee, rec_id))
+                # Small summary to clarify distribution
+                if selected_tracers:
+                    import math as _math
+                    per_tracer_est = _math.ceil(unassigned_count / max(len(selected_tracers), 1))
+                    st.caption(f"Perkiraan distribusi: ~{per_tracer_est} baris per tracer")
 
-                    # Commit updates in a single transaction
+                submitted = st.form_submit_button("Assign Sekarang", type="primary")
+
+            if submitted:
+                if not selected_tracers or len(selected_tracers) < 2:
+                    st.warning("Pilih minimal 2 tracer.")
+                else:
+                    ids = [r['id'] for r in unassigned_rows]
                     try:
-                        conn = sqlite3.connect(DB_PATH)
-                        cur = conn.cursor()
-                        cur.executemany("UPDATE assign_tracer SET Assigned_To=? WHERE id=?", updates)
-                        conn.commit()
-                        conn.close()
-                    except Exception as e:
-                        st.error(f"Gagal menyimpan assign: {e}")
-                    else:
-                        st.success(f"Berhasil assign {len(ids)} baris ke {len(selected_tracers)} tracer.")
-                        # Audit log
-                        u = current_user()
+                        import random
+                        if st.session_state.get("multi_assign_shuffle", True):
+                            random.shuffle(ids)
+                        # Batasi sesuai input
+                        limit_val = st.session_state.get("multi_assign_limit", 0)
+                        if limit_val and limit_val > 0:
+                            ids = ids[: min(limit_val, len(ids))]
+                        # Round-robin distribution
+                        updates = []  # list of tuples (assignee, id)
+                        for idx, rec_id in enumerate(ids):
+                            assignee = selected_tracers[idx % len(selected_tracers)]
+                            updates.append((assignee, rec_id))
+
+                        # Commit updates in a single transaction
                         try:
-                            details = f"Multi-assign {len(ids)} rows to {len(selected_tracers)} tracers: {', '.join(selected_tracers)}"
-                            execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (u.get('id') if u else None, "MULTI_ASSIGN", details))
-                        except Exception:
-                            pass
-                        st.rerun()
-                except Exception as e:
-                    st.error(f"Gagal melakukan multi-assign: {e}")
+                            conn = sqlite3.connect(DB_PATH)
+                            cur = conn.cursor()
+                            cur.executemany("UPDATE assign_tracer SET Assigned_To=? WHERE id=?", updates)
+                            conn.commit()
+                            conn.close()
+                        except Exception as e:
+                            st.error(f"Gagal menyimpan assign: {e}")
+                        else:
+                            st.success(f"Berhasil assign {len(ids)} baris ke {len(selected_tracers)} tracer.")
+                            # Audit log
+                            u = current_user()
+                            try:
+                                details = f"Multi-assign {len(ids)} rows to {len(selected_tracers)} tracers: {', '.join(selected_tracers)}"
+                                execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (u.get('id') if u else None, "MULTI_ASSIGN", details))
+                            except Exception:
+                                pass
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"Gagal melakukan multi-assign: {e}")
+        else:
+            st.caption("Tidak ada baris yang perlu di-assign saat ini.")
 
         tracer_fields = [
             "TRC_Code", "Agreement_No", "Debtor_Name", "NIK_KTP", "EMPLOYMENT_UPDATE", "EMPLOYER", "Debtor_Legal_Name", "Employee_Name", "Employee_ID_Number", "Debtor_Relation_to_Employee"
