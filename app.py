@@ -1497,22 +1497,86 @@ def main():
     if st.session_state.page == "Tracer":
         page_tracer()
         return
+    if st.session_state.page == "G Drive":
+        page_gdrive()
+        return
     if st.session_state.page == "Authentication":
-        st.session_state.page = "G Drive"
+        # After login, land on Supervisor (Monitoring tab)
+        st.session_state.page = "Supervisor"
         st.rerun()
-    # Paksa halaman selain Authentication menjadi G Drive
-    st.session_state.page = "G Drive"
-    page_gdrive()
+    # Default route
+    st.session_state.page = "Supervisor"
+    page_supervisor()
 
 # -------------------------
 # Supervisor Page
 # -------------------------
 def page_supervisor():
     st.title("🧑‍💼 Supervisor Menu")
-    tabs = st.tabs(["Input", "Monitoring", "Assign Tracer"])
+    # Monitoring first so it's the default view
+    tabs = st.tabs(["Monitoring", "Input", "Assign Tracer"])
+
+    # --- Monitoring Tab ---
+    with tabs[0]:
+        st.subheader("Monitoring Data Supervisor")
+        # Primary quick search fields
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            q_phone = st.text_input("Phone Number", key="monitor_phone")
+        with c2:
+            q_case_id = st.text_input("Case ID", key="monitor_case_id")
+        with c3:
+            q_third_uid = st.text_input("Third Uid", key="monitor_third_uid")
+        with c4:
+            q_customer = st.text_input("Customer name", key="monitor_customer_name")
+
+        # Advanced filters in expander
+        # All additional fields except the four primary ones
+        base_filter_fields = [
+            "Lending_Entity", "Date", "Task_ID", "email", "Gender", "Customer_Occupation", "DPD",
+            "Principle_Outstanding", "Principal_Overdue_CURR", "Interest_Overdue_CURR", "Last_Late_Fee",
+            "Return_Date", "Detail", "Loan_Type", "Product", "Home_Address", "Province", "City",
+            "Street", "RoomNumber", "Postcode", "Assignment_Date"
+        ]
+        extra_filters = {}
+        with st.expander("Filter lain (opsional)"):
+            cols = st.columns(min(4, len(base_filter_fields)))
+            for i, f in enumerate(base_filter_fields):
+                with cols[i % len(cols)]:
+                    extra_filters[f] = st.text_input(f.replace('_',' '), key=f"monitor_extra_{f}")
+
+        # Build query
+        query = "SELECT * FROM supervisor_data WHERE 1=1"
+        params = []
+        # Primary
+        if q_phone:
+            query += " AND (Phone_Number_1 LIKE ? OR Phone_Number_2 LIKE ?)"
+            params.extend([f"%{q_phone}%", f"%{q_phone}%"])
+        if q_case_id:
+            query += " AND Case_ID LIKE ?"
+            params.append(f"%{q_case_id}%")
+        if q_third_uid:
+            query += " AND Third_Uid LIKE ?"
+            params.append(f"%{q_third_uid}%")
+        if q_customer:
+            query += " AND Customer_name LIKE ?"
+            params.append(f"%{q_customer}%")
+        # Extras
+        for f, v in extra_filters.items():
+            if v:
+                query += f" AND {f} LIKE ?"
+                params.append(f"%{v}%")
+        query += " ORDER BY id DESC LIMIT 200"
+
+        rows = fetchall(query, tuple(params))
+        if not rows:
+            st.info("Tidak ada data supervisor ditemukan.")
+        else:
+            df = pd.DataFrame(rows)
+            st.dataframe(df, use_container_width=True, hide_index=True)
 
     # --- Input Tab ---
-    with tabs[0]:
+    with tabs[1]:
         st.subheader("Input Data Supervisor")
         mode = st.radio("Pilih mode input:", ["Manual", "Auto (Upload Excel/CSV)"], key="supervisor_input_mode")
         field_names = [
@@ -1676,39 +1740,7 @@ def page_supervisor():
                 except Exception as e:
                     st.error(f"Gagal membaca file: {e}")
 
-    # --- Monitoring Tab ---
-    with tabs[1]:
-        st.subheader("Monitoring Data Supervisor")
-        # Filter fields
-        filter_fields = [
-            "Lending_Entity", "Date", "Case_ID", "Task_ID", "Customer_name", "email", "Gender", "Customer_Occupation", "DPD", "Principle_Outstanding", "Principal_Overdue_CURR", "Interest_Overdue_CURR", "Last_Late_Fee", "Return_Date", "Detail", "Loan_Type", "Third_Uid", "Product", "Home_Address", "Province", "City", "Street", "RoomNumber", "Assignment_Date"
-        ]
-        search_fields = ["Case_ID", "Task_ID", "Customer_name"]
-        # Filter widgets
-        filters = {}
-        cols = st.columns(min(4, len(filter_fields)))
-        for i, f in enumerate(filter_fields):
-            with cols[i % len(cols)]:
-                filters[f] = st.text_input(f"Filter {f.replace('_',' ')}", key=f"filter_{f}")
-        # Search
-        search_val = st.text_input("Cari (Case ID / Task ID / Customer name)", key="supervisor_search")
-        # Query
-        query = "SELECT * FROM supervisor_data WHERE 1=1"
-        params = []
-        for f in filter_fields:
-            if filters[f]:
-                query += f" AND {f} LIKE ?"
-                params.append(f"%{filters[f]}%")
-        if search_val:
-            query += " AND (" + " OR ".join([f"{sf} LIKE ?" for sf in search_fields]) + ")"
-            params.extend([f"%{search_val}%"] * len(search_fields))
-        query += " ORDER BY id DESC LIMIT 200"
-        rows = fetchall(query, tuple(params))
-        if not rows:
-            st.info("Tidak ada data supervisor ditemukan.")
-        else:
-            df = pd.DataFrame(rows)
-            st.dataframe(df, use_container_width=True, hide_index=True)
+    # --- Monitoring Tab (moved to first) end ---
 
 def page_tracer():
     require_login()
