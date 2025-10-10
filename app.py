@@ -1787,13 +1787,8 @@ def page_audit_log():
         } for r in rows
     ])
     st.dataframe(df, use_container_width=True, hide_index=True)
-    if st.session_state.page == "Authentication":
-        # After login, land on Supervisor (Monitoring tab)
-        st.session_state.page = "Supervisor"
-        st.rerun()
-    # Default route
-    st.session_state.page = "Supervisor"
-    page_supervisor()
+    # Stay on Audit Log page without redirecting
+    return
 
 # -------------------------
 # Agent Page (placeholder)
