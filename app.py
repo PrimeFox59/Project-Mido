@@ -1963,9 +1963,6 @@ def page_supervisor():
             except Exception as e:
                 st.error(f"Gagal membaca file: {e}")
 
-        
-
-    # --- Trace Assigning Tab ---
     with tabs[2]:
         # --- Multi Assign (Random & Merata) ---
         st.subheader("Multi Assign (Random & Merata)")
