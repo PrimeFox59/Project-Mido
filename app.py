@@ -1963,8 +1963,11 @@ def page_supervisor():
             except Exception as e:
                 st.error(f"Gagal membaca file: {e}")
 
+        
+
+    # --- Trace Assigning Tab ---
+    with tabs[2]:
         # --- Multi Assign (Random & Merata) ---
-        st.markdown("---")
         st.subheader("Multi Assign (Random & Merata)")
         st.caption("Pilih beberapa tracer dan bagi rata baris yang belum ter-assign. Urutan baris diacak agar distribusi acak.")
 
@@ -2028,8 +2031,6 @@ def page_supervisor():
                 except Exception as e:
                     st.error(f"Gagal melakukan multi-assign: {e}")
 
-    # --- Trace Assigning Tab ---
-    with tabs[2]:
         tracer_fields = [
             "TRC_Code", "Agreement_No", "Debtor_Name", "NIK_KTP", "EMPLOYMENT_UPDATE", "EMPLOYER", "Debtor_Legal_Name", "Employee_Name", "Employee_ID_Number", "Debtor_Relation_to_Employee"
         ]  # base fields from upload/form
