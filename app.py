@@ -1880,11 +1880,6 @@ def page_supervisor():
                 st.error(f"Gagal membaca file: {e}")
 
     with tabs[2]:
-        # --- Multi Assign (Random & Merata) ---
-        st.subheader("Multi Assign (Random & Merata)")
-        st.caption("Bagi rata baris yang belum ter-assign ke beberapa tracer. Gunakan opsi lanjutan untuk batas jumlah dan acak urutan.")
-
-        # Info jumlah baris belum ter-assign
         unassigned_rows = fetchall("SELECT id FROM assign_tracer WHERE IFNULL(Assigned_To,'')='' ORDER BY id DESC")
         unassigned_count = len(unassigned_rows)
         st.info(f"Baris belum ter-assign saat ini: {unassigned_count}")
