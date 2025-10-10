@@ -1506,8 +1506,6 @@ def main():
 # -------------------------
 # Supervisor Page
 # -------------------------
-import pandas as pd
-import io
 def page_supervisor():
     st.title("🧑‍💼 Supervisor Menu")
     tabs = st.tabs(["Input", "Monitoring", "Assign Tracer"])
@@ -1609,7 +1607,6 @@ def page_supervisor():
             tracer_uploaded = st.file_uploader("Upload file Excel/CSV Tracer", type=["csv", "xlsx"], key="tracer_upload")
             if tracer_uploaded:
                 try:
-                    import pandas as pd
                     if tracer_uploaded.name.endswith(".csv"):
                         tracer_df = pd.read_csv(tracer_uploaded)
                     else:
