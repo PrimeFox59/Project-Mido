@@ -1973,6 +1973,10 @@ def page_supervisor():
         unassigned_count = len(unassigned_rows)
         st.info(f"Baris belum ter-assign saat ini: {unassigned_count}")
 
+        # Build tracer options in this scope (approved users)
+        _user_rows_ma = fetchall("SELECT COALESCE(full_name, name) AS full_name FROM users WHERE approved=1 ORDER BY COALESCE(full_name,name) ASC")
+        tracer_names = [r['full_name'] for r in _user_rows_ma if r.get('full_name')]
+
         selected_tracers = st.multiselect(
             "Pilih tracer (minimal 2)", options=tracer_names, default=[], key="multi_assign_tracers"
         )
