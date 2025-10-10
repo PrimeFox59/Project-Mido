@@ -29,6 +29,75 @@ ENABLE_TIMELINE_WEIGHTING = True
 st.set_page_config(layout="wide", page_icon="icon.png", page_title="Dunyim Security System")
 
 # -------------------------
+# Theming: Blue-Brown CSS
+# -------------------------
+PRIMARY_BLUE = "#1E88E5"
+SOFT_BROWN = "#EDE3D9"
+CREAM_BG = "#F8F5F2"
+DARK_TEXT = "#2E2E2E"
+
+def inject_theme_css():
+        css = f"""
+        <style>
+        :root {{
+            --primary: {PRIMARY_BLUE};
+            --brown: {SOFT_BROWN};
+            --bg: {CREAM_BG};
+            --text: {DARK_TEXT};
+        }}
+        html, body, [data-testid="stAppViewContainer"] {{
+            background: var(--bg) !important;
+            color: var(--text) !important;
+        }}
+        /* Buttons */
+        .stButton>button {{
+            background: var(--primary) !important;
+            color: white !important;
+            border-radius: 8px !important;
+            border: none !important;
+        }}
+        .stButton>button:hover {{ filter: brightness(0.95); }}
+
+        /* Tabs */
+        .stTabs [role="tablist"] {{ border-bottom: 2px solid var(--brown); }}
+        .stTabs [role="tab"] {{
+            color: var(--text);
+        }}
+        .stTabs [aria-selected="true"] {{
+            border-bottom: 3px solid var(--primary) !important;
+            color: var(--primary) !important;
+        }}
+
+        /* Sidebar */
+        [data-testid="stSidebar"] {{
+            background: var(--brown) !important;
+        }}
+        [data-testid="stSidebar"] * {{ color: #2b2b2b !important; }}
+
+        /* Forms */
+        .stTextInput>div>div>input, .stSelectbox>div>div>div {{
+            border-radius: 6px !important;
+            border: 1px solid #c9c1b8 !important;
+            background: white !important;
+        }}
+
+        /* Metrics */
+        [data-testid="stMetricValue"] {{ color: var(--primary) !important; }}
+
+        /* Dataframes */
+        .stDataFrame, .stTable {{
+            background: white !important;
+            border-radius: 8px !important;
+            border: 1px solid #e5ded4 !important;
+            padding: 4px !important;
+        }}
+        </style>
+        """
+        st.markdown(css, unsafe_allow_html=True)
+
+inject_theme_css()
+
+# -------------------------
 # Utility: DB initialization
 # -------------------------
 def get_db():
@@ -1353,7 +1422,8 @@ def page_gdrive():
             {"category": "Used", "bytes": used_clamped},
             {"category": "Free", "bytes": free_bytes},
         ])
-        color_scale = alt.Scale(domain=["Used", "Free"], range=["#e74c3c", "#2ecc71"]) if used_bytes/CAPACITY_BYTES > 0.8 else alt.Scale(domain=["Used", "Free"], range=["#3498db", "#bdc3c7"]) if CAPACITY_BYTES > 0 else alt.Undefined
+        # Blue-brown theme colors
+        color_scale = alt.Scale(domain=["Used", "Free"], range=["#8D6E63", "#1E88E5"]) if CAPACITY_BYTES > 0 else alt.Undefined
         bar = (
             alt.Chart(df_bar)
             .mark_bar(height=36)
