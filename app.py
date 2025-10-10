@@ -1961,19 +1961,6 @@ def page_supervisor():
             "TRC_Code", "Agreement_No", "Debtor_Name", "NIK_KTP", "EMPLOYMENT_UPDATE", "EMPLOYER", "Debtor_Legal_Name", "Employee_Name", "Employee_ID_Number", "Debtor_Relation_to_Employee"
         ]  # base fields from upload/form
 
-        # Build tracer assignee options from approved users (prefer full_name)
-        user_rows = fetchall("SELECT COALESCE(full_name, name) AS full_name FROM users WHERE approved=1 ORDER BY COALESCE(full_name,name) ASC")
-        tracer_names = [r['full_name'] for r in user_rows if r.get('full_name')]
-        assign_options = (tracer_names if tracer_names else []) + ["Other…"]
-        # Default assignee for all rows (used if file doesn't have Assigned_To column)
-        sel_auto = st.selectbox("Assign semua baris ke tracer", options=assign_options, key="assign_to_select_auto")
-        default_assigned = None
-        if sel_auto == "Other…":
-            custom_auto = st.text_input("Nama tracer (default)", key="assign_to_custom_auto")
-            default_assigned = custom_auto.strip()
-        else:
-            default_assigned = sel_auto
-
         tracer_uploaded = st.file_uploader("Upload file Excel/CSV Tracer", type=["csv", "xlsx"], key="tracer_upload")
         if tracer_uploaded:
             user = current_user()
