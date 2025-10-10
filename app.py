@@ -1588,7 +1588,6 @@ def page_supervisor():
 
     # --- Monitoring Tab ---
     with tabs[0]:
-        st.subheader("Monitoring Data Supervisor")
         # Primary quick search fields
         c1, c2, c3, c4 = st.columns(4)
         with c1:
@@ -1647,7 +1646,6 @@ def page_supervisor():
 
     # --- Input Tab ---
     with tabs[1]:
-        st.subheader("Input Data Supervisor")
         mode = st.radio("Pilih mode input:", ["Manual", "Auto (Upload Excel/CSV)"], key="supervisor_input_mode")
         field_names = [
             "DT", "Lending_Entity", "Date", "Case_ID", "Task_ID", "Customer_name", "email", "Gender", "Customer_Occupation", "DPD", "Principle_Outstanding", "Principal_Overdue_CURR", "Interest_Overdue_CURR", "Last_Late_Fee", "Return_Date", "Detail", "Loan_Type", "Third_Uid", "Product", "Home_Address", "Province", "City", "Street", "RoomNumber", "Postcode", "Assignment_Date", "Withdrawal_Date", "Phone_Number_1", "Phone_Number_2", "Contact_Type_1", "Contact_Name_1", "Contact_Phone_1", "Contact_Type_2", "Contact_Name_2", "Contact_Phone_2", "Contact_Type_3", "Contact_Name_3", "Contact_Phone_3", "Contact_Type_4", "Contact_Name_4", "Contact_Phone_4", "Contact_Type_5", "Contact_Name_5", "Contact_Phone_5", "Contact_Type_6", "Contact_Name_6", "Contact_Phone_6", "Contact_Type_7", "Contact_Name_7", "Contact_Phone_7", "Contact_Type_8", "Contact_Name_8", "Contact_Phone_8", "Total_debt_in_third_party", "Repayment_on_third_Party", "Remaining_Loan_on_third_Party", "Virtual_Account_Number"
@@ -1719,7 +1717,6 @@ def page_supervisor():
 
     # --- Assign Tracer Tab ---
     with tabs[2]:
-        st.subheader("Assign Tracer")
         tracer_fields = [
             "TRC_Code", "Agreement_No", "Debtor_Name", "NIK_KTP", "EMPLOYMENT_UPDATE", "EMPLOYER", "Debtor_Legal_Name", "Employee_Name", "Employee_ID_Number", "Debtor_Relation_to_Employee"
         ]  # base fields from upload/form
