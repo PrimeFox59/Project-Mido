@@ -910,6 +910,49 @@ def get_pending_users_count():
     return fetchone("SELECT COUNT(*) AS count FROM users WHERE approved=0")['count']
 
 
+# -------------------------
+# Centralized Access Control
+# -------------------------
+# Define roles
+ALL_ROLES = ("Superuser", "Supervisor", "Tracer", "Agent")
+
+# Central menu/page configuration and allowed roles
+MENU_ITEMS = [
+    {"label": "Supervisor", "page": "Supervisor", "roles": ("Superuser", "Supervisor"), "primary": False},
+    {"label": "Tracer",     "page": "Tracer",     "roles": ("Superuser", "Tracer"),     "primary": False},
+    {"label": "Agent",      "page": "Agent",      "roles": ("Superuser", "Agent"),      "primary": False},
+    {"label": "G Drive",    "page": "G Drive",    "roles": ALL_ROLES,                      "primary": True},
+    {"label": "User Setting","page": "User Setting","roles": ALL_ROLES,                      "primary": False},
+    {"label": "Audit Log",  "page": "Audit Log",  "roles": ("Superuser", "Supervisor"),   "primary": False},
+]
+
+def can_access_page(page_name, user_obj) -> bool:
+    if not user_obj:
+        return False
+    role = user_obj.get('role')
+    for item in MENU_ITEMS:
+        if item['page'] == page_name:
+            return role in item['roles']
+    # Default: if page not listed, fall back to logged-in users only
+    return True
+
+def first_allowed_page_for_role(role):
+    for item in MENU_ITEMS:
+        if role in item['roles']:
+            return item['page']
+    return "User Setting"
+
+def require_roles(allowed_roles):
+    u = current_user()
+    if not u:
+        require_login()
+        return
+    if u.get('role') not in allowed_roles:
+        st.warning("Akses ditolak untuk role Anda.")
+        st.session_state.page = first_allowed_page_for_role(u.get('role', ''))
+        st.rerun()
+
+
 
 # ... (page_auth, page_dashboard, page_resume, page_reporting, page_admin_panel, page_user_guide and main function remain the same) ...
 def page_auth():
@@ -1019,7 +1062,7 @@ def page_auth():
                     st.error(f"Gagal register: {e}")
 
 def page_gdrive():
-    require_login()
+    require_roles(ALL_ROLES)
     st.header("📂 Google Drive Files")
     try:
         service, _sa_email = build_drive_service()
@@ -1607,29 +1650,15 @@ def main():
             st.sidebar.markdown(f"✉️ {user['email']}")
         st.sidebar.markdown(f"**Role:** {user['role'].capitalize()}")
         st.sidebar.markdown("---")
-        # Navigasi utama setelah login
-
-        if st.sidebar.button("Supervisor", use_container_width=True):
-            st.session_state.page = "Supervisor"
-            st.rerun()
-        if st.sidebar.button("Tracer", use_container_width=True):
-            st.session_state.page = "Tracer"
-            st.rerun()
-        if st.sidebar.button("Agent", use_container_width=True):
-            st.session_state.page = "Agent"
-            st.rerun()
-        if st.sidebar.button("G Drive", use_container_width=True, type="primary"):
-            st.session_state.page = "G Drive"
-            st.rerun()
-        # User Setting menu for all users
-        if st.sidebar.button("User Setting", use_container_width=True):
-            st.session_state.page = "User Setting"
-            st.rerun()
-        # Audit Log menu: only for Superuser and Supervisor
-        if user.get('role') in ("Superuser", "Supervisor"):
-            if st.sidebar.button("Audit Log", use_container_width=True):
-                st.session_state.page = "Audit Log"
-                st.rerun()
+        # Navigasi utama setelah login (centralized)
+        for item in MENU_ITEMS:
+            if can_access_page(item['page'], user):
+                kwargs = {"use_container_width": True}
+                if item.get('primary'):
+                    kwargs["type"] = "primary"
+                if st.sidebar.button(item['label'], **kwargs):
+                    st.session_state.page = item['page']
+                    st.rerun()
         st.sidebar.button("Logout", on_click=logout_user, use_container_width=True)
         st.sidebar.markdown("---")
     elif st.session_state.page != 'RestoreStatus':
@@ -1682,80 +1711,10 @@ def main():
         page_user_setting()
         return
 # -------------------------
-# User Setting Page
-# -------------------------
-def page_user_setting():
-    require_login()
-    u = current_user()
-    st.title("User Setting")
-    st.caption("Update your profile information below.")
-    # Fetch latest user info
-    user_row = fetchone("SELECT * FROM users WHERE id=?", (u.get('id'),))
-    if not user_row:
-        st.error("User not found.")
-        return
-    with st.form("user_setting_form"):
-        full_name = st.text_input("Full Name", value=user_row.get('full_name') or "")
-        email = st.text_input("Email", value=user_row.get('email') or "")
-        pw1 = st.text_input("New Password", type="password", key="user_pw1", placeholder="Leave blank to keep current password")
-        pw2 = st.text_input("Confirm New Password", type="password", key="user_pw2", placeholder="Leave blank to keep current password")
-        submitted = st.form_submit_button("Update Profile")
-        if submitted:
-            updates = []
-            params = []
-            changed = False
-            # Name
-            if full_name.strip() != (user_row.get('full_name') or ""):
-                updates.append("full_name=?")
-                params.append(full_name.strip())
-                changed = True
-            # Email
-            if email.strip() != (user_row.get('email') or ""):
-                updates.append("email=?")
-                params.append(email.strip())
-                changed = True
-            # Password
-            if pw1 or pw2:
-                if pw1 != pw2:
-                    st.error("Password and confirmation do not match.")
-                    return
-                if pw1.strip():
-                    updates.append("password_hash=?")
-                    params.append(hash_password(pw1.strip()))
-                    changed = True
-            if not changed:
-                st.info("No changes to update.")
-                return
-            params.append(u.get('id'))
-            try:
-                execute(f"UPDATE users SET {', '.join(updates)} WHERE id=?", tuple(params))
-                # Update session state
-                updated_user = fetchone("SELECT * FROM users WHERE id=?", (u.get('id'),))
-                login_user(updated_user)
-                # Audit log
-                try:
-                    detail = []
-                    if 'full_name=?' in updates:
-                        detail.append(f"Name changed to '{full_name.strip()}'")
-                    if 'email=?' in updates:
-                        detail.append(f"Email changed to '{email.strip()}'")
-                    if 'password_hash=?' in updates:
-                        detail.append("Password changed")
-                    execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (u.get('id'), "USER_UPDATE", "; ".join(detail)))
-                except Exception:
-                    pass
-                st.success("Profile updated successfully.")
-            except Exception as e:
-                st.error(f"Failed to update profile: {e}")
-# -------------------------
 # Audit Log Page
 # -------------------------
 def page_audit_log():
-    require_login()
-    u = current_user()
-    if u.get('role') not in ("Superuser", "Supervisor"):
-        st.warning("Akses Audit Log hanya untuk Superuser dan Supervisor.")
-        return
+    require_roles(("Superuser", "Supervisor"))
     st.title("📋 Audit Log")
     st.caption("Semua aktivitas aplikasi direkam di sini. Waktu: GMT+07:00 (WIB)")
     # Query audit logs with user info
@@ -1794,14 +1753,76 @@ def page_audit_log():
 # Agent Page (placeholder)
 # -------------------------
 def page_agent():
-    require_login()
+    require_roles(("Superuser", "Agent"))
     st.title("Agent Menu")
     st.info("Coming soon")
+
+# -------------------------
+# User Setting Page
+# -------------------------
+def page_user_setting():
+    require_roles(ALL_ROLES)
+    u = current_user()
+    st.title("User Setting")
+    st.caption("Update your profile information below.")
+    user_row = fetchone("SELECT * FROM users WHERE id=?", (u.get('id'),))
+    if not user_row:
+        st.error("User not found.")
+        return
+    with st.form("user_setting_form"):
+        full_name = st.text_input("Full Name", value=user_row.get('full_name') or "")
+        email = st.text_input("Email", value=user_row.get('email') or "")
+        pw1 = st.text_input("New Password", type="password", key="user_pw1", placeholder="Leave blank to keep current password")
+        pw2 = st.text_input("Confirm New Password", type="password", key="user_pw2", placeholder="Leave blank to keep current password")
+        submitted = st.form_submit_button("Update Profile")
+        if submitted:
+            updates = []
+            params = []
+            changed = False
+            if full_name.strip() != (user_row.get('full_name') or ""):
+                updates.append("full_name=?")
+                params.append(full_name.strip())
+                changed = True
+            if email.strip() != (user_row.get('email') or ""):
+                updates.append("email=?")
+                params.append(email.strip())
+                changed = True
+            if pw1 or pw2:
+                if pw1 != pw2:
+                    st.error("Password and confirmation do not match.")
+                    return
+                if pw1.strip():
+                    updates.append("password_hash=?")
+                    params.append(hash_password(pw1.strip()))
+                    changed = True
+            if not changed:
+                st.info("No changes to update.")
+                return
+            params.append(u.get('id'))
+            try:
+                execute(f"UPDATE users SET {', '.join(updates)} WHERE id=?", tuple(params))
+                updated_user = fetchone("SELECT * FROM users WHERE id=?", (u.get('id'),))
+                login_user(updated_user)
+                try:
+                    detail = []
+                    if 'full_name=?' in updates:
+                        detail.append(f"Name changed to '{full_name.strip()}'")
+                    if 'email=?' in updates:
+                        detail.append(f"Email changed to '{email.strip()}'")
+                    if 'password_hash=?' in updates:
+                        detail.append("Password changed")
+                    execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (u.get('id'), "USER_UPDATE", "; ".join(detail)))
+                except Exception:
+                    pass
+                st.success("Profile updated successfully.")
+            except Exception as e:
+                st.error(f"Failed to update profile: {e}")
 
 # -------------------------
 # Supervisor Page
 # -------------------------
 def page_supervisor():
+    require_roles(("Superuser", "Supervisor"))
     st.title("Supervisor Menu")
     # Monitoring first so it's the default view
     tabs = st.tabs(["Monitoring", "Input", "Trace Assigning"])
@@ -1999,7 +2020,7 @@ def page_supervisor():
     # --- Monitoring Tab (moved to first) end ---
 
 def page_tracer():
-    require_login()
+    require_roles(("Superuser", "Tracer"))
     u = current_user()
     tracer_name = (u.get('full_name') or u.get('name')) if u else None
     st.title("Tracer Menu")
