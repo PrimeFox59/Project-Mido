@@ -1655,14 +1655,14 @@ def main():
 # -------------------------
 def page_agent():
     require_login()
-    st.title("🧑‍💼 Agent Menu")
+    st.title("Agent Menu")
     st.info("Coming soon")
 
 # -------------------------
 # Supervisor Page
 # -------------------------
 def page_supervisor():
-    st.title("🧑‍💼 Supervisor Menu")
+    st.title("Supervisor Menu")
     # Monitoring first so it's the default view
     tabs = st.tabs(["Monitoring", "Input", "Assign Tracer"])
 
@@ -1850,7 +1850,7 @@ def page_tracer():
     require_login()
     u = current_user()
     tracer_name = (u.get('full_name') or u.get('name')) if u else None
-    st.title("🧑‍💻 Tracer Menu")
+    st.title("Tracer Menu")
     if not tracer_name:
         st.error("Tidak dapat menentukan nama tracer. Silakan login ulang.")
         return
