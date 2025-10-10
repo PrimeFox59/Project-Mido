@@ -919,11 +919,11 @@ ALL_ROLES = ("Superuser", "Supervisor", "Tracer", "Agent")
 # Central menu/page configuration and allowed roles
 MENU_ITEMS = [
     {"label": "Supervisor", "page": "Supervisor", "roles": ("Superuser", "Supervisor"), "primary": False},
-    {"label": "Tracer",     "page": "Tracer",     "roles": ("Superuser", "Tracer"),     "primary": False},
-    {"label": "Agent",      "page": "Agent",      "roles": ("Superuser", "Agent"),      "primary": False},
-    {"label": "G Drive",    "page": "G Drive",    "roles": ALL_ROLES,                      "primary": True},
-    {"label": "User Setting","page": "User Setting","roles": ALL_ROLES,                      "primary": False},
-    {"label": "Audit Log",  "page": "Audit Log",  "roles": ("Superuser", "Supervisor"),   "primary": False},
+    {"label": "Tracer",     "page": "Tracer", "roles": ("Superuser", "Supervisor", "Tracer"), "primary": False},
+    {"label": "Agent",      "page": "Agent", "roles": ("Superuser", "Supervisor","Agent"), "primary": False},
+    {"label": "G Drive",    "page": "G Drive", "roles": ("Superuser", "Supervisor"), "primary": True},
+    {"label": "User Setting","page": "User Setting", "roles": ALL_ROLES, "primary": False},
+    {"label": "Audit Log",  "page": "Audit Log", "roles": ("Superuser", "Supervisor","Tracer","Agent"), "primary": False},
 ]
 
 def can_access_page(page_name, user_obj) -> bool:
