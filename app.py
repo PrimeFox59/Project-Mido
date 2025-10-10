@@ -58,6 +58,18 @@ def inject_theme_css():
         }}
         .stButton>button:hover {{ filter: brightness(0.95); }}
 
+        /* Sidebar buttons override: use white instead of blue */
+        [data-testid="stSidebar"] .stButton>button {{
+            background: white !important;
+            color: #2b2b2b !important;
+            border-radius: 8px !important;
+            border: 1px solid #c9c1b8 !important;
+        }}
+        [data-testid="stSidebar"] .stButton>button:hover {{
+            background: #f5f5f5 !important;
+            filter: none !important;
+        }}
+
         /* Tabs */
         .stTabs [role="tablist"] {{ border-bottom: 2px solid var(--brown); }}
         .stTabs [role="tab"] {{
