@@ -134,17 +134,48 @@ def init_db():
         # Safe to ignore if already exists or PRAGMA failed
         pass
     # users
+    # Fresh schema includes login_id (Id for login) and full_name; keep legacy 'name' for backward-compat.
     c.execute("""
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT,
-        email TEXT UNIQUE,
+        login_id TEXT UNIQUE,
         password_hash TEXT,
+        full_name TEXT,
+        name TEXT, -- legacy
+        email TEXT UNIQUE,
         role TEXT DEFAULT 'user', -- admin / user
         department TEXT,
         approved INTEGER DEFAULT 0,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )""")
+    # Migrate existing tables to ensure columns exist and are populated
+    try:
+        cols = [r['name'] for r in c.execute("PRAGMA table_info(users)").fetchall()]
+        if 'login_id' not in cols:
+            c.execute("ALTER TABLE users ADD COLUMN login_id TEXT")
+        if 'full_name' not in cols:
+            c.execute("ALTER TABLE users ADD COLUMN full_name TEXT")
+        # Ensure a unique index for login_id (SQLite cannot alter constraint easily)
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_login_id ON users(login_id)")
+        # Backfill values from legacy columns
+        c.execute("""
+            UPDATE users
+            SET full_name = CASE
+                WHEN (full_name IS NULL OR TRIM(full_name)='') THEN COALESCE(name, full_name)
+                ELSE full_name
+            END
+        """)
+        c.execute("""
+            UPDATE users
+            SET login_id = CASE
+                WHEN (login_id IS NULL OR TRIM(login_id)='') THEN
+                    CASE WHEN (email IS NOT NULL AND TRIM(email)<> '') THEN email ELSE name END
+                ELSE login_id
+            END
+        """)
+        conn.commit()
+    except Exception:
+        pass
     # departments
     c.execute("""
     CREATE TABLE IF NOT EXISTS departments (
@@ -267,15 +298,18 @@ def init_db():
     if row['cnt'] == 0:
         # Create default users
         users_to_seed = [
-            {"name": "Admin", "email": "admin", "password": "admin123", "role": "admin", "department": "Management", "approved": 1},
-            {"name": "Rendy", "email": "rendy", "password": "pass123", "role": "user", "department": "IT", "approved": 1},
+            {"login_id": "admin", "full_name": "Admin", "email": "admin", "password": "admin123", "role": "admin", "department": "Management", "approved": 1},
+            {"login_id": "rendy", "full_name": "Rendy", "email": "rendy", "password": "pass123", "role": "user", "department": "IT", "approved": 1},
         ]
         
         for user in users_to_seed:
             try:
                 hashed_pw = hash_password(user['password'])
-                c.execute("INSERT INTO users (name, email, password_hash, role, department, approved) VALUES (?,?,?,?,?,?)",
-                          (user['name'], user['email'], hashed_pw, user['role'], user['department'], user['approved']))
+                # Insert with new schema; also fill legacy 'name' for compatibility
+                c.execute(
+                    "INSERT INTO users (login_id, full_name, name, email, password_hash, role, department, approved) VALUES (?,?,?,?,?,?,?,?)",
+                    (user['login_id'], user['full_name'], user['full_name'], user['email'], hashed_pw, user['role'], user['department'], user['approved'])
+                )
             except sqlite3.IntegrityError:
                 # User might already exist, skip.
                 pass
@@ -874,13 +908,16 @@ def page_auth():
 
     with tab[0]:
         st.subheader("Login")
-        email = st.text_input("Email", key="login_email")
+        login_id = st.text_input("Id", key="login_id")
         pw = st.text_input("Password", type="password", key="login_pw")
         
         if st.button("Login", use_container_width=True):
             st.session_state.login_status_message = {"type": None, "text": ""}
             
-            row = fetchone("SELECT * FROM users WHERE email=?", (email,))
+            # Login by Id (login_id); fallback to email for backward compatibility
+            row = fetchone("SELECT * FROM users WHERE login_id=\?", (login_id,))
+            if not row and login_id:
+                row = fetchone("SELECT * FROM users WHERE email=\?", (login_id,))
             if not row:
                 st.session_state.login_status_message = {"type": "error", "text": "User tidak ditemukan."}
             else:
@@ -889,7 +926,8 @@ def page_auth():
                 elif verify_password(pw, row['password_hash']):
                     login_user(row)
                     # Catat audit trail login
-                    execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (row['id'], "LOGIN", f"User {row['email']} login."))
+                    detail_id = row.get('login_id') or row.get('email') or '-'
+                    execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (row['id'], "LOGIN", f"User {detail_id} login."))
                     # Backup on successful login (best-effort)
                     try:
                         if "service_account" in st.secrets:
@@ -924,7 +962,8 @@ def page_auth():
 
     with tab[1]:
         st.subheader("Register")
-        name = st.text_input("Nama", key="reg_name")
+        reg_id = st.text_input("Id (untuk login)", key="reg_login_id", placeholder="misal: johndoe")
+        full_name = st.text_input("Full name", key="reg_full_name")
         email_r = st.text_input("Email", key="reg_email")
         deps = [d['name'] for d in fetchall("SELECT * FROM departments")]
         dept = st.selectbox("Departemen", deps + ["Other"], key="reg_dept")
@@ -933,14 +972,16 @@ def page_auth():
         pw1 = st.text_input("Password", type="password", key="reg_pw1")
         pw2 = st.text_input("Confirm Password", type="password", key="reg_pw2")
         if st.button("Register", use_container_width=True):
-            if not name or not email_r or not pw1:
+            if not reg_id or not full_name or not pw1:
                 st.error("Isi semua data.")
             elif pw1 != pw2:
                 st.error("Password dan konfirmasi tidak cocok.")
             else:
                 try:
-                    execute("INSERT INTO users (name,email,password_hash,role,department,approved) VALUES (?,?,?,?,?,?)",
-                            (name, email_r, hash_password(pw1), "user", dept, 0))
+                    execute(
+                        "INSERT INTO users (login_id, full_name, name, email, password_hash, role, department, approved) VALUES (?,?,?,?,?,?,?,?)",
+                        (reg_id.strip(), full_name.strip(), full_name.strip(), (email_r.strip() or None), hash_password(pw1), "user", dept, 0)
+                    )
                     st.success("Registrasi berhasil. Tunggu approval Admin.")
                     st.rerun()
                 except Exception as e:
@@ -985,7 +1026,8 @@ def page_gdrive():
             new_note = st.text_input('Catatan baru', key='new_note_input')
             submitted = st.form_submit_button('Tambah Catatan')
             if submitted and new_note.strip():
-                execute("INSERT INTO record_notes (note, created_by) VALUES (?, ?)", (new_note.strip(), user['email'] if user else '-'))
+                creator = (user.get('login_id') or user.get('email') or '-') if user else '-'
+                execute("INSERT INTO record_notes (note, created_by) VALUES (?, ?)", (new_note.strip(), creator))
                 st.success('Catatan ditambahkan.')
                 st.rerun()
         # List notes
@@ -1178,12 +1220,14 @@ def page_gdrive():
     # Audit Log Tab
     with tabs[5]:
         st.subheader('📝 Audit Log Login')
-        logs = fetchall("SELECT audit_logs.timestamp, users.name, users.email FROM audit_logs JOIN users ON audit_logs.user_id = users.id WHERE audit_logs.action='LOGIN' ORDER BY audit_logs.id DESC LIMIT 50")
+        logs = fetchall("SELECT audit_logs.timestamp, COALESCE(users.full_name, users.name) AS full_name, users.login_id, users.email FROM audit_logs JOIN users ON audit_logs.user_id = users.id WHERE audit_logs.action='LOGIN' ORDER BY audit_logs.id DESC LIMIT 50")
         if not logs:
             st.info('Belum ada catatan login.')
         else:
             df = pd.DataFrame(logs)
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            # reorder columns if exist
+            cols = [c for c in ["timestamp","full_name","login_id","email"] if c in df.columns]
+            st.dataframe(df[cols] if cols else df, use_container_width=True, hide_index=True)
         try:
             files = list_files_in_folder(service, folder_id)
         except Exception as e:
@@ -1512,23 +1556,27 @@ def main():
 
     if user:
         # Info singkat user
-        st.sidebar.markdown(f"**👤 {user['name']}**")
-        st.sidebar.markdown(f"✉️ {user['email']}")
+        disp_name = user.get('full_name') or user.get('name') or user.get('login_id')
+        st.sidebar.markdown(f"**👤 {disp_name}**")
+        if user.get('login_id'):
+            st.sidebar.caption(f"Id: {user['login_id']}")
+        if user.get('email'):
+            st.sidebar.markdown(f"✉️ {user['email']}")
         st.sidebar.markdown(f"🏢 {user.get('department','-')}")
         st.sidebar.markdown(f"**Role:** {user['role'].capitalize()}")
         st.sidebar.markdown("---")
         # Navigasi utama setelah login
 
-        if st.sidebar.button("🧑‍💼 Supervisor", use_container_width=True):
+        if st.sidebar.button("Supervisor", use_container_width=True):
             st.session_state.page = "Supervisor"
             st.rerun()
-        if st.sidebar.button("🧑‍💻 Tracer", use_container_width=True):
+        if st.sidebar.button("Tracer", use_container_width=True):
             st.session_state.page = "Tracer"
             st.rerun()
-        if st.sidebar.button("📂 G Drive", use_container_width=True, type="primary"):
+        if st.sidebar.button("G Drive", use_container_width=True, type="primary"):
             st.session_state.page = "G Drive"
             st.rerun()
-        st.sidebar.button(" Logout", on_click=logout_user, use_container_width=True)
+        st.sidebar.button("Logout", on_click=logout_user, use_container_width=True)
         st.sidebar.markdown("---")
     elif st.session_state.page != 'RestoreStatus':
         if st.sidebar.button("🔐 Login / Register", use_container_width=True):
@@ -1721,9 +1769,9 @@ def page_supervisor():
             "TRC_Code", "Agreement_No", "Debtor_Name", "NIK_KTP", "EMPLOYMENT_UPDATE", "EMPLOYER", "Debtor_Legal_Name", "Employee_Name", "Employee_ID_Number", "Debtor_Relation_to_Employee"
         ]  # base fields from upload/form
 
-        # Build tracer assignee options from approved users
-        user_rows = fetchall("SELECT name FROM users WHERE approved=1 ORDER BY name ASC")
-        tracer_names = [r['name'] for r in user_rows if r.get('name')]
+        # Build tracer assignee options from approved users (prefer full_name)
+        user_rows = fetchall("SELECT COALESCE(full_name, name) AS full_name FROM users WHERE approved=1 ORDER BY COALESCE(full_name,name) ASC")
+        tracer_names = [r['full_name'] for r in user_rows if r.get('full_name')]
         assign_options = (tracer_names if tracer_names else []) + ["Other…"]
         tracer_mode = st.radio("Pilih mode input:", ["Manual", "Auto (Upload Excel/CSV)"], key="assign_tracer_mode")
         if tracer_mode == "Manual":
@@ -1812,7 +1860,7 @@ def page_supervisor():
 def page_tracer():
     require_login()
     u = current_user()
-    tracer_name = u.get('name') if u else None
+    tracer_name = (u.get('full_name') or u.get('name')) if u else None
     st.title("🧑‍💻 Tracer Menu")
     if not tracer_name:
         st.error("Tidak dapat menentukan nama tracer. Silakan login ulang.")
