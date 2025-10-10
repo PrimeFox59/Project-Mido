@@ -26,7 +26,7 @@ DB_PATH = "minama.db"
 # ---------------------------------
 # Dapat diubah jika ingin menonaktifkan pengaruh timeline terhadap skor agregasi
 ENABLE_TIMELINE_WEIGHTING = True
-st.set_page_config(layout="wide", page_icon="icon.png", page_title="Dunyim Security System")
+st.set_page_config(layout="wide", page_icon="icon.png", page_title="Minama Felonic Solutions")
 
 # -------------------------
 # Theming: Blue-Brown CSS
@@ -1694,74 +1694,60 @@ def page_supervisor():
 
     # --- Input Tab ---
     with tabs[1]:
-        mode = st.radio("Pilih mode input:", ["Manual", "Auto (Upload Excel/CSV)"], key="supervisor_input_mode")
+        st.subheader("Upload Excel/CSV Supervisor Data")
         field_names = [
             "DT", "Lending_Entity", "Date", "Case_ID", "Task_ID", "Customer_name", "email", "Gender", "Customer_Occupation", "DPD", "Principle_Outstanding", "Principal_Overdue_CURR", "Interest_Overdue_CURR", "Last_Late_Fee", "Return_Date", "Detail", "Loan_Type", "Third_Uid", "Product", "Home_Address", "Province", "City", "Street", "RoomNumber", "Postcode", "Assignment_Date", "Withdrawal_Date", "Phone_Number_1", "Phone_Number_2", "Contact_Type_1", "Contact_Name_1", "Contact_Phone_1", "Contact_Type_2", "Contact_Name_2", "Contact_Phone_2", "Contact_Type_3", "Contact_Name_3", "Contact_Phone_3", "Contact_Type_4", "Contact_Name_4", "Contact_Phone_4", "Contact_Type_5", "Contact_Name_5", "Contact_Phone_5", "Contact_Type_6", "Contact_Name_6", "Contact_Phone_6", "Contact_Type_7", "Contact_Name_7", "Contact_Phone_7", "Contact_Type_8", "Contact_Name_8", "Contact_Phone_8", "Total_debt_in_third_party", "Repayment_on_third_Party", "Remaining_Loan_on_third_Party", "Virtual_Account_Number"
         ]
-        if mode == "Manual":
-            with st.form("supervisor_manual_form"):
-                values = {}
-                for f in field_names:
-                    values[f] = st.text_input(f.replace("_", " "), key=f"sup_{f}")
-                submitted = st.form_submit_button("Simpan Data")
-                if submitted:
-                    placeholders = ",".join(["?" for _ in field_names])
-                    try:
-                        execute(f"INSERT INTO supervisor_data ({','.join(field_names)}) VALUES ({placeholders})", tuple(values[f] for f in field_names))
-                        st.success("Data supervisor berhasil disimpan.")
-                    except Exception as e:
-                        st.error(f"Gagal simpan: {e}")
-        else:
-            uploaded = st.file_uploader("Upload file Excel/CSV", type=["csv", "xlsx"])
-            if uploaded:
-                try:
-                    if uploaded.name.endswith(".csv"):
-                        df = pd.read_csv(uploaded)
-                    else:
-                        df = pd.read_excel(uploaded)
-                    # --- Normalize header names to match expected fields ---
-                    def _norm_col(s: str) -> str:
-                        if s is None:
-                            return ""
-                        s = str(s).replace("\ufeff", "").strip()
-                        s = re.sub(r"\s+", " ", s)  # collapse spaces
-                        s = s.replace(" ", "_")
-                        return s.lower()
+        uploaded = st.file_uploader("Upload file Excel/CSV", type=["csv", "xlsx"])
+        if uploaded:
+            try:
+                if uploaded.name.endswith(".csv"):
+                    df = pd.read_csv(uploaded)
+                else:
+                    df = pd.read_excel(uploaded)
+                # --- Normalize header names to match expected fields ---
+                def _norm_col(s: str) -> str:
+                    if s is None:
+                        return ""
+                    s = str(s).replace("\ufeff", "").strip()
+                    s = re.sub(r"\s+", " ", s)  # collapse spaces
+                    s = s.replace(" ", "_")
+                    return s.lower()
 
-                    # Known typo mappings (normalized form)
-                    typo_map = {
-                        _norm_col("Repayment_on_thrid_Party"): _norm_col("Repayment_on_third_Party"),
-                    }
-                    # Build map from normalized -> canonical expected name
-                    expected_map = { _norm_col(k): k for k in field_names }
-                    new_cols = []
-                    for c in df.columns:
-                        nc = _norm_col(c)
-                        # Fix known typos first
-                        if nc in typo_map:
-                            nc = typo_map[nc]
-                        # Map to canonical if matches
-                        if nc in expected_map:
-                            new_cols.append(expected_map[nc])
-                        else:
-                            new_cols.append(c)
-                    df.columns = new_cols
-                    # Pastikan urutan kolom sesuai field_names
-                    missing = [f for f in field_names if f not in df.columns]
-                    if missing:
-                        st.error(f"Kolom berikut tidak ditemukan di file: {missing}")
-                        st.caption("Tips: header akan dicocokkan tanpa spasi/kapital dan perbaikan typo umum (thrid->third). Pastikan nama kolom sesuai template.")
+                # Known typo mappings (normalized form)
+                typo_map = {
+                    _norm_col("Repayment_on_thrid_Party"): _norm_col("Repayment_on_third_Party"),
+                }
+                # Build map from normalized -> canonical expected name
+                expected_map = { _norm_col(k): k for k in field_names }
+                new_cols = []
+                for c in df.columns:
+                    nc = _norm_col(c)
+                    # Fix known typos first
+                    if nc in typo_map:
+                        nc = typo_map[nc]
+                    # Map to canonical if matches
+                    if nc in expected_map:
+                        new_cols.append(expected_map[nc])
                     else:
-                        count = 0
-                        for _, row in df.iterrows():
-                            try:
-                                execute(f"INSERT INTO supervisor_data ({','.join(field_names)}) VALUES ({','.join(['?' for _ in field_names])})", tuple(row[f] for f in field_names))
-                                count += 1
-                            except Exception as e:
-                                st.warning(f"Baris gagal: {e}")
-                        st.success(f"Berhasil input {count} data supervisor.")
-                except Exception as e:
-                    st.error(f"Gagal membaca file: {e}")
+                        new_cols.append(c)
+                df.columns = new_cols
+                # Pastikan urutan kolom sesuai field_names
+                missing = [f for f in field_names if f not in df.columns]
+                if missing:
+                    st.error(f"Kolom berikut tidak ditemukan di file: {missing}")
+                    st.caption("Tips: header akan dicocokkan tanpa spasi/kapital dan perbaikan typo umum (thrid->third). Pastikan nama kolom sesuai template.")
+                else:
+                    count = 0
+                    for _, row in df.iterrows():
+                        try:
+                            execute(f"INSERT INTO supervisor_data ({','.join(field_names)}) VALUES ({','.join(['?' for _ in field_names])})", tuple(row[f] for f in field_names))
+                            count += 1
+                        except Exception as e:
+                            st.warning(f"Baris gagal: {e}")
+                    st.success(f"Berhasil input {count} data supervisor.")
+            except Exception as e:
+                st.error(f"Gagal membaca file: {e}")
 
     # --- Assign Tracer Tab ---
     with tabs[2]:
@@ -1773,87 +1759,58 @@ def page_supervisor():
         user_rows = fetchall("SELECT COALESCE(full_name, name) AS full_name FROM users WHERE approved=1 ORDER BY COALESCE(full_name,name) ASC")
         tracer_names = [r['full_name'] for r in user_rows if r.get('full_name')]
         assign_options = (tracer_names if tracer_names else []) + ["Other…"]
-        tracer_mode = st.radio("Pilih mode input:", ["Manual", "Auto (Upload Excel/CSV)"], key="assign_tracer_mode")
-        if tracer_mode == "Manual":
-            with st.form("assign_tracer_manual_form"):
-                tracer_values = {}
-                # Choose assignee
-                sel = st.selectbox("Assign ke tracer", options=assign_options, key="assign_to_select_manual")
-                assigned_to = None
-                if sel == "Other…":
-                    custom_name = st.text_input("Nama tracer", key="assign_to_custom_manual")
-                    assigned_to = custom_name.strip()
+        st.subheader("Upload Excel/CSV Tracer Assignment")
+        # Default assignee for all rows (used if file doesn't have Assigned_To column)
+        sel_auto = st.selectbox("Assign semua baris ke tracer", options=assign_options, key="assign_to_select_auto")
+        default_assigned = None
+        if sel_auto == "Other…":
+            custom_auto = st.text_input("Nama tracer (default)", key="assign_to_custom_auto")
+            default_assigned = custom_auto.strip()
+        else:
+            default_assigned = sel_auto
+
+        tracer_uploaded = st.file_uploader("Upload file Excel/CSV Tracer", type=["csv", "xlsx"], key="tracer_upload")
+        if tracer_uploaded:
+            try:
+                if tracer_uploaded.name.endswith(".csv"):
+                    tracer_df = pd.read_csv(tracer_uploaded)
                 else:
-                    assigned_to = sel
-                for f in tracer_fields:
-                    tracer_values[f] = st.text_input(f.replace("_", " "), key=f"tracer_{f}")
-                tracer_submitted = st.form_submit_button("Simpan Data Tracer")
-                if tracer_submitted:
-                    if not assigned_to:
-                        st.error("Harap tentukan nama tracer untuk assignment.")
-                    else:
-                        insert_fields = tracer_fields + ["Assigned_To"]
-                        placeholders = ",".join(["?" for _ in insert_fields])
+                    tracer_df = pd.read_excel(tracer_uploaded)
+                # Normalize tracer headers (trim/BOM/case-insensitive + spaces to underscores)
+                def _norm_col2(s: str) -> str:
+                    if s is None:
+                        return ""
+                    s = str(s).replace("\ufeff", "").strip()
+                    s = re.sub(r"\s+", " ", s)
+                    s = s.replace(" ", "_")
+                    return s.lower()
+                expected_map_tr = { _norm_col2(k): k for k in (tracer_fields + ["Assigned_To"]) }
+                tracer_df.columns = [ expected_map_tr.get(_norm_col2(c), c) for c in tracer_df.columns ]
+                # Validate base required columns
+                missing = [f for f in tracer_fields if f not in tracer_df.columns]
+                if missing:
+                    st.error(f"Kolom berikut tidak ditemukan di file: {missing}")
+                else:
+                    # If Assigned_To column not in file, require a default assignee and fill it
+                    if 'Assigned_To' not in tracer_df.columns:
+                        if not default_assigned:
+                            st.error("File tidak memiliki kolom 'Assigned_To'. Pilih/isi tracer default terlebih dahulu.")
+                            return
+                        tracer_df['Assigned_To'] = default_assigned
+                    count = 0
+                    insert_fields = tracer_fields + ["Assigned_To"]
+                    for _, row in tracer_df.iterrows():
                         try:
                             execute(
-                                f"INSERT INTO assign_tracer ({','.join(insert_fields)}) VALUES ({placeholders})",
-                                tuple(tracer_values[f] for f in tracer_fields) + (assigned_to,)
+                                f"INSERT INTO assign_tracer ({','.join(insert_fields)}) VALUES ({','.join(['?' for _ in insert_fields])})",
+                                tuple(row[f] for f in insert_fields)
                             )
-                            st.success("Data tracer berhasil disimpan.")
+                            count += 1
                         except Exception as e:
-                            st.error(f"Gagal simpan: {e}")
-        else:
-            # Default assignee for all rows (used if file doesn't have Assigned_To column)
-            sel_auto = st.selectbox("Assign semua baris ke tracer", options=assign_options, key="assign_to_select_auto")
-            default_assigned = None
-            if sel_auto == "Other…":
-                custom_auto = st.text_input("Nama tracer (default)", key="assign_to_custom_auto")
-                default_assigned = custom_auto.strip()
-            else:
-                default_assigned = sel_auto
-
-            tracer_uploaded = st.file_uploader("Upload file Excel/CSV Tracer", type=["csv", "xlsx"], key="tracer_upload")
-            if tracer_uploaded:
-                try:
-                    if tracer_uploaded.name.endswith(".csv"):
-                        tracer_df = pd.read_csv(tracer_uploaded)
-                    else:
-                        tracer_df = pd.read_excel(tracer_uploaded)
-                    # Normalize tracer headers (trim/BOM/case-insensitive + spaces to underscores)
-                    def _norm_col2(s: str) -> str:
-                        if s is None:
-                            return ""
-                        s = str(s).replace("\ufeff", "").strip()
-                        s = re.sub(r"\s+", " ", s)
-                        s = s.replace(" ", "_")
-                        return s.lower()
-                    expected_map_tr = { _norm_col2(k): k for k in (tracer_fields + ["Assigned_To"]) }
-                    tracer_df.columns = [ expected_map_tr.get(_norm_col2(c), c) for c in tracer_df.columns ]
-                    # Validate base required columns
-                    missing = [f for f in tracer_fields if f not in tracer_df.columns]
-                    if missing:
-                        st.error(f"Kolom berikut tidak ditemukan di file: {missing}")
-                    else:
-                        # If Assigned_To column not in file, require a default assignee and fill it
-                        if 'Assigned_To' not in tracer_df.columns:
-                            if not default_assigned:
-                                st.error("File tidak memiliki kolom 'Assigned_To'. Pilih/isi tracer default terlebih dahulu.")
-                                return
-                            tracer_df['Assigned_To'] = default_assigned
-                        count = 0
-                        insert_fields = tracer_fields + ["Assigned_To"]
-                        for _, row in tracer_df.iterrows():
-                            try:
-                                execute(
-                                    f"INSERT INTO assign_tracer ({','.join(insert_fields)}) VALUES ({','.join(['?' for _ in insert_fields])})",
-                                    tuple(row[f] for f in insert_fields)
-                                )
-                                count += 1
-                            except Exception as e:
-                                st.warning(f"Baris gagal: {e}")
-                        st.success(f"Berhasil input {count} data tracer.")
-                except Exception as e:
-                    st.error(f"Gagal membaca file: {e}")
+                            st.warning(f"Baris gagal: {e}")
+                    st.success(f"Berhasil input {count} data tracer.")
+            except Exception as e:
+                st.error(f"Gagal membaca file: {e}")
 
     # --- Monitoring Tab (moved to first) end ---
 
