@@ -143,8 +143,7 @@ def init_db():
         full_name TEXT,
         name TEXT, -- legacy
         email TEXT UNIQUE,
-        role TEXT DEFAULT 'user', -- admin / user
-        department TEXT,
+        role TEXT DEFAULT 'Agent', -- Superuser / Supervisor / Tracer / Agent
         approved INTEGER DEFAULT 0,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )""")
@@ -157,6 +156,13 @@ def init_db():
             c.execute("ALTER TABLE users ADD COLUMN full_name TEXT")
         # Ensure a unique index for login_id (SQLite cannot alter constraint easily)
         c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_login_id ON users(login_id)")
+        # Soft-migrate deprecated 'department' column: keep if exists, but stop using it
+        # Soft-migrate old role names to new role set
+        try:
+            c.execute("UPDATE users SET role='Superuser' WHERE role='admin'")
+            c.execute("UPDATE users SET role='Agent' WHERE role='user'")
+        except Exception:
+            pass
         # Backfill values from legacy columns
         c.execute("""
             UPDATE users
@@ -176,12 +182,7 @@ def init_db():
         conn.commit()
     except Exception:
         pass
-    # departments
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS departments (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT UNIQUE
-    )""")
+    # departments table no longer used; keep existing table if present (no creation needed)
     # app_settings (key-value config)
     c.execute("""
     CREATE TABLE IF NOT EXISTS app_settings (
@@ -292,14 +293,16 @@ def init_db():
     except Exception:
         pass
 
-    # ensure at least one admin exists (seed)
+    # ensure at least one user exists (seed)
     c.execute("SELECT COUNT(*) as cnt FROM users")
     row = c.fetchone()
     if row['cnt'] == 0:
-        # Create default users
+        # Create default users for each role
         users_to_seed = [
-            {"login_id": "admin", "full_name": "Admin", "email": "admin", "password": "admin123", "role": "admin", "department": "Management", "approved": 1},
-            {"login_id": "rendy", "full_name": "Rendy", "email": "rendy", "password": "pass123", "role": "user", "department": "IT", "approved": 1},
+            {"login_id": "superuser", "full_name": "Superuser", "email": "superuser", "password": "superuser123", "role": "Superuser", "approved": 1},
+            {"login_id": "supervisor", "full_name": "Supervisor", "email": "supervisor", "password": "supervisor123", "role": "Supervisor", "approved": 1},
+            {"login_id": "tracer", "full_name": "Tracer", "email": "tracer", "password": "tracer123", "role": "Tracer", "approved": 1},
+            {"login_id": "agent", "full_name": "Agent", "email": "agent", "password": "agent123", "role": "Agent", "approved": 1},
         ]
         
         for user in users_to_seed:
@@ -307,21 +310,38 @@ def init_db():
                 hashed_pw = hash_password(user['password'])
                 # Insert with new schema; also fill legacy 'name' for compatibility
                 c.execute(
-                    "INSERT INTO users (login_id, full_name, name, email, password_hash, role, department, approved) VALUES (?,?,?,?,?,?,?,?)",
-                    (user['login_id'], user['full_name'], user['full_name'], user['email'], hashed_pw, user['role'], user['department'], user['approved'])
+                    "INSERT INTO users (login_id, full_name, name, email, password_hash, role, approved) VALUES (?,?,?,?,?,?,?)",
+                    (user['login_id'], user['full_name'], user['full_name'], user['email'], hashed_pw, user['role'], user['approved'])
                 )
             except sqlite3.IntegrityError:
                 # User might already exist, skip.
                 pass
         
-        # seed some departments
-        for d in ["Humas", "IT", "Operations", "Finance", "Management"]:
-            try:
-                c.execute("INSERT INTO departments (name) VALUES (?)", (d,))
-            except sqlite3.IntegrityError:
-                pass
-        
         conn.commit()
+
+    # Always ensure at least one approved user exists for each role (idempotent)
+    try:
+        ensure_roles = [
+            ("Superuser", "superuser", "Superuser", "superuser", "superuser123"),
+            ("Supervisor", "supervisor", "Supervisor", "supervisor", "supervisor123"),
+            ("Tracer", "tracer", "Tracer", "tracer", "tracer123"),
+            ("Agent", "agent", "Agent", "agent", "agent123"),
+        ]
+        for role_name, login_id_def, full_name_def, email_def, pw_def in ensure_roles:
+            r_cnt = c.execute("SELECT COUNT(*) AS c FROM users WHERE role=?", (role_name,)).fetchone()
+            cnt_val = (r_cnt[0] if r_cnt and 0 in r_cnt.keys() else r_cnt['c']) if isinstance(r_cnt, sqlite3.Row) else (r_cnt[0] if r_cnt else 0)
+            if not cnt_val:
+                try:
+                    c.execute(
+                        "INSERT INTO users (login_id, full_name, name, email, password_hash, role, approved) VALUES (?,?,?,?,?,?,?)",
+                        (login_id_def, full_name_def, full_name_def, email_def, hash_password(pw_def), role_name, 1)
+                    )
+                except sqlite3.IntegrityError:
+                    pass
+        conn.commit()
+    except Exception:
+        pass
+
     conn.close()
 
 # -------------------------
@@ -868,8 +888,9 @@ def require_login():
 
 def require_admin():
     u = current_user()
-    if not u or u.get("role") != "admin":
-        st.warning("Akses admin diperlukan.")
+    # Backward compatibility: treat 'Superuser' as admin; map old 'admin' to Superuser if still present
+    if not u or u.get("role") not in ("Superuser",):
+        st.warning("Akses Superuser diperlukan.")
         # Optional: redirect non-admin users to dashboard/login
         if not u:
             st.session_state.page = "Authentication"
@@ -965,10 +986,7 @@ def page_auth():
         reg_id = st.text_input("Id (untuk login)", key="reg_login_id", placeholder="misal: johndoe")
         full_name = st.text_input("Full name", key="reg_full_name")
         email_r = st.text_input("Email", key="reg_email")
-        deps = [d['name'] for d in fetchall("SELECT * FROM departments")]
-        dept = st.selectbox("Departemen", deps + ["Other"], key="reg_dept")
-        if dept == "Other":
-            dept = st.text_input("Nama Departemen baru", key="reg_dept_new")
+        # Department removed
         pw1 = st.text_input("Password", type="password", key="reg_pw1")
         pw2 = st.text_input("Confirm Password", type="password", key="reg_pw2")
         if st.button("Register", use_container_width=True):
@@ -978,9 +996,10 @@ def page_auth():
                 st.error("Password dan konfirmasi tidak cocok.")
             else:
                 try:
+                    # Default role for new registration is Agent (awaiting approval)
                     execute(
-                        "INSERT INTO users (login_id, full_name, name, email, password_hash, role, department, approved) VALUES (?,?,?,?,?,?,?,?)",
-                        (reg_id.strip(), full_name.strip(), full_name.strip(), (email_r.strip() or None), hash_password(pw1), "user", dept, 0)
+                        "INSERT INTO users (login_id, full_name, name, email, password_hash, role, approved) VALUES (?,?,?,?,?,?,?)",
+                        (reg_id.strip(), full_name.strip(), full_name.strip(), (email_r.strip() or None), hash_password(pw1), "Agent", 0)
                     )
                     st.success("Registrasi berhasil. Tunggu approval Admin.")
                     st.rerun()
@@ -1055,21 +1074,21 @@ def page_gdrive():
     # List Tab
     with tabs[0]:
         st.subheader("Daftar File")
-        # Manual trigger backup (admin only)
+        # Manual trigger backup (Superuser only)
         u = current_user()
-        if u and u.get('role') == 'admin':
+        if u and u.get('role') == 'Superuser':
             if st.button('🚀 Trigger Auto Backup Sekarang'):
                 ok, msg = perform_backup(service, folder_id)
                 if ok:
                     st.success(msg)
                 else:
                     st.error(msg)
-            # Show last 5 backup logs
-            logs = fetchall("SELECT * FROM backup_log ORDER BY id DESC LIMIT 5")
-            if logs:
-                st.markdown("**Riwayat Backup Terbaru:**")
-                for lg in logs:
-                    st.markdown(f"- {lg['backup_time']} | {lg['file_name']} | {lg['status']}")
+        # Show last 5 backup logs
+        logs = fetchall("SELECT * FROM backup_log ORDER BY id DESC LIMIT 5")
+        if logs:
+            st.markdown("**Riwayat Backup Terbaru:**")
+            for lg in logs:
+                st.markdown(f"- {lg['backup_time']} | {lg['file_name']} | {lg['status']}")
 
             st.markdown("---")
             st.markdown("### ⚙️ Pengaturan Scheduled Backup")
@@ -1562,7 +1581,6 @@ def main():
             st.sidebar.caption(f"Id: {user['login_id']}")
         if user.get('email'):
             st.sidebar.markdown(f"✉️ {user['email']}")
-        st.sidebar.markdown(f"🏢 {user.get('department','-')}")
         st.sidebar.markdown(f"**Role:** {user['role'].capitalize()}")
         st.sidebar.markdown("---")
         # Navigasi utama setelah login
@@ -1572,6 +1590,9 @@ def main():
             st.rerun()
         if st.sidebar.button("Tracer", use_container_width=True):
             st.session_state.page = "Tracer"
+            st.rerun()
+        if st.sidebar.button("Agent", use_container_width=True):
+            st.session_state.page = "Agent"
             st.rerun()
         if st.sidebar.button("G Drive", use_container_width=True, type="primary"):
             st.session_state.page = "G Drive"
@@ -1615,6 +1636,9 @@ def main():
     if st.session_state.page == "Tracer":
         page_tracer()
         return
+    if st.session_state.page == "Agent":
+        page_agent()
+        return
     if st.session_state.page == "G Drive":
         page_gdrive()
         return
@@ -1625,6 +1649,14 @@ def main():
     # Default route
     st.session_state.page = "Supervisor"
     page_supervisor()
+
+# -------------------------
+# Agent Page (placeholder)
+# -------------------------
+def page_agent():
+    require_login()
+    st.title("🧑‍💼 Agent Menu")
+    st.info("Coming soon")
 
 # -------------------------
 # Supervisor Page
