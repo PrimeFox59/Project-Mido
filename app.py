@@ -915,9 +915,9 @@ def page_auth():
             st.session_state.login_status_message = {"type": None, "text": ""}
             
             # Login by Id (login_id); fallback to email for backward compatibility
-            row = fetchone("SELECT * FROM users WHERE login_id=\?", (login_id,))
+            row = fetchone("SELECT * FROM users WHERE login_id=?", (login_id,))
             if not row and login_id:
-                row = fetchone("SELECT * FROM users WHERE email=\?", (login_id,))
+                row = fetchone("SELECT * FROM users WHERE email=?", (login_id,))
             if not row:
                 st.session_state.login_status_message = {"type": "error", "text": "User tidak ditemukan."}
             else:
