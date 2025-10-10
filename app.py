@@ -108,7 +108,7 @@ def get_db():
 def init_db():
     conn = get_db()
     c = conn.cursor()
-    # assign_tracer (for Assign Tracer tab)
+    # assign_tracer (for Trace Assigning tab)
     c.execute("""
     CREATE TABLE IF NOT EXISTS assign_tracer (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1664,7 +1664,7 @@ def page_agent():
 def page_supervisor():
     st.title("Supervisor Menu")
     # Monitoring first so it's the default view
-    tabs = st.tabs(["Monitoring", "Input", "Assign Tracer"])
+    tabs = st.tabs(["Monitoring", "Input", "Trace Assigning"])
 
     # --- Monitoring Tab ---
     with tabs[0]:
@@ -1781,7 +1781,7 @@ def page_supervisor():
             except Exception as e:
                 st.error(f"Gagal membaca file: {e}")
 
-    # --- Assign Tracer Tab ---
+    # --- Trace Assigning Tab ---
     with tabs[2]:
         tracer_fields = [
             "TRC_Code", "Agreement_No", "Debtor_Name", "NIK_KTP", "EMPLOYMENT_UPDATE", "EMPLOYER", "Debtor_Legal_Name", "Employee_Name", "Employee_ID_Number", "Debtor_Relation_to_Employee"
