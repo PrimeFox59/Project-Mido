@@ -1574,15 +1574,30 @@ def main():
     st.sidebar.markdown(
         """
         <style>
+        /* Base style: white buttons, uniform size */
+        div[data-testid="stSidebar"] .stButton { margin-bottom: 6px; }
         div[data-testid="stSidebar"] .stButton > button {
             background-color: #ffffff !important;
             color: #111111 !important;
             border: 1px solid #E0E0E0 !important;
+            border-radius: 8px !important;
+            padding: 8px 12px !important;
+            min-height: 40px !important;
+            width: 100% !important;
+            box-shadow: none !important;
+            text-align: left !important;
         }
-        /* Improve focus/hover */
+        /* Hover */
         div[data-testid="stSidebar"] .stButton > button:hover {
             border-color: #BDBDBD !important;
             background-color: #FAFAFA !important;
+        }
+        /* Active (use disabled button as current-page highlight) */
+        div[data-testid="stSidebar"] .stButton > button:disabled {
+            background-color: #E8F0FE !important; /* light blue */
+            border-color: #1A73E8 !important;
+            color: #1A73E8 !important;
+            opacity: 1 !important; /* keep readable */
         }
         </style>
         """,
@@ -1599,23 +1614,14 @@ def main():
             st.sidebar.markdown(f"✉️ {user['email']}")
         st.sidebar.markdown(f"**Role:** {user['role'].capitalize()}")
         st.sidebar.markdown("---")
-        # Navigasi utama setelah login (centralized) — gunakan radio agar item aktif ter-highlight
+        # Navigasi utama setelah login (centralized) — gunakan button putih seragam; aktif di-highlight
         allowed_items = [it for it in MENU_ITEMS if can_access_page(it['page'], user)]
-        labels = [it['label'] for it in allowed_items]
-        pages = [it['page'] for it in allowed_items]
-        # Tentukan index pilihan aktif saat ini
-        try:
-            current_index = pages.index(st.session_state.page)
-        except ValueError:
-            current_index = 0 if pages else 0
-        sel_label = st.sidebar.radio("Menu", labels, index=current_index if labels else 0, label_visibility="collapsed")
-        try:
-            new_page = pages[labels.index(sel_label)]
-        except Exception:
-            new_page = st.session_state.page
-        if new_page != st.session_state.page:
-            st.session_state.page = new_page
-            st.rerun()
+        for it in allowed_items:
+            is_active = (st.session_state.page == it['page'])
+            clicked = st.sidebar.button(it['label'], key=f"nav_{it['page']}", use_container_width=True, disabled=is_active)
+            if clicked and not is_active:
+                st.session_state.page = it['page']
+                st.rerun()
         st.sidebar.button("Logout", on_click=logout_user, use_container_width=True)
         st.sidebar.markdown("---")
     elif st.session_state.page != 'RestoreStatus':
