@@ -214,21 +214,6 @@ def init_db():
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
     """)
-
-    # agent_assignments (Supervisor assigns cases to Agents; Agents fill NIK)
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS agent_assignments (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        case_id TEXT,
-        debtor_name TEXT,
-        phone_number TEXT,
-        nik TEXT,
-        agent_assigned TEXT, -- COALESCE(full_name, name)
-        status TEXT DEFAULT 'assigned', -- assigned | submitted
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-    );
-    """)
     conn.commit()
 
     # Seed default settings (idempotent)
@@ -1585,6 +1570,24 @@ def main():
     # Sidebar minimal: hanya autentikasi & G Drive
     st.sidebar.image("logo.png", use_container_width=True)
     st.sidebar.title("Navigasi")
+    # Global sidebar button style: force white buttons for consistency
+    st.sidebar.markdown(
+        """
+        <style>
+        div[data-testid="stSidebar"] .stButton > button {
+            background-color: #ffffff !important;
+            color: #111111 !important;
+            border: 1px solid #E0E0E0 !important;
+        }
+        /* Improve focus/hover */
+        div[data-testid="stSidebar"] .stButton > button:hover {
+            border-color: #BDBDBD !important;
+            background-color: #FAFAFA !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
     if user:
         # Info singkat user
@@ -1596,15 +1599,23 @@ def main():
             st.sidebar.markdown(f"✉️ {user['email']}")
         st.sidebar.markdown(f"**Role:** {user['role'].capitalize()}")
         st.sidebar.markdown("---")
-        # Navigasi utama setelah login (centralized)
-        for item in MENU_ITEMS:
-            if can_access_page(item['page'], user):
-                kwargs = {"use_container_width": True}
-                if item.get('primary'):
-                    kwargs["type"] = "primary"
-                if st.sidebar.button(item['label'], **kwargs):
-                    st.session_state.page = item['page']
-                    st.rerun()
+        # Navigasi utama setelah login (centralized) — gunakan radio agar item aktif ter-highlight
+        allowed_items = [it for it in MENU_ITEMS if can_access_page(it['page'], user)]
+        labels = [it['label'] for it in allowed_items]
+        pages = [it['page'] for it in allowed_items]
+        # Tentukan index pilihan aktif saat ini
+        try:
+            current_index = pages.index(st.session_state.page)
+        except ValueError:
+            current_index = 0 if pages else 0
+        sel_label = st.sidebar.radio("Menu", labels, index=current_index if labels else 0, label_visibility="collapsed")
+        try:
+            new_page = pages[labels.index(sel_label)]
+        except Exception:
+            new_page = st.session_state.page
+        if new_page != st.session_state.page:
+            st.session_state.page = new_page
+            st.rerun()
         st.sidebar.button("Logout", on_click=logout_user, use_container_width=True)
         st.sidebar.markdown("---")
     elif st.session_state.page != 'RestoreStatus':
@@ -1700,69 +1711,8 @@ def page_audit_log():
 # -------------------------
 def page_agent():
     require_roles(("Superuser", "Agent"))
-    u = current_user()
-    agent_name = (u.get('full_name') or u.get('name')) if u else None
     st.title("Agent Menu")
-    if not agent_name:
-        st.error("Tidak dapat menentukan nama agent. Silakan login ulang.")
-        return
-
-    st.caption(f"Assignment untuk: {agent_name}")
-    rows = fetchall(
-        "SELECT id, case_id, debtor_name, phone_number, nik, status, created_at, updated_at FROM agent_assignments WHERE agent_assigned = ? ORDER BY id DESC LIMIT 300",
-        (agent_name,)
-    )
-    if not rows:
-        st.info("Belum ada assignment untuk Anda.")
-        return
-
-    st.subheader("Daftar Assignment (Read-only kecuali NIK)")
-    df_view = pd.DataFrame([
-        {
-            'ID': r['id'],
-            'Case ID': r['case_id'],
-            'User/Debtor Name': r['debtor_name'],
-            'Phone Number': r['phone_number'],
-            'NIK': r['nik'] or '',
-            'Status': r['status'],
-            'Assigned At': r['created_at'],
-        } for r in rows
-    ])
-    st.dataframe(df_view, use_container_width=True, hide_index=True)
-
-    st.markdown("---")
-    st.subheader("Lengkapi / Perbarui NIK")
-    ids = [r['id'] for r in rows]
-    sel_id = st.selectbox("Pilih Assignment ID", ids, key="agent_sel_id")
-    sel_row = next((r for r in rows if r['id'] == sel_id), None)
-    if not sel_row:
-        st.warning("Data tidak ditemukan.")
-        return
-
-    with st.form("agent_update_nik_form"):
-        col1, col2 = st.columns(2)
-        with col1:
-            st.text_input("Case ID", value=sel_row.get('case_id',''), disabled=True)
-            st.text_input("User Name / Debtor Name", value=sel_row.get('debtor_name',''), disabled=True)
-        with col2:
-            st.text_input("Phone Number", value=sel_row.get('phone_number',''), disabled=True)
-            nik_val = st.text_input("NIK", value=sel_row.get('nik') or '')
-        submitted = st.form_submit_button("Submit ke Supervisor", type="primary")
-    if submitted:
-        try:
-            execute(
-                "UPDATE agent_assignments SET nik=?, status='submitted', updated_at=? WHERE id=? AND agent_assigned=?",
-                (nik_val.strip(), datetime.utcnow().isoformat(), sel_id, agent_name)
-            )
-            # Audit log agent submit
-            try:
-                execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (u.get('id') if u else None, "AGENT_SUBMIT", f"Agent '{agent_name}' submitted NIK for assignment ID {sel_id}"))
-            except Exception:
-                pass
-            st.success("NIK berhasil disubmit ke Supervisor.")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Gagal submit NIK: {e}")
+    st.info("Coming soon")
 
 # -------------------------
 # User Setting Page
@@ -1832,7 +1782,7 @@ def page_supervisor():
     require_roles(("Superuser", "Supervisor"))
     st.title("Supervisor Menu")
     # Monitoring first so it's the default view
-    tabs = st.tabs(["Monitoring", "Input", "Trace Assigning", "Agent Assigning"])
+    tabs = st.tabs(["Monitoring", "Input", "Trace Assigning"])
 
     # --- Monitoring Tab ---
     with tabs[0]:
@@ -2032,6 +1982,17 @@ def page_supervisor():
             "TRC_Code", "Agreement_No", "Debtor_Name", "NIK_KTP", "EMPLOYMENT_UPDATE", "EMPLOYER", "Debtor_Legal_Name", "Employee_Name", "Employee_ID_Number", "Debtor_Relation_to_Employee"
         ]  # base fields from upload/form
 
+        # Default assignee for upload rows (used when file has no Assigned_To)
+        _user_rows_up = fetchall("SELECT COALESCE(full_name, name) AS full_name FROM users WHERE approved=1 ORDER BY COALESCE(full_name,name) ASC")
+        _tracer_names_up = [r['full_name'] for r in _user_rows_up if r.get('full_name')]
+        _assign_opts_up = (_tracer_names_up if _tracer_names_up else []) + ["Other…"]
+        col_up1, col_up2 = st.columns([2,1])
+        with col_up1:
+            _sel_up = st.selectbox("Default tracer untuk file (digunakan jika kolom Assigned_To tidak ada)", options=_assign_opts_up, key="tr_upload_default_sel")
+        with col_up2:
+            _custom_up = st.text_input("Nama custom (jika Other)", key="tr_upload_default_custom")
+        default_assigned = _custom_up.strip() if _sel_up == "Other…" else _sel_up
+
         tracer_uploaded = st.file_uploader("Upload file Excel/CSV Tracer", type=["csv", "xlsx"], key="tracer_upload")
         if tracer_uploaded:
             user = current_user()
@@ -2055,40 +2016,12 @@ def page_supervisor():
                 if missing:
                     st.error(f"Kolom berikut tidak ditemukan di file: {missing}")
                 else:
-                    # If Assigned_To column not in file, let user pick assign mode then fill Assigned_To
+                    # If Assigned_To column not in file, require a default assignee and fill it
                     if 'Assigned_To' not in tracer_df.columns:
-                        st.subheader("Opsi Assign untuk File yang Diupload")
-                        # Build tracer options
-                        _user_rows_up = fetchall("SELECT COALESCE(full_name, name) AS full_name FROM users WHERE approved=1 ORDER BY COALESCE(full_name,name) ASC")
-                        tracer_opts = [r['full_name'] for r in _user_rows_up if r.get('full_name')]
-                        mode = st.radio("Pilih mode assign", ["Satu tracer", "Multi assign (Rata & Acak)"], horizontal=True, key="tr_up_assign_mode")
-                        if mode == "Satu tracer":
-                            assign_options = (tracer_opts if tracer_opts else []) + ["Other…"]
-                            sel_auto = st.selectbox("Pilih tracer", options=assign_options, key="tr_up_assign_to")
-                            if sel_auto == "Other…":
-                                custom_auto = st.text_input("Nama tracer", key="tr_up_assign_custom")
-                                picked = (custom_auto or "").strip()
-                            else:
-                                picked = sel_auto
-                            if not picked:
-                                st.warning("Isi/pilih tracer terlebih dahulu untuk melanjutkan import.")
-                                return
-                            tracer_df['Assigned_To'] = picked
-                        else:
-                            st.caption("Baris akan dibagi rata ke beberapa tracer.")
-                            selected_trs = st.multiselect("Pilih tracer (minimal 2)", options=tracer_opts, default=[], key="tr_up_multi_list")
-                            do_shuffle_up = st.checkbox("Acak urutan baris", value=True, key="tr_up_multi_shuffle")
-                            if not selected_trs or len(selected_trs) < 2:
-                                st.warning("Pilih minimal 2 tracer untuk multi assign.")
-                                return
-                            idxs = list(range(len(tracer_df)))
-                            if do_shuffle_up:
-                                import random as _r
-                                _r.shuffle(idxs)
-                            assigned_list = [None]*len(tracer_df)
-                            for i, row_idx in enumerate(idxs):
-                                assigned_list[row_idx] = selected_trs[i % len(selected_trs)]
-                            tracer_df['Assigned_To'] = assigned_list
+                        if not default_assigned:
+                            st.error("File tidak memiliki kolom 'Assigned_To'. Pilih/isi tracer default terlebih dahulu.")
+                            return
+                        tracer_df['Assigned_To'] = default_assigned
                     count = 0
                     insert_fields = tracer_fields + ["Assigned_To"]
                     for _, row in tracer_df.iterrows():
@@ -2108,54 +2041,6 @@ def page_supervisor():
                         pass
             except Exception as e:
                 st.error(f"Gagal membaca file: {e}")
-
-    # --- Agent Assigning Tab ---
-    with tabs[3]:
-        st.subheader("Agent Assigning")
-        st.caption("Supervisor dapat meng-assign Case ID, Debtor Name, dan Phone ke Agent. Agent akan melengkapi NIK.")
-
-        # Agent list (approved users with role Agent)
-        agents = fetchall("SELECT COALESCE(full_name, name) AS full_name FROM users WHERE approved=1 AND role='Agent' ORDER BY COALESCE(full_name,name) ASC")
-        agent_names = [a['full_name'] for a in agents if a.get('full_name')]
-        if not agent_names:
-            st.info("Belum ada user dengan role Agent yang disetujui.")
-        else:
-            with st.form("assign_agent_form"):
-                col1, col2 = st.columns(2)
-                with col1:
-                    case_id_in = st.text_input("Case ID", key="ag_case_id")
-                    phone_in = st.text_input("Phone Number", key="ag_phone")
-                with col2:
-                    debtor_in = st.text_input("User Name / Debtor Name", key="ag_debtor")
-                    agent_sel = st.selectbox("Pilih Agent", options=agent_names, key="ag_agent_sel")
-                submitted = st.form_submit_button("Assign ke Agent", type="primary")
-            if submitted:
-                if not case_id_in or not debtor_in or not phone_in or not agent_sel:
-                    st.warning("Lengkapi semua field sebelum assign.")
-                else:
-                    try:
-                        execute(
-                            "INSERT INTO agent_assignments (case_id, debtor_name, phone_number, agent_assigned) VALUES (?,?,?,?)",
-                            (case_id_in.strip(), debtor_in.strip(), phone_in.strip(), agent_sel)
-                        )
-                        # Audit log
-                        u = current_user()
-                        try:
-                            execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (u.get('id') if u else None, "AGENT_ASSIGN", f"Assign case {case_id_in} to agent {agent_sel}"))
-                        except Exception:
-                            pass
-                        st.success("Berhasil assign ke agent.")
-                    except Exception as e:
-                        st.error(f"Gagal assign: {e}")
-
-        st.markdown("---")
-        st.subheader("Daftar Assignment untuk Agent")
-        rows = fetchall("SELECT id, case_id, debtor_name, phone_number, nik, agent_assigned, status, created_at, updated_at FROM agent_assignments ORDER BY id DESC LIMIT 300")
-        if not rows:
-            st.info("Belum ada assignment agent.")
-        else:
-            df = pd.DataFrame(rows)
-            st.dataframe(df, use_container_width=True, hide_index=True)
 
     # --- Monitoring Tab (moved to first) end ---
 
