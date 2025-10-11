@@ -2656,7 +2656,7 @@ def page_supervisor():
         # Default assignee for upload rows (used when file has no Assigned_To)
         _user_rows_up = fetchall("SELECT COALESCE(full_name, name) AS full_name FROM users WHERE approved=1 AND role='Tracer' ORDER BY COALESCE(full_name,name) ASC")
         _tracer_names_up = [r['full_name'] for r in _user_rows_up if r.get('full_name')]
-        _assign_opts_up = ["(Unassigned)"] + (_tracer_names_up if _tracer_names_up else []) + ["Other…"]
+        _assign_opts_up = ["(Unassigned)"] + (_tracer_names_up if _tracer_names_up else [])
         col_up1, col_up2 = st.columns([2,1])
         with col_up1:
             _sel_up = st.selectbox("Default tracer untuk file (digunakan jika kolom Assigned_To tidak ada)", options=_assign_opts_up, key="tr_upload_default_sel")
