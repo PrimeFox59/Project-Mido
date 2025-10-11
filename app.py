@@ -437,8 +437,14 @@ def logout_user():
     st.session_state.page = "Authentication"
 
 def fetchall(query, params=()):
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA busy_timeout=10000;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+    except Exception:
+        pass
     cur = conn.cursor()
     cur.execute(query, params)
     rows = cur.fetchall()
@@ -446,8 +452,14 @@ def fetchall(query, params=()):
     return [dict(r) for r in rows]
 
 def fetchone(query, params=()):
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA busy_timeout=10000;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+    except Exception:
+        pass
     cur = conn.cursor()
     cur.execute(query, params)
     row = cur.fetchone()
@@ -455,8 +467,14 @@ def fetchone(query, params=()):
     return dict(row) if row else None
 
 def execute(query, params=()):
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA busy_timeout=10000;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+    except Exception:
+        pass
     cur = conn.cursor()
     cur.execute(query, params)
     conn.commit()
@@ -2695,59 +2713,75 @@ def page_supervisor():
                     insert_fields = ["TRC_Code"] + tracer_fields + ["Assigned_To"]
                     updated = 0
                     skipped = 0
-                    for _, row in tracer_df.iterrows():
+                    # Use single connection and transaction to avoid locks
+                    try:
+                        conn = sqlite3.connect(DB_PATH, timeout=30)
+                        conn.row_factory = sqlite3.Row
                         try:
-                            assignee = row.get('Assigned_To')
-                            trc_val = row.get('TRC_Code') if 'TRC_Code' in tracer_df.columns else None
-                            if not trc_val or str(trc_val).strip() == "":
-                                trc_val = _gen_trc_code(assignee)
-                            agr = (row.get('Agreement_No') or '').strip()
-                            if not agr:
-                                skipped += 1
-                                continue
-                            existing = fetchone("SELECT id, Assigned_To, COALESCE(TRC_Code,'') AS TRC_Code FROM assign_tracer WHERE Agreement_No=?", (agr,))
-                            if existing:
-                                if update_existing:
-                                    params = [
-                                        trc_val,
-                                        row.get('Debtor_Name'),
-                                        row.get('NIK_KTP'),
-                                        row.get('EMPLOYMENT_UPDATE'),
-                                        row.get('EMPLOYER'),
-                                        row.get('Debtor_Legal_Name'),
-                                        row.get('Employee_Name'),
-                                        row.get('Employee_ID_Number'),
-                                        row.get('Debtor_Relation_to_Employee'),
-                                        agr
-                                    ]
-                                    execute(
-                                        """
-                                        UPDATE assign_tracer SET
-                                            TRC_Code = COALESCE(NULLIF(TRC_Code,''), ?),
-                                            Debtor_Name = COALESCE(NULLIF(?,''), Debtor_Name),
-                                            NIK_KTP = COALESCE(NULLIF(?,''), NIK_KTP),
-                                            EMPLOYMENT_UPDATE = COALESCE(NULLIF(?,''), EMPLOYMENT_UPDATE),
-                                            EMPLOYER = COALESCE(NULLIF(?,''), EMPLOYER),
-                                            Debtor_Legal_Name = COALESCE(NULLIF(?,''), Debtor_Legal_Name),
-                                            Employee_Name = COALESCE(NULLIF(?,''), Employee_Name),
-                                            Employee_ID_Number = COALESCE(NULLIF(?,''), Employee_ID_Number),
-                                            Debtor_Relation_to_Employee = COALESCE(NULLIF(?,''), Debtor_Relation_to_Employee)
-                                        WHERE Agreement_No=?
-                                        """,
-                                        tuple(params)
-                                    )
-                                    updated += 1
-                                else:
+                            conn.execute("PRAGMA journal_mode=WAL;")
+                            conn.execute("PRAGMA busy_timeout=10000;")
+                            conn.execute("PRAGMA synchronous=NORMAL;")
+                        except Exception:
+                            pass
+                        cur = conn.cursor()
+                        for _, row in tracer_df.iterrows():
+                            try:
+                                assignee = row.get('Assigned_To')
+                                trc_val = row.get('TRC_Code') if 'TRC_Code' in tracer_df.columns else None
+                                if not trc_val or str(trc_val).strip() == "":
+                                    trc_val = _gen_trc_code(assignee)
+                                agr = (row.get('Agreement_No') or '').strip()
+                                if not agr:
                                     skipped += 1
-                            else:
-                                values = [trc_val] + [row.get(f) for f in tracer_fields] + [assignee]
-                                execute(
-                                    f"INSERT INTO assign_tracer ({','.join(insert_fields)}) VALUES ({','.join(['?' for _ in insert_fields])})",
-                                    tuple(values)
-                                )
-                                count += 1
-                        except Exception as e:
-                            st.warning(f"Baris gagal: {e}")
+                                    continue
+                                cur.execute("SELECT id, Assigned_To, COALESCE(TRC_Code,'') AS TRC_Code FROM assign_tracer WHERE Agreement_No=?", (agr,))
+                                existing = cur.fetchone()
+                                if existing:
+                                    if update_existing:
+                                        params = [
+                                            trc_val,
+                                            row.get('Debtor_Name'),
+                                            row.get('NIK_KTP'),
+                                            row.get('EMPLOYMENT_UPDATE'),
+                                            row.get('EMPLOYER'),
+                                            row.get('Debtor_Legal_Name'),
+                                            row.get('Employee_Name'),
+                                            row.get('Employee_ID_Number'),
+                                            row.get('Debtor_Relation_to_Employee'),
+                                            agr
+                                        ]
+                                        cur.execute(
+                                            """
+                                            UPDATE assign_tracer SET
+                                                TRC_Code = COALESCE(NULLIF(TRC_Code,''), ?),
+                                                Debtor_Name = COALESCE(NULLIF(?,''), Debtor_Name),
+                                                NIK_KTP = COALESCE(NULLIF(?,''), NIK_KTP),
+                                                EMPLOYMENT_UPDATE = COALESCE(NULLIF(?,''), EMPLOYMENT_UPDATE),
+                                                EMPLOYER = COALESCE(NULLIF(?,''), EMPLOYER),
+                                                Debtor_Legal_Name = COALESCE(NULLIF(?,''), Debtor_Legal_Name),
+                                                Employee_Name = COALESCE(NULLIF(?,''), Employee_Name),
+                                                Employee_ID_Number = COALESCE(NULLIF(?,''), Employee_ID_Number),
+                                                Debtor_Relation_to_Employee = COALESCE(NULLIF(?,''), Debtor_Relation_to_Employee)
+                                            WHERE Agreement_No=?
+                                            """,
+                                            tuple(params)
+                                        )
+                                        updated += 1
+                                    else:
+                                        skipped += 1
+                                else:
+                                    values = [trc_val] + [row.get(f) for f in tracer_fields] + [assignee]
+                                    cur.execute(
+                                        f"INSERT INTO assign_tracer ({','.join(insert_fields)}) VALUES ({','.join(['?' for _ in insert_fields])})",
+                                        tuple(values)
+                                    )
+                                    count += 1
+                            except Exception as e:
+                                st.warning(f"Baris gagal: {e}")
+                        conn.commit()
+                        conn.close()
+                    except Exception as e:
+                        st.error(f"Gagal memproses batch: {e}")
                     st.success(f"Selesai. Insert baru: {count}, Update: {updated}, Skip: {skipped}. Duplikat di file: {_dupes_dropped}.")
                     # Audit log tracer upload
                     try:
