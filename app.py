@@ -2545,7 +2545,7 @@ def page_supervisor():
 
             with st.form("multi_assign_form"):
                 selected_tracers = st.multiselect(
-                    "Pilih tracer (minimal 2)", options=tracer_names, default=[], key="multi_assign_tracers"
+                    "Pilih tracer (minimal 1)", options=tracer_names, default=[], key="multi_assign_tracers"
                 )
                 # Advanced options hidden by default
                 with st.expander("Opsi lanjutan", expanded=False):
@@ -2564,8 +2564,8 @@ def page_supervisor():
                 submitted = st.form_submit_button("Assign Sekarang", type="primary")
 
             if submitted:
-                if not selected_tracers or len(selected_tracers) < 2:
-                    st.warning("Pilih minimal 2 tracer.")
+                if not selected_tracers or len(selected_tracers) < 1:
+                    st.warning("Pilih minimal 1 tracer.")
                 else:
                     ids = [r['id'] for r in unassigned_rows]
                     try:
