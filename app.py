@@ -2621,6 +2621,33 @@ def page_supervisor():
         else:
             st.caption("Tidak ada baris yang perlu di-assign saat ini.")
 
+        # Optional: Unassign tool to prepare rows for assignment
+        st.markdown("---")
+        with st.expander("Unassign beberapa loan (opsional)"):
+            st.caption("Tempel daftar Agreement_No (satu per baris) untuk mengosongkan Assigned_To sehingga bisa di-assign ulang.")
+            text_ids = st.text_area("Agreement_No list", height=120, placeholder="Contoh:\n123456\n987654\n...")
+            if st.button("Unassign sekarang"):
+                ids = [s.strip() for s in (text_ids or "").splitlines() if s.strip()]
+                if not ids:
+                    st.warning("Masukkan minimal satu Agreement_No.")
+                else:
+                    try:
+                        conn = sqlite3.connect(DB_PATH, timeout=30)
+                        try:
+                            conn.execute("PRAGMA journal_mode=WAL;")
+                            conn.execute("PRAGMA busy_timeout=10000;")
+                            conn.execute("PRAGMA synchronous=NORMAL;")
+                        except Exception:
+                            pass
+                        cur = conn.cursor()
+                        cur.executemany("UPDATE assign_tracer SET Assigned_To='' WHERE Agreement_No=?", [(x,) for x in ids])
+                        conn.commit()
+                        conn.close()
+                        st.success(f"Berhasil unassign {len(ids)} loan. Silakan refresh atau klik Assign setelah ini.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Gagal unassign: {e}")
+
         # Base tracer fields from upload/form (TRC_Code will be generated if missing)
         tracer_fields = [
             "Agreement_No", "Debtor_Name", "NIK_KTP", "EMPLOYMENT_UPDATE", "EMPLOYER", "Debtor_Legal_Name", "Employee_Name", "Employee_ID_Number", "Debtor_Relation_to_Employee"
@@ -2629,7 +2656,7 @@ def page_supervisor():
         # Default assignee for upload rows (used when file has no Assigned_To)
         _user_rows_up = fetchall("SELECT COALESCE(full_name, name) AS full_name FROM users WHERE approved=1 ORDER BY COALESCE(full_name,name) ASC")
         _tracer_names_up = [r['full_name'] for r in _user_rows_up if r.get('full_name')]
-        _assign_opts_up = (_tracer_names_up if _tracer_names_up else []) + ["Other…"]
+        _assign_opts_up = ["(Unassigned)"] + (_tracer_names_up if _tracer_names_up else []) + ["Other…"]
         col_up1, col_up2 = st.columns([2,1])
         with col_up1:
             _sel_up = st.selectbox("Default tracer untuk file (digunakan jika kolom Assigned_To tidak ada)", options=_assign_opts_up, key="tr_upload_default_sel")
@@ -2685,12 +2712,15 @@ def page_supervisor():
                 if missing:
                     st.error(f"Kolom berikut tidak ditemukan di file: {missing}")
                 else:
-                    # If Assigned_To column not in file, require a default assignee and fill it
+                    # If Assigned_To column not in file, use default selection; allow Unassigned
                     if 'Assigned_To' not in tracer_df.columns:
-                        if not default_assigned:
-                            st.error("File tidak memiliki kolom 'Assigned_To'. Pilih/isi tracer default terlebih dahulu.")
+                        if default_assigned == "(Unassigned)":
+                            tracer_df['Assigned_To'] = ""
+                        elif not default_assigned:
+                            st.error("File tidak memiliki kolom 'Assigned_To'. Pilih tracer default atau pilih '(Unassigned)'.")
                             return
-                        tracer_df['Assigned_To'] = default_assigned
+                        else:
+                            tracer_df['Assigned_To'] = default_assigned
                     # Clean Agreement_No and drop empty/duplicates inside the file
                     try:
                         tracer_df['Agreement_No'] = tracer_df['Agreement_No'].astype(str).str.strip()
