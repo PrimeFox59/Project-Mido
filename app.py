@@ -214,6 +214,89 @@ def init_db():
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
     """)
+    # --- New foundational tables ---
+    # 1) Agent assignments (one agent per Agreement_No)
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS agent_assignments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            Agreement_No TEXT,
+            Agent_Assigned_To TEXT,
+            assigned_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            assigned_by TEXT,
+            active INTEGER DEFAULT 1
+        );
+        """
+    )
+    # Unique per loan for active assignment (soft-enforced via app; hard unique per Agreement_No)
+    try:
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_assignments_unique ON agent_assignments(Agreement_No)")
+    except Exception:
+        pass
+    # 2) Trace results (touch logs/status)
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS trace_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            Agreement_No TEXT,
+            tracer TEXT,
+            status TEXT,
+            notes TEXT,
+            touch_type TEXT,
+            party TEXT,
+            touched_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            created_by TEXT
+        );
+        """
+    )
+    try:
+        c.execute("CREATE INDEX IF NOT EXISTS idx_trace_results_agreement ON trace_results(Agreement_No)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_trace_results_touched ON trace_results(touched_at)")
+    except Exception:
+        pass
+    # 3) Masked company dictionary
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS masked_companies (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            masked_name TEXT,
+            canonical_name TEXT,
+            mapping_notes TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+    )
+    try:
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_masked_companies_masked ON masked_companies(masked_name)")
+    except Exception:
+        pass
+    # 4) Payments recap (daily uploads)
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS payments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            Agreement_No TEXT,
+            paid_amount REAL,
+            paid_date TEXT,
+            status TEXT,
+            source_file TEXT,
+            uploaded_by TEXT,
+            uploaded_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+    )
+    try:
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_unique ON payments(Agreement_No, paid_date)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_payments_date ON payments(paid_date)")
+    except Exception:
+        pass
+    # ensure assign_tracer has optional masked company name field
+    try:
+        cols = [r['name'] for r in c.execute("PRAGMA table_info(assign_tracer)").fetchall()]
+        if 'Masked_Company_Name' not in cols:
+            c.execute("ALTER TABLE assign_tracer ADD COLUMN Masked_Company_Name TEXT")
+    except Exception:
+        pass
     conn.commit()
 
     # Seed default settings (idempotent)
@@ -916,6 +999,88 @@ def page_auth():
         if st.button("Login", use_container_width=True):
             st.session_state.login_status_message = {"type": None, "text": ""}
             
+        st.markdown("---")
+        st.subheader("📘 Masked Company Dictionary")
+        with st.form("masked_company_form"):
+            mc_masked = st.text_input("Masked Company Name")
+            mc_canon = st.text_input("Canonical Name (Nama Perusahaan Sebenarnya)")
+            mc_notes = st.text_input("Catatan (opsional)")
+            sub_mc = st.form_submit_button("Simpan/Perbarui")
+            if sub_mc and mc_masked.strip():
+                try:
+                    execute(
+                        "INSERT INTO masked_companies (masked_name, canonical_name, mapping_notes) VALUES (?,?,?)\n                         ON CONFLICT(masked_name) DO UPDATE SET canonical_name=excluded.canonical_name, mapping_notes=excluded.mapping_notes",
+                        (mc_masked.strip(), mc_canon.strip() if mc_canon else None, mc_notes.strip() if mc_notes else None)
+                    )
+                    st.success("Dictionary tersimpan.")
+                except Exception as e:
+                    st.error(f"Gagal menyimpan: {e}")
+        # list recent 20 mappings
+        mc_rows = fetchall("SELECT masked_name, canonical_name, mapping_notes, created_at FROM masked_companies ORDER BY id DESC LIMIT 20")
+        if mc_rows:
+            st.dataframe(pd.DataFrame(mc_rows), use_container_width=True, hide_index=True)
+
+        st.markdown("---")
+        st.subheader("💸 Upload Payment Recap (CSV/XLSX)")
+        st.caption("Kolom minimal: Agreement_No, paid_amount, paid_date, status. Duplikat (Agreement_No, paid_date) akan diabaikan.")
+        pay_file = st.file_uploader("Pilih file payment recap", type=["csv", "xlsx"], key="pay_recap")
+        if pay_file is not None:
+            try:
+                if pay_file.name.lower().endswith(".csv"):
+                    dfp = pd.read_csv(pay_file)
+                else:
+                    try:
+                        import openpyxl  # noqa: F401
+                        dfp = pd.read_excel(pay_file, engine="openpyxl")
+                    except Exception:
+                        dfp = pd.read_excel(pay_file)
+                # normalize columns
+                dfp.columns = [str(c).strip() for c in dfp.columns]
+                required_cols = {"Agreement_No", "paid_amount", "paid_date", "status"}
+                if not required_cols.issubset(set(dfp.columns)):
+                    st.error(f"Kolom wajib tidak lengkap. Ditemukan: {list(dfp.columns)}")
+                else:
+                    u = current_user() or {}
+                    uploader = (u.get('full_name') or u.get('login_id') or '-')
+                    inserted = 0; skipped = 0
+                    for _, r in dfp.iterrows():
+                        agr = str(r.get("Agreement_No") or "").strip()
+                        amt = r.get("paid_amount")
+                        pdt = str(r.get("paid_date") or "").strip()
+                        stt = str(r.get("status") or "").strip()
+                        if not agr or not pdt:
+                            skipped += 1
+                            continue
+                        try:
+                            # Try parse date to ISO (yyyy-mm-dd)
+                            try:
+                                if isinstance(r.get("paid_date"), (datetime,)):
+                                    pdt_iso = r.get("paid_date").date().isoformat()
+                                else:
+                                    pdt_iso = pd.to_datetime(pdt, errors='coerce').date().isoformat()
+                            except Exception:
+                                pdt_iso = pdt
+                            # amount numeric
+                            try:
+                                amt_num = float(amt) if amt is not None and str(amt).strip() != '' else 0.0
+                            except Exception:
+                                amt_num = 0.0
+                            # upsert by (Agreement_No, paid_date)
+                            execute(
+                                "INSERT OR IGNORE INTO payments (Agreement_No, paid_amount, paid_date, status, source_file, uploaded_by) VALUES (?,?,?,?,?,?)",
+                                (agr, amt_num, pdt_iso, stt, pay_file.name, uploader)
+                            )
+                            # If already exists and status/amount differ, update
+                            execute(
+                                "UPDATE payments SET paid_amount=COALESCE(?, paid_amount), status=COALESCE(?, status), source_file=? WHERE Agreement_No=? AND paid_date=?",
+                                (amt_num, stt or None, pay_file.name, agr, pdt_iso)
+                            )
+                            inserted += 1
+                        except Exception:
+                            skipped += 1
+                    st.success(f"Selesai. Baris diproses: {inserted}. Dilewati: {skipped}.")
+            except Exception as e:
+                st.error(f"Gagal membaca file: {e}")
             # Login by Id (login_id); fallback to email for backward compatibility
             row = fetchone("SELECT * FROM users WHERE login_id=?", (login_id,))
             if not row and login_id:
