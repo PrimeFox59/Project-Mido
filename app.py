@@ -2375,10 +2375,51 @@ def page_supervisor():
                     st.error(f"Kolom berikut tidak ditemukan di file: {missing}")
                     st.caption("Tips: header akan dicocokkan tanpa spasi/kapital dan perbaikan typo umum (thrid->third). Pastikan nama kolom sesuai template.")
                 else:
+                    # Helper to coerce values into SQLite-friendly types
+                    def _to_sql_value(v):
+                        try:
+                            import pandas as _pd
+                            import numpy as _np
+                        except Exception:
+                            _pd = None; _np = None
+                        # Treat NaN/NaT as NULL
+                        try:
+                            if _pd is not None and (_pd.isna(v) if not isinstance(v, str) else False):
+                                return None
+                        except Exception:
+                            pass
+                        # Pandas Timestamp -> ISO string
+                        try:
+                            if _pd is not None and isinstance(v, _pd.Timestamp):
+                                # keep space separator for readability
+                                return v.to_pydatetime().isoformat(sep=' ')
+                        except Exception:
+                            pass
+                        # Python datetime/date -> ISO string
+                        from datetime import datetime as _dt, date as _d
+                        if isinstance(v, _dt):
+                            return v.isoformat(sep=' ')
+                        if isinstance(v, _d):
+                            return v.isoformat()
+                        # Numpy scalars -> Python scalars
+                        try:
+                            if hasattr(v, 'item'):
+                                return v.item()
+                        except Exception:
+                            pass
+                        return v
+
                     count = 0
+                    placeholders = ','.join(['?' for _ in field_names])
                     for _, row in df.iterrows():
                         try:
-                            execute(f"INSERT INTO supervisor_data ({','.join(field_names)}) VALUES ({','.join(['?' for _ in field_names])})", tuple(row[f] for f in field_names))
+                            vals = []
+                            for f in field_names:
+                                vals.append(_to_sql_value(row.get(f)))
+                            execute(
+                                f"INSERT INTO supervisor_data ({','.join(field_names)}) VALUES ({placeholders})",
+                                tuple(vals)
+                            )
                             count += 1
                         except Exception as e:
                             st.warning(f"Baris gagal: {e}")
