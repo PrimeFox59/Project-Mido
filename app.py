@@ -2202,7 +2202,7 @@ def page_supervisor():
     require_roles(("Superuser", "Supervisor"))
     st.title("Supervisor Menu")
     # Monitoring first so it's the default view
-    tabs = st.tabs(["Monitoring", "Input", "Trace Assigning", "Agent Assigning", "Trace Results"])
+    tabs = st.tabs(["Monitoring", "Input", "Trace Assigning", "Agent Assigning", "Trace Results", "Enriched & Lookup"])
 
     # --- Monitoring Tab ---
     with tabs[0]:
@@ -2262,89 +2262,7 @@ def page_supervisor():
             df = pd.DataFrame(rows)
             st.dataframe(df, use_container_width=True, hide_index=True)
 
-        with st.expander("Enriched Monitoring (Loan-centric)"):
-            st.caption("Gabungan assign_tracer + agent_assignments + latest trace status + payments")
-            fcol1, fcol2, fcol3, fcol4 = st.columns(4)
-            with fcol1:
-                f_ag = st.text_input("Agreement_No contains", key="en_ag")
-            with fcol2:
-                f_nik = st.text_input("NIK contains", key="en_nik")
-            with fcol3:
-                tracers = [r['full_name'] for r in fetchall("SELECT COALESCE(full_name,name) AS full_name FROM users WHERE approved=1 ORDER BY 1") if r.get('full_name')]
-                f_tracer = st.selectbox("Tracer", options=["(All)"] + tracers, index=0, key="en_tracer")
-            with fcol4:
-                agents = [r['full_name'] for r in fetchall("SELECT COALESCE(full_name,name) AS full_name FROM users WHERE approved=1 ORDER BY 1") if r.get('full_name')]
-                f_agent = st.selectbox("Agent", options=["(All)"] + agents, index=0, key="en_agent")
-
-            fcol5, fcol6, fcol7 = st.columns(3)
-            with fcol5:
-                f_status = st.multiselect("Latest Status", ["TRACED", "EMAILED", "RTP", "PAYING", "UNREACHABLE", "OTHER"], key="en_status")
-            with fcol6:
-                f_pay = st.selectbox("Payment", ["All", "With Payment", "Without Payment"], index=0, key="en_pay")
-            with fcol7:
-                ad_from = st.date_input("Assigned From", value=None, key="en_ad_from")
-                ad_to = st.date_input("Assigned To", value=None, key="en_ad_to")
-
-            q_en = (
-                "SELECT a.Agreement_No, a.Debtor_Name, a.NIK_KTP, a.Assigned_To AS tracer, "
-                "a.Masked_Company_Name, ag.Agent_Assigned_To AS agent, ag.assigned_at, "
-                "ts.status AS latest_status, ts.touched_at AS status_time, "
-                "COALESCE(p.amount, 0) AS paid_amount_total, p.last_paid_date "
-                "FROM assign_tracer a "
-                "LEFT JOIN agent_assignments ag ON ag.Agreement_No = a.Agreement_No "
-                "LEFT JOIN ( "
-                "  SELECT tr1.Agreement_No, tr1.status, tr1.touched_at "
-                "  FROM trace_results tr1 "
-                "  JOIN (SELECT Agreement_No, MAX(touched_at) mt FROM trace_results GROUP BY Agreement_No) t2 "
-                "    ON t2.Agreement_No = tr1.Agreement_No AND t2.mt = tr1.touched_at "
-                ") ts ON ts.Agreement_No = a.Agreement_No "
-                "LEFT JOIN ( "
-                "  SELECT Agreement_No, SUM(paid_amount) AS amount, MAX(paid_date) AS last_paid_date "
-                "  FROM payments GROUP BY Agreement_No "
-                ") p ON p.Agreement_No = a.Agreement_No "
-                "WHERE 1=1"
-            )
-            p_en = []
-            if f_ag:
-                q_en += " AND a.Agreement_No LIKE ?"; p_en.append(f"%{f_ag}%")
-            if f_nik:
-                q_en += " AND COALESCE(a.NIK_KTP,'') LIKE ?"; p_en.append(f"%{f_nik}%")
-            if f_tracer and f_tracer != "(All)":
-                q_en += " AND COALESCE(a.Assigned_To,'') = ?"; p_en.append(f_tracer)
-            if f_agent and f_agent != "(All)":
-                q_en += " AND COALESCE(ag.Agent_Assigned_To,'') = ?"; p_en.append(f_agent)
-            if f_status:
-                placeholders = ",".join(["?"] * len(f_status))
-                q_en += f" AND COALESCE(ts.status,'') IN ({placeholders})"; p_en.extend(f_status)
-            if f_pay == "With Payment":
-                q_en += " AND COALESCE(p.amount,0) > 0"
-            elif f_pay == "Without Payment":
-                q_en += " AND COALESCE(p.amount,0) = 0"
-            if ad_from:
-                q_en += " AND DATE(ag.assigned_at) >= DATE(?)"; p_en.append(str(ad_from))
-            if ad_to:
-                q_en += " AND DATE(ag.assigned_at) <= DATE(?)"; p_en.append(str(ad_to))
-            q_en += " ORDER BY ag.assigned_at DESC, a.id DESC LIMIT 500"
-
-            rows_en = fetchall(q_en, tuple(p_en))
-            if rows_en:
-                st.dataframe(pd.DataFrame(rows_en), use_container_width=True, hide_index=True)
-            else:
-                st.info("Tidak ada data sesuai filter.")
-        st.markdown("---")
-        st.subheader("🔎 Lookup NIK Across Loans")
-        nik_q = st.text_input("Cari NIK (global)", key="monitor_nik_lookup")
-        if nik_q:
-            nik_rows = fetchall(
-                "SELECT Agreement_No, Debtor_Name, NIK_KTP, Assigned_To FROM assign_tracer WHERE NIK_KTP LIKE ? ORDER BY id DESC LIMIT 200",
-                (f"%{nik_q}%",)
-            )
-            if nik_rows:
-                df_n = pd.DataFrame(nik_rows)
-                st.caption(f"Ditemukan {len(df_n)} loan untuk NIK mengandung '{nik_q}'")
-                st.dataframe(df_n, use_container_width=True, hide_index=True)
-            else:
-                st.info("Tidak ditemukan loan untuk NIK tersebut.")
+        # Enriched Monitoring & Lookup NIK dipindahkan ke tab khusus "Enriched & Lookup"
 
     # --- Input Tab ---
     with tabs[1]:
@@ -3048,6 +2966,95 @@ def page_supervisor():
 
     # --- Monitoring Tab (moved to first) end ---
 
+    # --- Enriched & Lookup Tab ---
+    with tabs[5]:
+        st.title("Enriched Monitoring & Lookup")
+        left, right = st.columns([2, 1])
+        with left:
+            st.subheader("Enriched Monitoring (Loan-centric)")
+            st.caption("Gabungan assign_tracer + agent_assignments + latest trace status + payments")
+            fcol1, fcol2, fcol3, fcol4 = st.columns(4)
+            with fcol1:
+                f_ag = st.text_input("Agreement_No contains", key="en_ag")
+            with fcol2:
+                f_nik = st.text_input("NIK contains", key="en_nik")
+            with fcol3:
+                tracers = [r['full_name'] for r in fetchall("SELECT COALESCE(full_name,name) AS full_name FROM users WHERE approved=1 ORDER BY 1") if r.get('full_name')]
+                f_tracer = st.selectbox("Tracer", options=["(All)"] + tracers, index=0, key="en_tracer")
+            with fcol4:
+                agents = [r['full_name'] for r in fetchall("SELECT COALESCE(full_name,name) AS full_name FROM users WHERE approved=1 ORDER BY 1") if r.get('full_name')]
+                f_agent = st.selectbox("Agent", options=["(All)"] + agents, index=0, key="en_agent")
+
+            fcol5, fcol6, fcol7 = st.columns(3)
+            with fcol5:
+                f_status = st.multiselect("Latest Status", ["TRACED", "EMAILED", "RTP", "PAYING", "UNREACHABLE", "OTHER"], key="en_status")
+            with fcol6:
+                f_pay = st.selectbox("Payment", ["All", "With Payment", "Without Payment"], index=0, key="en_pay")
+            with fcol7:
+                ad_from = st.date_input("Assigned From", value=None, key="en_ad_from")
+                ad_to = st.date_input("Assigned To", value=None, key="en_ad_to")
+
+            q_en = (
+                "SELECT a.Agreement_No, a.Debtor_Name, a.NIK_KTP, a.Assigned_To AS tracer, "
+                "a.Masked_Company_Name, ag.Agent_Assigned_To AS agent, ag.assigned_at, "
+                "ts.status AS latest_status, ts.touched_at AS status_time, "
+                "COALESCE(p.amount, 0) AS paid_amount_total, p.last_paid_date "
+                "FROM assign_tracer a "
+                "LEFT JOIN agent_assignments ag ON ag.Agreement_No = a.Agreement_No "
+                "LEFT JOIN ( "
+                "  SELECT tr1.Agreement_No, tr1.status, tr1.touched_at "
+                "  FROM trace_results tr1 "
+                "  JOIN (SELECT Agreement_No, MAX(touched_at) mt FROM trace_results GROUP BY Agreement_No) t2 "
+                "    ON t2.Agreement_No = tr1.Agreement_No AND t2.mt = tr1.touched_at "
+                ") ts ON ts.Agreement_No = a.Agreement_No "
+                "LEFT JOIN ( "
+                "  SELECT Agreement_No, SUM(paid_amount) AS amount, MAX(paid_date) AS last_paid_date "
+                "  FROM payments GROUP BY Agreement_No "
+                ") p ON p.Agreement_No = a.Agreement_No "
+                "WHERE 1=1"
+            )
+            p_en = []
+            if f_ag:
+                q_en += " AND a.Agreement_No LIKE ?"; p_en.append(f"%{f_ag}%")
+            if f_nik:
+                q_en += " AND COALESCE(a.NIK_KTP,'') LIKE ?"; p_en.append(f"%{f_nik}%")
+            if f_tracer and f_tracer != "(All)":
+                q_en += " AND COALESCE(a.Assigned_To,'') = ?"; p_en.append(f_tracer)
+            if f_agent and f_agent != "(All)":
+                q_en += " AND COALESCE(ag.Agent_Assigned_To,'') = ?"; p_en.append(f_agent)
+            if f_status:
+                placeholders = ",".join(["?"] * len(f_status))
+                q_en += f" AND COALESCE(ts.status,'') IN ({placeholders})"; p_en.extend(f_status)
+            if f_pay == "With Payment":
+                q_en += " AND COALESCE(p.amount,0) > 0"
+            elif f_pay == "Without Payment":
+                q_en += " AND COALESCE(p.amount,0) = 0"
+            if ad_from:
+                q_en += " AND DATE(ag.assigned_at) >= DATE(?)"; p_en.append(str(ad_from))
+            if ad_to:
+                q_en += " AND DATE(ag.assigned_at) <= DATE(?)"; p_en.append(str(ad_to))
+            q_en += " ORDER BY ag.assigned_at DESC, a.id DESC LIMIT 500"
+
+            rows_en = fetchall(q_en, tuple(p_en))
+            if rows_en:
+                st.dataframe(pd.DataFrame(rows_en), use_container_width=True, hide_index=True)
+            else:
+                st.info("Tidak ada data sesuai filter.")
+
+        with right:
+            st.subheader("🔎 Lookup NIK Across Loans")
+            nik_q = st.text_input("Cari NIK (global)", key="monitor_nik_lookup")
+            if nik_q:
+                nik_rows = fetchall(
+                    "SELECT Agreement_No, Debtor_Name, NIK_KTP, Assigned_To FROM assign_tracer WHERE NIK_KTP LIKE ? ORDER BY id DESC LIMIT 200",
+                    (f"%{nik_q}%",)
+                )
+                if nik_rows:
+                    df_n = pd.DataFrame(nik_rows)
+                    st.caption(f"Ditemukan {len(df_n)} loan untuk NIK mengandung '{nik_q}'")
+                    st.dataframe(df_n, use_container_width=True, hide_index=True)
+                else:
+                    st.info("Tidak ditemukan loan untuk NIK tersebut.")
 def page_tracer():
     require_roles(("Superuser", "Tracer"))
     u = current_user()
