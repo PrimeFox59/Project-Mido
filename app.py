@@ -2564,11 +2564,26 @@ def page_supervisor():
                             assignee = selected_tracers[idx % len(selected_tracers)]
                             updates.append((assignee, rec_id))
 
-                        # Commit updates in a single transaction
+                        # Commit updates in a single transaction (and generate TRC_Code if missing)
                         try:
                             conn = sqlite3.connect(DB_PATH)
                             cur = conn.cursor()
+                            # First, set assignees
                             cur.executemany("UPDATE assign_tracer SET Assigned_To=? WHERE id=?", updates)
+                            # Generate TRC codes for rows where TRC_Code is NULL/empty
+                            def _gen_trc_code(assignee: str) -> str:
+                                try:
+                                    first = (assignee or "").strip().split(" ")[0]
+                                    suffix = first[:3].upper()
+                                except Exception:
+                                    suffix = "XXX"
+                                ymd = datetime.now().strftime('%y%m%d')
+                                return f"TRC-{ymd}-{suffix}"
+                            updates_trc = [(_gen_trc_code(assignee), rec_id) for assignee, rec_id in updates]
+                            cur.executemany(
+                                "UPDATE assign_tracer SET TRC_Code = COALESCE(NULLIF(TRC_Code, ''), ?) WHERE id=?",
+                                updates_trc
+                            )
                             conn.commit()
                             conn.close()
                         except Exception as e:
@@ -2588,9 +2603,10 @@ def page_supervisor():
         else:
             st.caption("Tidak ada baris yang perlu di-assign saat ini.")
 
+        # Base tracer fields from upload/form (TRC_Code will be generated if missing)
         tracer_fields = [
-            "TRC_Code", "Agreement_No", "Debtor_Name", "NIK_KTP", "EMPLOYMENT_UPDATE", "EMPLOYER", "Debtor_Legal_Name", "Employee_Name", "Employee_ID_Number", "Debtor_Relation_to_Employee"
-        ]  # base fields from upload/form
+            "Agreement_No", "Debtor_Name", "NIK_KTP", "EMPLOYMENT_UPDATE", "EMPLOYER", "Debtor_Legal_Name", "Employee_Name", "Employee_ID_Number", "Debtor_Relation_to_Employee"
+        ]
 
         # Default assignee for upload rows (used when file has no Assigned_To)
         _user_rows_up = fetchall("SELECT COALESCE(full_name, name) AS full_name FROM users WHERE approved=1 ORDER BY COALESCE(full_name,name) ASC")
@@ -2619,8 +2635,28 @@ def page_supervisor():
                     s = re.sub(r"\s+", " ", s)
                     s = s.replace(" ", "_")
                     return s.lower()
-                expected_map_tr = { _norm_col2(k): k for k in (tracer_fields + ["Assigned_To"]) }
-                tracer_df.columns = [ expected_map_tr.get(_norm_col2(c), c) for c in tracer_df.columns ]
+                # Header aliasing for friendlier uploads
+                alias_map = {
+                    "agreement_no.": "Agreement_No",
+                    "agreement_no": "Agreement_No",
+                    "agreement_number": "Agreement_No",
+                    "virtual_account_number": "Agreement_No",
+                    "tracer": "Assigned_To",
+                    "assigned_to": "Assigned_To",
+                    "trace_date": "Trace_Date",  # optional, currently unused
+                    "trc_code": "TRC_Code",
+                }
+                expected_map_tr = { _norm_col2(k): k for k in (tracer_fields + ["Assigned_To", "TRC_Code"]) }
+                new_cols = []
+                for c in tracer_df.columns:
+                    key = _norm_col2(c)
+                    # map via alias first, then to expected target
+                    if key in alias_map:
+                        target = alias_map[key]
+                    else:
+                        target = expected_map_tr.get(key, c)
+                    new_cols.append(target)
+                tracer_df.columns = new_cols
                 # Validate base required columns
                 missing = [f for f in tracer_fields if f not in tracer_df.columns]
                 if missing:
@@ -2633,12 +2669,26 @@ def page_supervisor():
                             return
                         tracer_df['Assigned_To'] = default_assigned
                     count = 0
-                    insert_fields = tracer_fields + ["Assigned_To"]
+                    # Insert with TRC_Code generated from assignee at upload time
+                    def _gen_trc_code(assignee: str) -> str:
+                        try:
+                            first = (assignee or "").strip().split(" ")[0]
+                            suffix = first[:3].upper()
+                        except Exception:
+                            suffix = "XXX"
+                        ymd = datetime.now().strftime('%y%m%d')
+                        return f"TRC-{ymd}-{suffix}"
+                    insert_fields = ["TRC_Code"] + tracer_fields + ["Assigned_To"]
                     for _, row in tracer_df.iterrows():
                         try:
+                            assignee = row.get('Assigned_To')
+                            trc_val = row.get('TRC_Code') if 'TRC_Code' in tracer_df.columns else None
+                            if not trc_val or str(trc_val).strip() == "":
+                                trc_val = _gen_trc_code(assignee)
+                            values = [trc_val] + [row.get(f) for f in tracer_fields] + [assignee]
                             execute(
                                 f"INSERT INTO assign_tracer ({','.join(insert_fields)}) VALUES ({','.join(['?' for _ in insert_fields])})",
-                                tuple(row[f] for f in insert_fields)
+                                tuple(values)
                             )
                             count += 1
                         except Exception as e:
