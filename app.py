@@ -2540,7 +2540,7 @@ def page_supervisor():
 
         if unassigned_count > 0:
             # Build tracer options in this scope (approved users)
-            _user_rows_ma = fetchall("SELECT COALESCE(full_name, name) AS full_name FROM users WHERE approved=1 ORDER BY COALESCE(full_name,name) ASC")
+            _user_rows_ma = fetchall("SELECT COALESCE(full_name, name) AS full_name FROM users WHERE approved=1 AND role='Tracer' ORDER BY COALESCE(full_name,name) ASC")
             tracer_names = [r['full_name'] for r in _user_rows_ma if r.get('full_name')]
 
             with st.form("multi_assign_form"):
@@ -2654,7 +2654,7 @@ def page_supervisor():
         ]
 
         # Default assignee for upload rows (used when file has no Assigned_To)
-        _user_rows_up = fetchall("SELECT COALESCE(full_name, name) AS full_name FROM users WHERE approved=1 ORDER BY COALESCE(full_name,name) ASC")
+        _user_rows_up = fetchall("SELECT COALESCE(full_name, name) AS full_name FROM users WHERE approved=1 AND role='Tracer' ORDER BY COALESCE(full_name,name) ASC")
         _tracer_names_up = [r['full_name'] for r in _user_rows_up if r.get('full_name')]
         _assign_opts_up = ["(Unassigned)"] + (_tracer_names_up if _tracer_names_up else []) + ["Other…"]
         col_up1, col_up2 = st.columns([2,1])
