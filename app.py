@@ -64,6 +64,16 @@ def init_db():
     except Exception:
         # Safe to ignore if already exists or PRAGMA failed
         pass
+    # Try to enforce unique Agreement_No for tracer assignment (one tracer per loan)
+    try:
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_assign_tracer_unique_agreement ON assign_tracer(Agreement_No)")
+    except Exception:
+        # Will fail if duplicates already exist; app-level guards will still apply
+        pass
+    try:
+        c.execute("CREATE INDEX IF NOT EXISTS idx_assign_tracer_assigned_to ON assign_tracer(Assigned_To)")
+    except Exception:
+        pass
     # users
     # Fresh schema includes login_id (Id for login) and full_name; keep legacy 'name' for backward-compat.
     c.execute("""
@@ -288,6 +298,26 @@ def init_db():
     try:
         c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_unique ON payments(Agreement_No, paid_date)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_payments_date ON payments(paid_date)")
+    except Exception:
+        pass
+    # 5) Agent results (handling outcome fields)
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS agent_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            Agreement_No TEXT,
+            agent TEXT,
+            agent_status TEXT,
+            agent_ptp_amount REAL,
+            agent_ptp_date TEXT,
+            agent_notes TEXT,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+    )
+    try:
+        c.execute("CREATE INDEX IF NOT EXISTS idx_agent_results_agreement ON agent_results(Agreement_No)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_agent_results_agent ON agent_results(agent)")
     except Exception:
         pass
     # ensure assign_tracer has optional masked company name field
@@ -932,6 +962,7 @@ ALL_ROLES = ("Superuser", "Supervisor", "Tracer", "Agent")
 
 # Central menu/page configuration and allowed roles
 MENU_ITEMS = [
+    {"label": "Dashboard",  "page": "Dashboard", "roles": ALL_ROLES, "primary": True},
     {"label": "Supervisor", "page": "Supervisor", "roles": ("Superuser", "Supervisor"), "primary": False},
     {"label": "Tracer",     "page": "Tracer", "roles": ("Superuser", "Supervisor", "Tracer"), "primary": False},
     {"label": "Agent",      "page": "Agent", "roles": ("Superuser", "Supervisor","Agent"), "primary": False},
@@ -995,92 +1026,10 @@ def page_auth():
         st.subheader("Login")
         login_id = st.text_input("Id", key="login_id")
         pw = st.text_input("Password", type="password", key="login_pw")
-        
-        if st.button("Login", use_container_width=True):
-            st.session_state.login_status_message = {"type": None, "text": ""}
-            
-        st.markdown("---")
-        st.subheader("📘 Masked Company Dictionary")
-        with st.form("masked_company_form"):
-            mc_masked = st.text_input("Masked Company Name")
-            mc_canon = st.text_input("Canonical Name (Nama Perusahaan Sebenarnya)")
-            mc_notes = st.text_input("Catatan (opsional)")
-            sub_mc = st.form_submit_button("Simpan/Perbarui")
-            if sub_mc and mc_masked.strip():
-                try:
-                    execute(
-                        "INSERT INTO masked_companies (masked_name, canonical_name, mapping_notes) VALUES (?,?,?)\n                         ON CONFLICT(masked_name) DO UPDATE SET canonical_name=excluded.canonical_name, mapping_notes=excluded.mapping_notes",
-                        (mc_masked.strip(), mc_canon.strip() if mc_canon else None, mc_notes.strip() if mc_notes else None)
-                    )
-                    st.success("Dictionary tersimpan.")
-                except Exception as e:
-                    st.error(f"Gagal menyimpan: {e}")
-        # list recent 20 mappings
-        mc_rows = fetchall("SELECT masked_name, canonical_name, mapping_notes, created_at FROM masked_companies ORDER BY id DESC LIMIT 20")
-        if mc_rows:
-            st.dataframe(pd.DataFrame(mc_rows), use_container_width=True, hide_index=True)
+        login_clicked = st.button("Login", use_container_width=True)
 
-        st.markdown("---")
-        st.subheader("💸 Upload Payment Recap (CSV/XLSX)")
-        st.caption("Kolom minimal: Agreement_No, paid_amount, paid_date, status. Duplikat (Agreement_No, paid_date) akan diabaikan.")
-        pay_file = st.file_uploader("Pilih file payment recap", type=["csv", "xlsx"], key="pay_recap")
-        if pay_file is not None:
-            try:
-                if pay_file.name.lower().endswith(".csv"):
-                    dfp = pd.read_csv(pay_file)
-                else:
-                    try:
-                        import openpyxl  # noqa: F401
-                        dfp = pd.read_excel(pay_file, engine="openpyxl")
-                    except Exception:
-                        dfp = pd.read_excel(pay_file)
-                # normalize columns
-                dfp.columns = [str(c).strip() for c in dfp.columns]
-                required_cols = {"Agreement_No", "paid_amount", "paid_date", "status"}
-                if not required_cols.issubset(set(dfp.columns)):
-                    st.error(f"Kolom wajib tidak lengkap. Ditemukan: {list(dfp.columns)}")
-                else:
-                    u = current_user() or {}
-                    uploader = (u.get('full_name') or u.get('login_id') or '-')
-                    inserted = 0; skipped = 0
-                    for _, r in dfp.iterrows():
-                        agr = str(r.get("Agreement_No") or "").strip()
-                        amt = r.get("paid_amount")
-                        pdt = str(r.get("paid_date") or "").strip()
-                        stt = str(r.get("status") or "").strip()
-                        if not agr or not pdt:
-                            skipped += 1
-                            continue
-                        try:
-                            # Try parse date to ISO (yyyy-mm-dd)
-                            try:
-                                if isinstance(r.get("paid_date"), (datetime,)):
-                                    pdt_iso = r.get("paid_date").date().isoformat()
-                                else:
-                                    pdt_iso = pd.to_datetime(pdt, errors='coerce').date().isoformat()
-                            except Exception:
-                                pdt_iso = pdt
-                            # amount numeric
-                            try:
-                                amt_num = float(amt) if amt is not None and str(amt).strip() != '' else 0.0
-                            except Exception:
-                                amt_num = 0.0
-                            # upsert by (Agreement_No, paid_date)
-                            execute(
-                                "INSERT OR IGNORE INTO payments (Agreement_No, paid_amount, paid_date, status, source_file, uploaded_by) VALUES (?,?,?,?,?,?)",
-                                (agr, amt_num, pdt_iso, stt, pay_file.name, uploader)
-                            )
-                            # If already exists and status/amount differ, update
-                            execute(
-                                "UPDATE payments SET paid_amount=COALESCE(?, paid_amount), status=COALESCE(?, status), source_file=? WHERE Agreement_No=? AND paid_date=?",
-                                (amt_num, stt or None, pay_file.name, agr, pdt_iso)
-                            )
-                            inserted += 1
-                        except Exception:
-                            skipped += 1
-                    st.success(f"Selesai. Baris diproses: {inserted}. Dilewati: {skipped}.")
-            except Exception as e:
-                st.error(f"Gagal membaca file: {e}")
+        if login_clicked:
+            st.session_state.login_status_message = {"type": None, "text": ""}
             # Login by Id (login_id); fallback to email for backward compatibility
             row = fetchone("SELECT * FROM users WHERE login_id=?", (login_id,))
             if not row and login_id:
@@ -1093,8 +1042,11 @@ def page_auth():
                 elif verify_password(pw, row['password_hash']):
                     login_user(row)
                     # Catat audit trail login
-                    detail_id = row.get('login_id') or row.get('email') or '-'
-                    execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (row['id'], "LOGIN", f"User {detail_id} login."))
+                    try:
+                        detail_id = row.get('login_id') or row.get('email') or '-'
+                        execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (row['id'], "LOGIN", f"User {detail_id} login."))
+                    except Exception:
+                        pass
                     # Backup on successful login (best-effort)
                     try:
                         if "service_account" in st.secrets:
@@ -1117,8 +1069,8 @@ def page_auth():
                             'time': datetime.utcnow().isoformat()
                         }
                     st.session_state.login_status_message = {"type": "success", "text": "Login berhasil. Mengalihkan..."}
-                    st.session_state.page = "Dashboard" 
-                    st.rerun() 
+                    st.session_state.page = "Dashboard"
+                    st.rerun()
                 else:
                     st.session_state.login_status_message = {"type": "error", "text": "Password salah."}
 
@@ -1823,6 +1775,9 @@ def main():
     if st.session_state.page == "Supervisor":
         page_supervisor()
         return
+    if st.session_state.page == "Dashboard":
+        page_dashboard()
+        return
     if st.session_state.page == "Tracer":
         page_tracer()
         return
@@ -1882,8 +1837,284 @@ def page_audit_log():
 # -------------------------
 def page_agent():
     require_roles(("Superuser", "Agent"))
+    u = current_user()
+    agent_name = (u.get('full_name') or u.get('login_id') or '-') if u else '-'
     st.title("Agent Menu")
-    st.info("Coming soon")
+    # Simple PTP notif today
+    today_str = date.today().isoformat()
+    ptp_today = fetchone("SELECT COUNT(*) c FROM agent_results WHERE agent=? AND DATE(agent_ptp_date)=?", (agent_name, today_str))
+    count_ptp = ptp_today.get('c') if ptp_today else 0
+    if count_ptp and count_ptp > 0:
+        st.success(f"Hai {agent_name}, hari ini kamu ada {count_ptp} PTP. Klik di bawah untuk lihat daftar.")
+
+    # Agent's assigned loans
+    rows = fetchall("SELECT Agreement_No, assigned_at FROM agent_assignments WHERE Agent_Assigned_To=? ORDER BY assigned_at DESC LIMIT 500", (agent_name,))
+    if not rows:
+        st.info("Belum ada assignment untuk Anda.")
+        return
+
+    # Optional quick search
+    q_ag = st.text_input("Cari Agreement_No (Loan Number)", key="ag_q_no")
+    filtered = [r for r in rows if (not q_ag or q_ag.strip() in str(r.get('Agreement_No') or ''))]
+
+    st.subheader("Assignments")
+    st.dataframe(pd.DataFrame(filtered), use_container_width=True, hide_index=True)
+
+    # Select a loan to open detail
+    sel = st.selectbox("Pilih Loan Number", [r['Agreement_No'] for r in filtered], key="ag_sel")
+    if not sel:
+        return
+
+    st.markdown("---")
+    st.subheader(f"Loan Details: {sel}")
+    # Fetch minimal debtor info (if present) from assign_tracer and supervisor_data
+    info = fetchone("SELECT Debtor_Name, NIK_KTP FROM assign_tracer WHERE Agreement_No=?", (sel,)) or {}
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.text_input("Debtor Name", value=info.get('Debtor_Name',''), disabled=True)
+    with c2:
+        st.text_input("NIK", value=info.get('NIK_KTP',''), disabled=True)
+    with c3:
+        # Attempt to show phone from supervisor_data (Phone_Number_1)
+        sup = fetchone("SELECT Phone_Number_1 FROM supervisor_data WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=? LIMIT 1", (sel, sel, sel))
+        phone = (sup.get('Phone_Number_1') if sup else '') or ''
+        st.text_input("Phone", value=phone, disabled=True)
+    # Click-to-call link (Microsip) if phone exists
+    if phone:
+        st.markdown(f"[Click to call]({'tel:'+str(phone)})  |  [SIP]({'sip:'+str(phone)})")
+
+    st.markdown("---")
+    st.subheader("Hasil Penanganan (D–G)")
+    # Store/update agent results
+    last = fetchone("SELECT * FROM agent_results WHERE Agreement_No=? AND agent=? ORDER BY id DESC LIMIT 1", (sel, agent_name)) or {}
+    with st.form("agent_result_form"):
+        ag_status = st.selectbox("Status", ["", "PTP", "NO ANSWER", "RTP", "PAID", "FOLLOW UP", "OTHER"], index=0)
+        colx, coly = st.columns(2)
+        with colx:
+            ptp_amount = st.number_input("PTP Amount", min_value=0.0, value=float(last.get('agent_ptp_amount') or 0.0), step=10000.0)
+        with coly:
+            ptp_date = st.date_input("PTP Date", value=date.today())
+        notes = st.text_area("Catatan", value=last.get('agent_notes') or "")
+        sub = st.form_submit_button("Simpan")
+        if sub:
+            try:
+                execute(
+                    "INSERT INTO agent_results (Agreement_No, agent, agent_status, agent_ptp_amount, agent_ptp_date, agent_notes) VALUES (?,?,?,?,?,?)",
+                    (sel, agent_name, ag_status or None, float(ptp_amount or 0), (ptp_date.isoformat() if ptp_date else None), (notes.strip() if notes else None))
+                )
+                st.success("Tersimpan.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Gagal menyimpan: {e}")
+
+    st.markdown("---")
+    st.subheader("Email Templates")
+    st.caption("Pilih template lalu salin konten untuk dikirim via email/WA.")
+    tpl = st.selectbox("Kategori", ["COMPANY", "RELATIVES", "PERSONAL"], index=0)
+    debtor = info.get('Debtor_Name','') if isinstance(info, dict) else ''
+    nik = info.get('NIK_KTP','') if isinstance(info, dict) else ''
+    if tpl == "COMPANY":
+        body = f"Yth. HRD,\n\nMohon bantuan verifikasi karyawan atas nama {debtor} (NIK {nik}) terkait kewajiban pembayaran pinjaman. Harap hubungi kami.\n\nTerima kasih."
+    elif tpl == "RELATIVES":
+        body = f"Halo, kami menghubungi keluarga dari {debtor} (NIK {nik}) untuk menyampaikan informasi penting terkait kewajiban pembayaran. Mohon bantu sampaikan agar yang bersangkutan segera menghubungi kami. Terima kasih."
+    else:
+        body = f"Halo {debtor},\n\nKami mengingatkan adanya kewajiban pembayaran yang belum diselesaikan. Mohon segera menghubungi kami untuk penyelesaian. Terima kasih."
+    st.text_area("Preview", value=body, height=140)
+
+# -------------------------
+# Dashboard Page (basic MVP)
+# -------------------------
+def page_dashboard():
+    require_roles(ALL_ROLES)
+    st.title("🏠 Dashboard")
+    # Period filter (month/week)
+    colp1, colp2, colp3 = st.columns([1,1,2])
+    with colp1:
+        period = st.selectbox("Periode", ["Minggu Ini", "Bulan Ini", "30 Hari Terakhir"]) 
+    with colp2:
+        today = date.today()
+        if period == "Minggu Ini":
+            start_date = today - timedelta(days=today.weekday())
+        elif period == "Bulan Ini":
+            start_date = today.replace(day=1)
+        else:
+            start_date = today - timedelta(days=30)
+    st.caption(f"Rentang: {start_date.isoformat()} s/d {today.isoformat()}")
+
+    # STATUS counts: latest status per Agreement_No within selected period
+    rows = fetchall(
+        """
+        SELECT tr.status FROM trace_results tr
+        JOIN (
+            SELECT Agreement_No, MAX(touched_at) AS mt
+            FROM trace_results
+            WHERE DATE(touched_at) >= ?
+            GROUP BY Agreement_No
+        ) t ON t.Agreement_No = tr.Agreement_No AND t.mt = tr.touched_at
+        """,
+        (start_date.isoformat(),)
+    )
+    status_counts = {}
+    for r in rows:
+        s = (r.get('status') or '').strip().upper()
+        if not s:
+            continue
+        status_counts[s] = status_counts.get(s, 0) + 1
+    colA, colB, colC, colD = st.columns(4)
+    with colA:
+        st.metric("TRACED", status_counts.get("TRACED", 0))
+    with colB:
+        st.metric("EMAILED", status_counts.get("EMAILED", 0))
+    with colC:
+        st.metric("RTP", status_counts.get("RTP", 0))
+    with colD:
+        st.metric("PAYING", status_counts.get("PAYING", 0))
+
+    st.markdown("---")
+    # TRC Code (Tracer performance): count touches per tracer in period
+    tr_rows = fetchall("SELECT tracer, COUNT(*) as c FROM trace_results WHERE DATE(touched_at) >= ? GROUP BY tracer ORDER BY c DESC LIMIT 20", (start_date.isoformat(),))
+    if tr_rows:
+        df_tr = pd.DataFrame(tr_rows)
+        chart_tr = alt.Chart(df_tr).mark_bar().encode(
+            x=alt.X('c:Q', title='Touches'),
+            y=alt.Y('tracer:N', sort='-x', title='Tracer')
+        ).properties(title='Performa Tracer (Touches)', height=360)
+        st.altair_chart(chart_tr, use_container_width=True)
+    else:
+        st.info("Belum ada data tracer pada periode ini.")
+
+    # Agent Assigned performance: count loans assigned per agent in period
+    ag_rows = fetchall("SELECT Agent_Assigned_To as agent, COUNT(*) as c FROM agent_assignments WHERE DATE(assigned_at) >= ? GROUP BY Agent_Assigned_To ORDER BY c DESC LIMIT 20", (start_date.isoformat(),))
+    if ag_rows:
+        df_ag = pd.DataFrame(ag_rows)
+        chart_ag = alt.Chart(df_ag).mark_bar(color='#1E88E5').encode(
+            x=alt.X('c:Q', title='Loans Assigned'),
+            y=alt.Y('agent:N', sort='-x', title='Agent')
+        ).properties(title='Performa Agent (Assignment)', height=360)
+        st.altair_chart(chart_ag, use_container_width=True)
+    else:
+        st.info("Belum ada assignment agent pada periode ini.")
+
+    st.markdown("---")
+    # Latest Agent Status per Loan (within period)
+    agent_rows = fetchall(
+        """
+        SELECT ar.agent_status
+        FROM agent_results ar
+        JOIN (
+            SELECT Agreement_No, MAX(updated_at) AS mu
+            FROM agent_results
+            WHERE DATE(updated_at) >= ?
+            GROUP BY Agreement_No
+        ) t ON t.Agreement_No = ar.Agreement_No AND t.mu = ar.updated_at
+        """,
+        (start_date.isoformat(),)
+    )
+    if agent_rows:
+        agg = {}
+        for r in agent_rows:
+            s = (r.get('agent_status') or '').upper().strip()
+            if not s:
+                continue
+            agg[s] = agg.get(s, 0) + 1
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.metric("PTP (latest)", agg.get('PTP', 0))
+        with c2:
+            st.metric("PAID (latest)", agg.get('PAID', 0))
+        with c3:
+            st.metric("RTP (latest)", agg.get('RTP', 0))
+        with c4:
+            st.metric("FOLLOW UP (latest)", agg.get('FOLLOW UP', 0))
+    else:
+        st.info("Belum ada status agent pada periode ini.")
+
+    # Status-by-Agent (latest per loan)
+    agent_matrix = fetchall(
+        """
+        SELECT COALESCE(ar.agent,'(Unknown)') AS agent, COALESCE(ar.agent_status,'') AS status, COUNT(*) AS c
+        FROM agent_results ar
+        JOIN (
+            SELECT Agreement_No, MAX(updated_at) AS mu
+            FROM agent_results
+            WHERE DATE(updated_at) >= ?
+            GROUP BY Agreement_No
+        ) t ON t.Agreement_No = ar.Agreement_No AND t.mu = ar.updated_at
+        GROUP BY COALESCE(ar.agent,'(Unknown)'), COALESCE(ar.agent_status,'')
+        ORDER BY c DESC
+        LIMIT 200
+        """,
+        (start_date.isoformat(),)
+    )
+    if agent_matrix:
+        dfm = pd.DataFrame(agent_matrix)
+        chart_m = alt.Chart(dfm).mark_bar().encode(
+            x=alt.X('c:Q', title='Count'),
+            y=alt.Y('agent:N', sort='-x', title='Agent'),
+            color=alt.Color('status:N', title='Status'),
+            tooltip=['agent:N', 'status:N', 'c:Q']
+        ).properties(title='Latest Agent Status by Agent', height=360)
+        st.altair_chart(chart_m, use_container_width=True)
+    else:
+        st.info("Belum ada matriks status agent pada periode ini.")
+
+    st.markdown("---")
+    # Paid Amount trend (from payments)
+    pay_rows = fetchall("SELECT paid_date, SUM(paid_amount) as amount FROM payments WHERE DATE(paid_date) >= ? GROUP BY paid_date ORDER BY paid_date", (start_date.isoformat(),))
+    if pay_rows:
+        dfp = pd.DataFrame(pay_rows)
+        line = alt.Chart(dfp).mark_line(point=True).encode(
+            x=alt.X('paid_date:T', title='Tanggal'),
+            y=alt.Y('amount:Q', title='Paid Amount'),
+            tooltip=['paid_date:T','amount:Q']
+        ).properties(title='Paid Amount Harian')
+        st.altair_chart(line, use_container_width=True)
+    else:
+        st.info("Belum ada Payment Recap pada periode ini.")
+
+    st.markdown("---")
+    # Saving by Agent (sum of payments joined to agent assignments)
+    sav_rows = fetchall(
+        """
+        SELECT COALESCE(aa.Agent_Assigned_To, '(Unassigned)') AS agent, COALESCE(SUM(p.paid_amount),0) AS amount
+        FROM payments p
+        LEFT JOIN agent_assignments aa ON aa.Agreement_No = p.Agreement_No
+        WHERE DATE(p.paid_date) >= ?
+        GROUP BY COALESCE(aa.Agent_Assigned_To, '(Unassigned)')
+        ORDER BY amount DESC
+        LIMIT 20
+        """,
+        (start_date.isoformat(),)
+    )
+    if sav_rows:
+        df_sav = pd.DataFrame(sav_rows)
+        bar = alt.Chart(df_sav).mark_bar(color='#43A047').encode(
+            x=alt.X('amount:Q', title='Paid Amount'),
+            y=alt.Y('agent:N', sort='-x', title='Agent'),
+            tooltip=['agent:N','amount:Q']
+        ).properties(title='Saving by Agent', height=360)
+        st.altair_chart(bar, use_container_width=True)
+    else:
+        st.info("Belum ada saving pada periode ini.")
+
+    st.markdown("---")
+    # Saving comparison (MoM to date) — simple total comparison
+    this_month_start = today.replace(day=1)
+    last_month_end = this_month_start - timedelta(days=1)
+    last_month_start = last_month_end.replace(day=1)
+    # up to same day-of-month if exists
+    day_to = min(today.day, (last_month_end.day if hasattr(last_month_end, 'day') else today.day))
+    this_to_date = fetchone("SELECT COALESCE(SUM(paid_amount),0) v FROM payments WHERE DATE(paid_date) BETWEEN ? AND ?", (this_month_start.isoformat(), today.isoformat()))['v']
+    last_to_date_end = last_month_start + timedelta(days=day_to-1)
+    last_to_date = fetchone("SELECT COALESCE(SUM(paid_amount),0) v FROM payments WHERE DATE(paid_date) BETWEEN ? AND ?", (last_month_start.isoformat(), last_to_date_end.isoformat()))['v']
+    colS1, colS2, colS3 = st.columns(3)
+    with colS1:
+        st.metric("This Month (to-date)", f"{this_to_date:,.0f}")
+    with colS2:
+        st.metric("Last Month (same days)", f"{last_to_date:,.0f}")
+    with colS3:
+        delta_val = (this_to_date - last_to_date)
+        st.metric("Delta", f"{delta_val:,.0f}", delta=f"{delta_val:,.0f}")
 
 # -------------------------
 # User Setting Page
@@ -1953,7 +2184,7 @@ def page_supervisor():
     require_roles(("Superuser", "Supervisor"))
     st.title("Supervisor Menu")
     # Monitoring first so it's the default view
-    tabs = st.tabs(["Monitoring", "Input", "Trace Assigning"])
+    tabs = st.tabs(["Monitoring", "Input", "Trace Assigning", "Agent Assigning", "Trace Results"])
 
     # --- Monitoring Tab ---
     with tabs[0]:
@@ -2012,6 +2243,90 @@ def page_supervisor():
         else:
             df = pd.DataFrame(rows)
             st.dataframe(df, use_container_width=True, hide_index=True)
+
+        with st.expander("Enriched Monitoring (Loan-centric)"):
+            st.caption("Gabungan assign_tracer + agent_assignments + latest trace status + payments")
+            fcol1, fcol2, fcol3, fcol4 = st.columns(4)
+            with fcol1:
+                f_ag = st.text_input("Agreement_No contains", key="en_ag")
+            with fcol2:
+                f_nik = st.text_input("NIK contains", key="en_nik")
+            with fcol3:
+                tracers = [r['full_name'] for r in fetchall("SELECT COALESCE(full_name,name) AS full_name FROM users WHERE approved=1 ORDER BY 1") if r.get('full_name')]
+                f_tracer = st.selectbox("Tracer", options=["(All)"] + tracers, index=0, key="en_tracer")
+            with fcol4:
+                agents = [r['full_name'] for r in fetchall("SELECT COALESCE(full_name,name) AS full_name FROM users WHERE approved=1 ORDER BY 1") if r.get('full_name')]
+                f_agent = st.selectbox("Agent", options=["(All)"] + agents, index=0, key="en_agent")
+
+            fcol5, fcol6, fcol7 = st.columns(3)
+            with fcol5:
+                f_status = st.multiselect("Latest Status", ["TRACED", "EMAILED", "RTP", "PAYING", "UNREACHABLE", "OTHER"], key="en_status")
+            with fcol6:
+                f_pay = st.selectbox("Payment", ["All", "With Payment", "Without Payment"], index=0, key="en_pay")
+            with fcol7:
+                ad_from = st.date_input("Assigned From", value=None, key="en_ad_from")
+                ad_to = st.date_input("Assigned To", value=None, key="en_ad_to")
+
+            q_en = (
+                "SELECT a.Agreement_No, a.Debtor_Name, a.NIK_KTP, a.Assigned_To AS tracer, "
+                "a.Masked_Company_Name, ag.Agent_Assigned_To AS agent, ag.assigned_at, "
+                "ts.status AS latest_status, ts.touched_at AS status_time, "
+                "COALESCE(p.amount, 0) AS paid_amount_total, p.last_paid_date "
+                "FROM assign_tracer a "
+                "LEFT JOIN agent_assignments ag ON ag.Agreement_No = a.Agreement_No "
+                "LEFT JOIN ( "
+                "  SELECT tr1.Agreement_No, tr1.status, tr1.touched_at "
+                "  FROM trace_results tr1 "
+                "  JOIN (SELECT Agreement_No, MAX(touched_at) mt FROM trace_results GROUP BY Agreement_No) t2 "
+                "    ON t2.Agreement_No = tr1.Agreement_No AND t2.mt = tr1.touched_at "
+                ") ts ON ts.Agreement_No = a.Agreement_No "
+                "LEFT JOIN ( "
+                "  SELECT Agreement_No, SUM(paid_amount) AS amount, MAX(paid_date) AS last_paid_date "
+                "  FROM payments GROUP BY Agreement_No "
+                ") p ON p.Agreement_No = a.Agreement_No "
+                "WHERE 1=1"
+            )
+            p_en = []
+            if f_ag:
+                q_en += " AND a.Agreement_No LIKE ?"; p_en.append(f"%{f_ag}%")
+            if f_nik:
+                q_en += " AND COALESCE(a.NIK_KTP,'') LIKE ?"; p_en.append(f"%{f_nik}%")
+            if f_tracer and f_tracer != "(All)":
+                q_en += " AND COALESCE(a.Assigned_To,'') = ?"; p_en.append(f_tracer)
+            if f_agent and f_agent != "(All)":
+                q_en += " AND COALESCE(ag.Agent_Assigned_To,'') = ?"; p_en.append(f_agent)
+            if f_status:
+                placeholders = ",".join(["?"] * len(f_status))
+                q_en += f" AND COALESCE(ts.status,'') IN ({placeholders})"; p_en.extend(f_status)
+            if f_pay == "With Payment":
+                q_en += " AND COALESCE(p.amount,0) > 0"
+            elif f_pay == "Without Payment":
+                q_en += " AND COALESCE(p.amount,0) = 0"
+            if ad_from:
+                q_en += " AND DATE(ag.assigned_at) >= DATE(?)"; p_en.append(str(ad_from))
+            if ad_to:
+                q_en += " AND DATE(ag.assigned_at) <= DATE(?)"; p_en.append(str(ad_to))
+            q_en += " ORDER BY ag.assigned_at DESC, a.id DESC LIMIT 500"
+
+            rows_en = fetchall(q_en, tuple(p_en))
+            if rows_en:
+                st.dataframe(pd.DataFrame(rows_en), use_container_width=True, hide_index=True)
+            else:
+                st.info("Tidak ada data sesuai filter.")
+        st.markdown("---")
+        st.subheader("🔎 Lookup NIK Across Loans")
+        nik_q = st.text_input("Cari NIK (global)", key="monitor_nik_lookup")
+        if nik_q:
+            nik_rows = fetchall(
+                "SELECT Agreement_No, Debtor_Name, NIK_KTP, Assigned_To FROM assign_tracer WHERE NIK_KTP LIKE ? ORDER BY id DESC LIMIT 200",
+                (f"%{nik_q}%",)
+            )
+            if nik_rows:
+                df_n = pd.DataFrame(nik_rows)
+                st.caption(f"Ditemukan {len(df_n)} loan untuk NIK mengandung '{nik_q}'")
+                st.dataframe(df_n, use_container_width=True, hide_index=True)
+            else:
+                st.info("Tidak ditemukan loan untuk NIK tersebut.")
 
     # --- Input Tab ---
     with tabs[1]:
@@ -2073,6 +2388,89 @@ def page_supervisor():
                         execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (user.get('id') if user else None, "UPLOAD_SUPERVISOR", f"Uploaded supervisor data: {count} rows from '{uploaded.name}'"))
                     except Exception:
                         pass
+            except Exception as e:
+                st.error(f"Gagal membaca file: {e}")
+
+        st.markdown("---")
+        st.subheader("📘 Masked Company Dictionary")
+        with st.form("masked_company_form_supervisor"):
+            mc_masked = st.text_input("Masked Company Name", key="mc_masked_supervisor")
+            mc_canon = st.text_input("Canonical Name (Nama Perusahaan Sebenarnya)", key="mc_canon_supervisor")
+            mc_notes = st.text_input("Catatan (opsional)", key="mc_notes_supervisor")
+            sub_mc = st.form_submit_button("Simpan/Perbarui")
+            if sub_mc and mc_masked.strip():
+                try:
+                    execute(
+                        "INSERT INTO masked_companies (masked_name, canonical_name, mapping_notes) VALUES (?,?,?)\n                         ON CONFLICT(masked_name) DO UPDATE SET canonical_name=excluded.canonical_name, mapping_notes=excluded.mapping_notes",
+                        (mc_masked.strip(), mc_canon.strip() if mc_canon else None, mc_notes.strip() if mc_notes else None)
+                    )
+                    st.success("Dictionary tersimpan.")
+                except Exception as e:
+                    st.error(f"Gagal menyimpan: {e}")
+        # list recent 20 mappings
+        mc_rows = fetchall("SELECT masked_name, canonical_name, mapping_notes, created_at FROM masked_companies ORDER BY id DESC LIMIT 20")
+        if mc_rows:
+            st.dataframe(pd.DataFrame(mc_rows), use_container_width=True, hide_index=True)
+
+        st.markdown("---")
+        st.subheader("💸 Upload Payment Recap (CSV/XLSX)")
+        st.caption("Kolom minimal: Agreement_No, paid_amount, paid_date, status. Duplikat (Agreement_No, paid_date) akan diabaikan.")
+        pay_file = st.file_uploader("Pilih file payment recap", type=["csv", "xlsx"], key="pay_recap_supervisor")
+        if pay_file is not None:
+            try:
+                if pay_file.name.lower().endswith(".csv"):
+                    dfp = pd.read_csv(pay_file)
+                else:
+                    try:
+                        import openpyxl  # noqa: F401
+                        dfp = pd.read_excel(pay_file, engine="openpyxl")
+                    except Exception:
+                        dfp = pd.read_excel(pay_file)
+                # normalize columns
+                dfp.columns = [str(c).strip() for c in dfp.columns]
+                required_cols = {"Agreement_No", "paid_amount", "paid_date", "status"}
+                if not required_cols.issubset(set(dfp.columns)):
+                    st.error(f"Kolom wajib tidak lengkap. Ditemukan: {list(dfp.columns)}")
+                else:
+                    u = current_user() or {}
+                    uploader = (u.get('full_name') or u.get('login_id') or '-')
+                    inserted = 0; skipped = 0
+                    for _, r in dfp.iterrows():
+                        agr = str(r.get("Agreement_No") or "").strip()
+                        amt = r.get("paid_amount")
+                        pdt = str(r.get("paid_date") or "").strip()
+                        stt = str(r.get("status") or "").strip()
+                        if not agr or not pdt:
+                            skipped += 1
+                            continue
+                        try:
+                            # Try parse date to ISO (yyyy-mm-dd)
+                            try:
+                                if isinstance(r.get("paid_date"), (datetime,)):
+                                    pdt_iso = r.get("paid_date").date().isoformat()
+                                else:
+                                    pdt_iso = pd.to_datetime(pdt, errors='coerce').date().isoformat()
+                            except Exception:
+                                pdt_iso = pdt
+                            # amount numeric
+                            try:
+                                amt_num = float(amt) if amt is not None and str(amt).strip() != '' else 0.0
+                            except Exception:
+                                amt_num = 0.0
+                            # upsert by (Agreement_No, paid_date)
+                            execute(
+                                "INSERT OR IGNORE INTO payments (Agreement_No, paid_amount, paid_date, status, source_file, uploaded_by) VALUES (?,?,?,?,?,?)",
+                                (agr, amt_num, pdt_iso, stt, pay_file.name, uploader)
+                            )
+                            # If already exists and status/amount differ, update
+                            execute(
+                                "UPDATE payments SET paid_amount=COALESCE(?, paid_amount), status=COALESCE(?, status), source_file=? WHERE Agreement_No=? AND paid_date=?",
+                                (amt_num, stt or None, pay_file.name, agr, pdt_iso)
+                            )
+                            inserted += 1
+                        except Exception:
+                            skipped += 1
+                    st.success(f"Selesai. Baris diproses: {inserted}. Dilewati: {skipped}.")
             except Exception as e:
                 st.error(f"Gagal membaca file: {e}")
 
@@ -2213,6 +2611,231 @@ def page_supervisor():
             except Exception as e:
                 st.error(f"Gagal membaca file: {e}")
 
+    # --- Agent Assigning Tab ---
+    with tabs[3]:
+        st.subheader("Assign ke Agent (Round-robin)")
+        # Determine unassigned agreements from assign_tracer
+        base_unassigned = fetchall(
+            """
+            SELECT a.Agreement_No, a.Assigned_To AS tracer, a.Masked_Company_Name
+            FROM assign_tracer a
+            LEFT JOIN agent_assignments ag ON ag.Agreement_No = a.Agreement_No
+            WHERE IFNULL(a.Agreement_No,'')<>'' AND ag.Agreement_No IS NULL
+            ORDER BY a.id DESC
+            """
+        )
+        st.caption(f"Belum ter-assign ke Agent: {len(base_unassigned)} loan")
+
+        # Filters
+        f1, f2, f3 = st.columns(3)
+        with f1:
+            # agent candidates (approved users, role Agent preferred)
+            agent_rows = fetchall("SELECT COALESCE(full_name,name) AS full_name, role FROM users WHERE approved=1 ORDER BY COALESCE(full_name,name)")
+            agent_names = [r['full_name'] for r in agent_rows if r.get('full_name') and (r.get('role') in ("Agent", "Superuser", "Supervisor"))]
+            selected_agents = st.multiselect("Pilih agent (>=2)", options=agent_names, default=[])
+        with f2:
+            filter_tracer = st.text_input("Filter by Tracer (opsional)")
+        with f3:
+            filter_mask = st.text_input("Filter by Masked Company (opsional)")
+
+        # Build filtered list
+        loans = []
+        for r in base_unassigned:
+            if filter_tracer and filter_tracer.strip().lower() not in (r.get('tracer') or '').lower():
+                continue
+            if filter_mask and filter_mask.strip().lower() not in (r.get('Masked_Company_Name') or '').lower():
+                continue
+            loans.append(r['Agreement_No'])
+
+        cset1, cset2 = st.columns(2)
+        with cset1:
+            limit_n = st.number_input("Jumlah yang akan di-assign (0=semua)", min_value=0, value=min(len(loans), 100), step=1)
+        with cset2:
+            do_shuffle = st.checkbox("Acak urutan loan", value=True)
+
+        if selected_agents:
+            import math as _math
+            per_est = _math.ceil((len(loans) if (limit_n == 0) else min(limit_n, len(loans))) / max(len(selected_agents), 1))
+            st.caption(f"Perkiraan: ~{per_est} loan per agent")
+
+        # Load saved next offset if any
+        try:
+            saved_off = int(get_setting('agent_rr_next_start', '0') or '0')
+        except Exception:
+            saved_off = 0
+        rr1, rr2 = st.columns(2)
+        with rr1:
+            start_offset = st.number_input("Mulai dari agen ke- (offset)", min_value=0, value=int(saved_off), step=1, key="agent_rr_offset")
+        with rr2:
+            remember_idx = st.checkbox("Ingat offset berikutnya (auto resume)", value=False, key="agent_rr_remember")
+            st.caption(f"Offset tersimpan saat ini: {saved_off}")
+            if st.button("Hapus offset tersimpan"):
+                try:
+                    set_setting('agent_rr_next_start', '0')
+                    st.rerun()
+                except Exception:
+                    pass
+
+        if st.button("Assign ke Agent Sekarang", type="primary"):
+            if not selected_agents or len(selected_agents) < 2:
+                st.warning("Pilih minimal 2 agent.")
+            elif not loans:
+                st.info("Tidak ada loan memenuhi filter.")
+            else:
+                try:
+                    ids = list(loans)
+                    if do_shuffle:
+                        import random
+                        random.shuffle(ids)
+                    if limit_n and limit_n > 0:
+                        ids = ids[: min(len(ids), int(limit_n))]
+                    # Build inserts round-robin
+                    ins_rows = []
+                    u = current_user() or {}
+                    by = (u.get('full_name') or u.get('login_id') or '-')
+                    n_agents = max(len(selected_agents), 1)
+                    offset = int(start_offset) % n_agents
+                    for i, agr in enumerate(ids):
+                        agent_to = selected_agents[(i + offset) % n_agents]
+                        ins_rows.append((agr, agent_to, by))
+                    try:
+                        conn = sqlite3.connect(DB_PATH)
+                        cur = conn.cursor()
+                        cur.executemany("INSERT OR IGNORE INTO agent_assignments (Agreement_No, Agent_Assigned_To, assigned_by) VALUES (?,?,?)", ins_rows)
+                        conn.commit()
+                        conn.close()
+                    except Exception as e:
+                        st.error(f"Gagal menyimpan assign agent: {e}")
+                    else:
+                        st.success(f"Berhasil assign {len(ins_rows)} loan ke {len(selected_agents)} agent.")
+                        # Audit
+                        try:
+                            execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (u.get('id') if u else None, "AGENT_ASSIGN", f"Assign {len(ins_rows)} loans to {', '.join(selected_agents)}"))
+                        except Exception:
+                            pass
+                        # Auto-remember next offset globally
+                        if remember_idx and n_agents > 0:
+                            try:
+                                next_offset = (offset + len(ins_rows)) % n_agents
+                                set_setting('agent_rr_next_start', str(next_offset))
+                                st.caption(f"Offset berikutnya disimpan: {next_offset}")
+                            except Exception:
+                                pass
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"Gagal assign: {e}")
+
+        st.markdown("---")
+        st.subheader("Upload Agent Assignments (CSV/XLSX)")
+        st.caption("Kolom: Agreement_No, Agent_Assigned_To. Duplikat Agreement_No akan diabaikan.")
+        f = st.file_uploader("Pilih file", type=["csv", "xlsx"], key="agent_assign_upload")
+        if f is not None:
+            try:
+                if f.name.lower().endswith('.csv'):
+                    dfa = pd.read_csv(f)
+                else:
+                    try:
+                        import openpyxl  # noqa: F401
+                        dfa = pd.read_excel(f, engine='openpyxl')
+                    except Exception:
+                        dfa = pd.read_excel(f)
+                dfa.columns = [str(c).strip() for c in dfa.columns]
+                req = {"Agreement_No", "Agent_Assigned_To"}
+                if not req.issubset(set(dfa.columns)):
+                    st.error(f"Kolom wajib tidak lengkap. Ditemukan: {list(dfa.columns)}")
+                else:
+                    ok = 0; skip = 0
+                    u = current_user() or {}
+                    by = (u.get('full_name') or u.get('login_id') or '-')
+                    for _, r in dfa.iterrows():
+                        agr = str(r.get('Agreement_No') or '').strip()
+                        agt = str(r.get('Agent_Assigned_To') or '').strip()
+                        if not agr or not agt:
+                            skip += 1
+                            continue
+                        try:
+                            execute("INSERT OR IGNORE INTO agent_assignments (Agreement_No, Agent_Assigned_To, assigned_by) VALUES (?,?,?)", (agr, agt, by))
+                            ok += 1
+                        except Exception:
+                            skip += 1
+                    st.success(f"Upload selesai. Disimpan: {ok}. Dilewati: {skip}.")
+            except Exception as e:
+                st.error(f"Gagal membaca file: {e}")
+
+    # --- Trace Results Tab ---
+    with tabs[4]:
+        st.subheader("Trace Results (Touch Logs)")
+        st.caption("Tambah catatan trace dan lihat log.")
+
+        with st.form("trace_add_form"):
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                agr_input = st.text_input("Agreement_No (Loan)")
+            with c2:
+                tracer_sel = st.text_input("Tracer", value=(current_user().get('full_name') if current_user() else ''))
+            with c3:
+                status_sel = st.selectbox("Status", ["", "TRACED", "EMAILED", "RTP", "PAYING", "UNREACHABLE", "OTHER"])
+            c4, c5 = st.columns(2)
+            with c4:
+                party_sel = st.selectbox("Party", ["", "COMPANY", "RELATIVES", "PERSONAL", "OTHER"])
+            with c5:
+                touch_type = st.selectbox("Touch Type", ["", "CALL", "WHATSAPP", "SMS", "EMAIL", "VISIT", "OTHER"])
+            notes = st.text_area("Notes")
+            submitted = st.form_submit_button("Tambah Trace")
+            if submitted:
+                if not agr_input.strip():
+                    st.warning("Isi Agreement_No.")
+                else:
+                    try:
+                        u = current_user() or {}
+                        execute(
+                            "INSERT INTO trace_results (Agreement_No, tracer, status, notes, touch_type, party, created_by) VALUES (?,?,?,?,?,?,?)",
+                            (agr_input.strip(), tracer_sel.strip() if tracer_sel else None, status_sel or None, notes.strip() if notes else None, touch_type or None, party_sel or None, (u.get('full_name') or u.get('login_id') or '-'))
+                        )
+                        st.success("Trace ditambahkan.")
+                    except Exception as e:
+                        st.error(f"Gagal menyimpan: {e}")
+
+        st.markdown("---")
+        st.subheader("Lihat Log")
+        fc1, fc2, fc3, fc4 = st.columns(4)
+        with fc1:
+            date_from = st.date_input("Dari Tanggal", value=None, key="trace_from")
+        with fc2:
+            date_to = st.date_input("Sampai Tanggal", value=None, key="trace_to")
+        with fc3:
+            f_status = st.multiselect("Status", ["TRACED", "EMAILED", "RTP", "PAYING", "UNREACHABLE", "OTHER"])
+        with fc4:
+            f_tracer = st.text_input("Tracer")
+        f_agr = st.text_input("Cari Agreement_No", key="trace_q_agr")
+
+        q = "SELECT Agreement_No, tracer, status, party, touch_type, notes, touched_at, created_by FROM trace_results WHERE 1=1"
+        params = []
+        if f_agr:
+            q += " AND Agreement_No LIKE ?"
+            params.append(f"%{f_agr}%")
+        if f_tracer:
+            q += " AND COALESCE(tracer,'') LIKE ?"
+            params.append(f"%{f_tracer}%")
+        if f_status:
+            placeholders = ",".join(["?"] * len(f_status))
+            q += f" AND COALESCE(status,'') IN ({placeholders})"
+            params.extend(f_status)
+        # Date filtering on touched_at (TEXT ISO). We'll compare date part.
+        if date_from:
+            q += " AND date(touched_at) >= date(?)"
+            params.append(str(date_from))
+        if date_to:
+            q += " AND date(touched_at) <= date(?)"
+            params.append(str(date_to))
+        q += " ORDER BY touched_at DESC LIMIT 500"
+
+        logs = fetchall(q, tuple(params))
+        if logs:
+            st.dataframe(pd.DataFrame(logs), use_container_width=True, hide_index=True)
+        else:
+            st.info("Belum ada data sesuai filter.")
+
     # --- Monitoring Tab (moved to first) end ---
 
 def page_tracer():
@@ -2227,7 +2850,7 @@ def page_tracer():
 
     # Fetch rows assigned to this tracer (Assigned_To = user name)
     rows = fetchall(
-        "SELECT id, TRC_Code, Agreement_No, Debtor_Name, NIK_KTP, EMPLOYMENT_UPDATE, EMPLOYER, Debtor_Legal_Name, Employee_Name, Employee_ID_Number, Debtor_Relation_to_Employee, created_at "
+        "SELECT id, TRC_Code, Agreement_No, Debtor_Name, NIK_KTP, EMPLOYMENT_UPDATE, EMPLOYER, Debtor_Legal_Name, Employee_Name, Employee_ID_Number, Debtor_Relation_to_Employee, Masked_Company_Name, created_at "
         "FROM assign_tracer WHERE IFNULL(Assigned_To,'') = ? ORDER BY id DESC LIMIT 500",
         (tracer_name,)
     )
@@ -2236,6 +2859,22 @@ def page_tracer():
         return
 
     st.subheader("Daftar Assignment")
+    # Quick search
+    qcol1, qcol2 = st.columns([2,1])
+    with qcol1:
+        q_ag = st.text_input("Cari Agreement_No (Loan Number)", key="tr_q_ag")
+    with qcol2:
+        q_nik = st.text_input("Cari NIK", key="tr_q_nik")
+
+    # Apply quick client-side filtering on loaded rows
+    filtered_rows = []
+    for r in rows:
+        if q_ag and q_ag.strip() not in str(r.get('Agreement_No') or ''):
+            continue
+        if q_nik and q_nik.strip() not in str(r.get('NIK_KTP') or ''):
+            continue
+        filtered_rows.append(r)
+
     # Quick table view of key identifiers
     df_view = pd.DataFrame([
         {
@@ -2245,7 +2884,7 @@ def page_tracer():
             'Debtor Name': r['Debtor_Name'],
             'NIK KTP': r['NIK_KTP'],
             'Assigned At': r['created_at'],
-        } for r in rows
+        } for r in filtered_rows
     ])
     st.dataframe(df_view, use_container_width=True, hide_index=True)
 
@@ -2254,9 +2893,9 @@ def page_tracer():
     st.caption("Pilih satu baris kemudian isi data yang diperlukan.")
 
     # Select a row to update
-    id_options = [r['id'] for r in rows]
+    id_options = [r['id'] for r in filtered_rows]
     sel_id = st.selectbox("Pilih ID Assignment", id_options, key="tr_sel_id")
-    sel_row = next((r for r in rows if r['id'] == sel_id), None)
+    sel_row = next((r for r in filtered_rows if r['id'] == sel_id), None)
     if not sel_row:
         st.warning("Data tidak ditemukan.")
         return
@@ -2276,13 +2915,36 @@ def page_tracer():
             employee_id = st.text_input("Employee ID Number", value=sel_row.get('Employee_ID_Number',''), key="tr_employee_id")
             relation = st.text_input("Debtor Relation to Employee", value=sel_row.get('Debtor_Relation_to_Employee',''), key="tr_relation")
 
+        st.markdown("---")
+        st.subheader("Masked Company")
+        dict_rows = fetchall("SELECT masked_name, canonical_name FROM masked_companies ORDER BY masked_name ASC")
+        options = [d['masked_name'] for d in dict_rows]
+        current_masked = sel_row.get('Masked_Company_Name') or ""
+        masked_sel = st.selectbox("Pilih Masked Company (opsional)", ["(ketik manual)"] + options, index=0, key="tr_mask_sel")
+        if masked_sel == "(ketik manual)":
+            masked_manual = st.text_input("Masked Company Name", value=current_masked, key="tr_mask_manual")
+            masked_value = masked_manual.strip()
+        else:
+            masked_value = masked_sel
+        if masked_value:
+            canon = next((d['canonical_name'] for d in dict_rows if d['masked_name'] == masked_value), None)
+            if canon:
+                st.caption(f"Canonical: {canon}")
+
         submitted = st.form_submit_button("Simpan Perubahan")
         if submitted:
             try:
                 execute(
-                    "UPDATE assign_tracer SET EMPLOYMENT_UPDATE=?, EMPLOYER=?, Debtor_Legal_Name=?, Employee_Name=?, Employee_ID_Number=?, Debtor_Relation_to_Employee=? WHERE id=? AND IFNULL(Assigned_To,'')=?",
+                    "UPDATE assign_tracer SET EMPLOYMENT_UPDATE=?, EMPLOYER=?, Debtor_Legal_Name=?, Employee_Name=?, Employee_ID_Number=?, Debtor_Relation_to_Employee=?, Masked_Company_Name=? WHERE id=? AND IFNULL(Assigned_To,'')=?",
                     (
-                        emp_update.strip(), employer.strip(), debtor_legal.strip(), employee_name.strip(), employee_id.strip(), relation.strip(), sel_id, tracer_name
+                        (emp_update.strip() if emp_update is not None else None),
+                        (employer.strip() if employer is not None else None),
+                        (debtor_legal.strip() if debtor_legal is not None else None),
+                        (employee_name.strip() if employee_name is not None else None),
+                        (employee_id.strip() if employee_id is not None else None),
+                        (relation.strip() if relation is not None else None),
+                        (masked_value if masked_value else None),
+                        sel_id, tracer_name
                     )
                 )
                 # Audit log tracer update
