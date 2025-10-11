@@ -2618,6 +2618,11 @@ def page_supervisor():
         with col_up2:
             _custom_up = st.text_input("Nama custom (jika Other)", key="tr_upload_default_custom")
         default_assigned = _custom_up.strip() if _sel_up == "Other…" else _sel_up
+        update_existing = st.checkbox(
+            "Update baris yang sudah ada (Agreement_No sama)",
+            value=False,
+            help="Jika dicentang, baris existing akan diperbarui; Assigned_To tidak diubah."
+        )
 
         tracer_uploaded = st.file_uploader("Upload file Excel/CSV Tracer", type=["csv", "xlsx"], key="tracer_upload")
         if tracer_uploaded:
@@ -2668,6 +2673,15 @@ def page_supervisor():
                             st.error("File tidak memiliki kolom 'Assigned_To'. Pilih/isi tracer default terlebih dahulu.")
                             return
                         tracer_df['Assigned_To'] = default_assigned
+                    # Clean Agreement_No and drop empty/duplicates inside the file
+                    try:
+                        tracer_df['Agreement_No'] = tracer_df['Agreement_No'].astype(str).str.strip()
+                    except Exception:
+                        pass
+                    tracer_df = tracer_df[tracer_df['Agreement_No'] != '']
+                    _rows_before = len(tracer_df)
+                    tracer_df = tracer_df.drop_duplicates(subset=['Agreement_No'], keep='first')
+                    _dupes_dropped = _rows_before - len(tracer_df)
                     count = 0
                     # Insert with TRC_Code generated from assignee at upload time
                     def _gen_trc_code(assignee: str) -> str:
@@ -2679,21 +2693,62 @@ def page_supervisor():
                         ymd = datetime.now().strftime('%y%m%d')
                         return f"TRC-{ymd}-{suffix}"
                     insert_fields = ["TRC_Code"] + tracer_fields + ["Assigned_To"]
+                    updated = 0
+                    skipped = 0
                     for _, row in tracer_df.iterrows():
                         try:
                             assignee = row.get('Assigned_To')
                             trc_val = row.get('TRC_Code') if 'TRC_Code' in tracer_df.columns else None
                             if not trc_val or str(trc_val).strip() == "":
                                 trc_val = _gen_trc_code(assignee)
-                            values = [trc_val] + [row.get(f) for f in tracer_fields] + [assignee]
-                            execute(
-                                f"INSERT INTO assign_tracer ({','.join(insert_fields)}) VALUES ({','.join(['?' for _ in insert_fields])})",
-                                tuple(values)
-                            )
-                            count += 1
+                            agr = (row.get('Agreement_No') or '').strip()
+                            if not agr:
+                                skipped += 1
+                                continue
+                            existing = fetchone("SELECT id, Assigned_To, COALESCE(TRC_Code,'') AS TRC_Code FROM assign_tracer WHERE Agreement_No=?", (agr,))
+                            if existing:
+                                if update_existing:
+                                    params = [
+                                        trc_val,
+                                        row.get('Debtor_Name'),
+                                        row.get('NIK_KTP'),
+                                        row.get('EMPLOYMENT_UPDATE'),
+                                        row.get('EMPLOYER'),
+                                        row.get('Debtor_Legal_Name'),
+                                        row.get('Employee_Name'),
+                                        row.get('Employee_ID_Number'),
+                                        row.get('Debtor_Relation_to_Employee'),
+                                        agr
+                                    ]
+                                    execute(
+                                        """
+                                        UPDATE assign_tracer SET
+                                            TRC_Code = COALESCE(NULLIF(TRC_Code,''), ?),
+                                            Debtor_Name = COALESCE(NULLIF(?,''), Debtor_Name),
+                                            NIK_KTP = COALESCE(NULLIF(?,''), NIK_KTP),
+                                            EMPLOYMENT_UPDATE = COALESCE(NULLIF(?,''), EMPLOYMENT_UPDATE),
+                                            EMPLOYER = COALESCE(NULLIF(?,''), EMPLOYER),
+                                            Debtor_Legal_Name = COALESCE(NULLIF(?,''), Debtor_Legal_Name),
+                                            Employee_Name = COALESCE(NULLIF(?,''), Employee_Name),
+                                            Employee_ID_Number = COALESCE(NULLIF(?,''), Employee_ID_Number),
+                                            Debtor_Relation_to_Employee = COALESCE(NULLIF(?,''), Debtor_Relation_to_Employee)
+                                        WHERE Agreement_No=?
+                                        """,
+                                        tuple(params)
+                                    )
+                                    updated += 1
+                                else:
+                                    skipped += 1
+                            else:
+                                values = [trc_val] + [row.get(f) for f in tracer_fields] + [assignee]
+                                execute(
+                                    f"INSERT INTO assign_tracer ({','.join(insert_fields)}) VALUES ({','.join(['?' for _ in insert_fields])})",
+                                    tuple(values)
+                                )
+                                count += 1
                         except Exception as e:
                             st.warning(f"Baris gagal: {e}")
-                    st.success(f"Berhasil input {count} data tracer.")
+                    st.success(f"Selesai. Insert baru: {count}, Update: {updated}, Skip: {skipped}. Duplikat di file: {_dupes_dropped}.")
                     # Audit log tracer upload
                     try:
                         execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (user.get('id') if user else None, "UPLOAD_TRACER", f"Uploaded tracer assignment: {count} rows from '{tracer_uploaded.name}'"))
