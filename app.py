@@ -720,6 +720,83 @@ def ai_summarize_table(table: str, filter_column: str | None = None, keyword: st
         lines.append("(Tidak ada baris contoh untuk filter ini)")
     return "\n".join(lines)
 
+def ai_build_context_pack(tables: list[str], row_cap_per_table: int = 2000, char_budget: int = 300_000) -> str:
+    """Build a large but bounded context pack containing many rows from selected tables.
+    Safeguards:
+      - Only whitelisted tables
+      - Blacklist sensitive columns
+      - Row cap per table and total char budget to respect model context limits
+    Returns a concatenated text block noting any truncation.
+    """
+    if not tables:
+        return "Tidak ada tabel dipilih."
+    # Sanitize inputs
+    try:
+        row_cap_per_table = max(1, min(int(row_cap_per_table or 2000), 50_000))
+    except Exception:
+        row_cap_per_table = 2000
+    try:
+        char_budget = max(10_000, min(int(char_budget or 300_000), 2_000_000))
+    except Exception:
+        char_budget = 300_000
+
+    parts: list[str] = []
+    total_chars = 0
+    truncated = False
+
+    def add(text: str):
+        nonlocal total_chars, truncated
+        if truncated:
+            return
+        remain = char_budget - total_chars
+        if remain <= 0:
+            truncated = True
+            return
+        chunk = text[:remain]
+        parts.append(chunk)
+        total_chars += len(chunk)
+        if len(text) > remain:
+            truncated = True
+
+    for tbl in tables:
+        if tbl not in SAFE_TABLES:
+            continue
+        cols = _get_table_columns(tbl)
+        cols = [c for c in cols if c and c not in SECRET_COLUMN_BLACKLIST]
+        if not cols:
+            add(f"\n=== {tbl} (kolom tidak tersedia) ===\n")
+            continue
+        add(f"\n=== {tbl} (max {row_cap_per_table} baris) ===\n")
+        add("|".join(cols) + "\n")
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+            cur.execute(f"SELECT {', '.join(cols)} FROM {tbl} ORDER BY 1 DESC LIMIT {row_cap_per_table}")
+            for r in cur.fetchall():
+                if truncated:
+                    break
+                vals = []
+                for c in cols:
+                    v = r.get(c)
+                    s = "" if v is None else str(v)
+                    # Keep line compact
+                    if len(s) > 300:
+                        s = s[:300] + "…"
+                    # Avoid newlines breaking rows
+                    s = s.replace("\n", "\\n")
+                    vals.append(s)
+                add("|".join(vals) + "\n")
+            conn.close()
+        except Exception as e:
+            add(f"(Gagal membaca {tbl}: {e})\n")
+        if truncated:
+            break
+
+    if truncated:
+        parts.append("\n[Catatan] Lampiran dipotong karena melewati anggaran konteks. Kurangi jumlah tabel/row cap atau tingkatkan anggaran.\n")
+    return "".join(parts)
+
 def ai_generate_response(prompt: str, chat_history_for_gemini: list, context_data: str = "") -> str:
     """Call Gemini REST API to generate a response with system + memory context."""
     api_key = get_gemini_api_key()
@@ -1997,6 +2074,22 @@ def page_chat_ai():
             preview = st.session_state.get("ai_attached_context")
             if preview:
                 st.text_area("Preview Lampiran", value=preview, height=180, disabled=True)
+
+        # Superuser: big context pack builder (bounded by budget)
+        u = current_user() or {}
+        if u.get('role') == 'Superuser':
+            with st.expander("🛡️ Superuser: Lampirkan seluruh data (dibatasi anggaran)", expanded=False):
+                pick_tbls = st.multiselect("Pilih tabel untuk dilampirkan", sorted(list(SAFE_TABLES)), default=sorted(list(SAFE_TABLES))[:5], key="ai_pack_tbls")
+                row_cap = st.number_input("Row cap per tabel", min_value=100, max_value=50000, value=2000, step=100, key="ai_pack_rows")
+                budget = st.number_input("Anggaran karakter total", min_value=10000, max_value=2000000, value=300000, step=10000, key="ai_pack_budget")
+                if st.button("Bangun & Lampirkan Pack", use_container_width=True, key="btn_build_pack"):
+                    pack = ai_build_context_pack(pick_tbls, int(row_cap), int(budget))
+                    st.session_state["ai_attached_context"] = pack
+                    st.success("Context pack dilampirkan.")
+                preview_pack = st.session_state.get("ai_attached_context")
+                if preview_pack:
+                    st.caption(f"Ukuran lampiran: {len(preview_pack):,} karakter")
+                    st.text_area("Preview Pack", value=preview_pack[:5000] + ("\n…(dipotong)" if len(preview_pack) > 5000 else ""), height=200, disabled=True)
 
         st.subheader("📚 Basis Pengetahuan")
         mem = ai_get_all_knowledge()
