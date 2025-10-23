@@ -2305,52 +2305,52 @@ def page_dashboard():
         unsafe_allow_html=True,
     )
 
-    st.markdown("<div class='kpi-grid'>", unsafe_allow_html=True)
-    # 1) Pending
-    st.markdown(
-        f"""
-        <div class='kpi-card accent-orange'>
-            <div class='kpi-title'>Dokumen Pending</div>
-            <div class='kpi-value'>{pending_total:,}</div>
-            <div class='kpi-sub'>{{sign}}{abs(delta_pending):,} dari kemarin</div>
-        </div>
-        """.replace("{sign}", "+" if delta_pending>=0 else "-"),
-        unsafe_allow_html=True,
-    )
-    # 2) Selesai
-    st.markdown(
-        f"""
-        <div class='kpi-card accent-blue'>
-            <div class='kpi-title'>Dokumen Selesai</div>
-            <div class='kpi-value'>{completed_total:,}</div>
-            <div class='kpi-sub'>+{completed_week:,} minggu ini</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    # 3) Total User
-    st.markdown(
-        f"""
-        <div class='kpi-card accent-purple'>
-            <div class='kpi-title'>Total User</div>
-            <div class='kpi-value'>{total_users:,}</div>
-            <div class='kpi-sub'>{active_today:,} aktif hari ini</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    # 4) Dokumen Bulan Ini
-    st.markdown(
-        f"""
-        <div class='kpi-card accent-green'>
-            <div class='kpi-title'>Dokumen Bulan Ini</div>
-            <div class='kpi-value'>{new_this_month:,}</div>
-            <div class='kpi-sub'>{(pct_vs_last or 0):.0f}% dari bulan lalu</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.markdown("</div>", unsafe_allow_html=True)
+    # Render KPI cards side-by-side using Streamlit columns (more reliable than cross-markdown wrappers)
+    kpi_cols = st.columns(4)
+    with kpi_cols[0]:
+        st.markdown(
+            f"""
+            <div class='kpi-card accent-orange'>
+                <div class='kpi-title'>Dokumen Pending</div>
+                <div class='kpi-value'>{pending_total:,}</div>
+                <div class='kpi-sub'>{{sign}}{abs(delta_pending):,} dari kemarin</div>
+            </div>
+            """.replace("{sign}", "+" if delta_pending>=0 else "-"),
+            unsafe_allow_html=True,
+        )
+    with kpi_cols[1]:
+        st.markdown(
+            f"""
+            <div class='kpi-card accent-blue'>
+                <div class='kpi-title'>Dokumen Selesai</div>
+                <div class='kpi-value'>{completed_total:,}</div>
+                <div class='kpi-sub'>+{completed_week:,} minggu ini</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with kpi_cols[2]:
+        st.markdown(
+            f"""
+            <div class='kpi-card accent-purple'>
+                <div class='kpi-title'>Total User</div>
+                <div class='kpi-value'>{total_users:,}</div>
+                <div class='kpi-sub'>{active_today:,} aktif hari ini</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with kpi_cols[3]:
+        st.markdown(
+            f"""
+            <div class='kpi-card accent-green'>
+                <div class='kpi-title'>Dokumen Bulan Ini</div>
+                <div class='kpi-value'>{new_this_month:,}</div>
+                <div class='kpi-sub'>{(pct_vs_last or 0):.0f}% dari bulan lalu</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
     # -------- Pending approvals banner --------
     pending_approvals = get_pending_users_count()
