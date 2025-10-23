@@ -2029,7 +2029,7 @@ def page_chat_ai():
         /* Scrollable chat area: only the inner chat container (without the typing box) */
         /* Avoid styling any ancestor that also contains the input */
         div[data-testid=\"stVerticalBlock\"]:has(.chat-scroll-marker):not(:has(div[data-testid='stChatInput'])) {
-            max-height: 520px; /* adjust as needed */
+            max-height: 1000px; /* adjust as needed */
             overflow-y: auto;
             padding: 6px 8px;
             border: 1px solid #EEF2FF;
