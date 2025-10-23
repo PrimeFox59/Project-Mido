@@ -2009,7 +2009,8 @@ def page_dashboard():
     st.markdown(
         """
         <style>
-        .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 12px 0 4px 0; }
+        /* KPI in vertical rows (single column) */
+        .kpi-grid { display: grid; grid-template-columns: 1fr; gap: 12px; margin: 12px 0 4px 0; }
         .kpi-card { background: #fff; border: 1px solid #E9ECEF; border-radius: 12px; padding: 16px; box-shadow: 0 2px 6px rgba(16,24,40,0.04); }
         .kpi-title { font-size: 13px; color: #475467; margin-bottom: 6px; display:flex; align-items:center; gap:8px; }
         .kpi-value { font-size: 28px; font-weight: 700; color: #1F2937; }
