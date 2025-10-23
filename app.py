@@ -2026,18 +2026,17 @@ def page_chat_ai():
         .section { margin-bottom: 14px; }
         .section h3, .section h4 { margin-bottom: 6px; }
 
-        /* Scrollable chat area: constrain height and enable vertical scroll */
-        /* We target the specific container that includes a small marker element */
-        div[data-testid="stVerticalBlock"]:has(.chat-scroll-marker) {
+        /* Scrollable chat area: only the inner chat container (without the typing box) */
+        /* Avoid styling any ancestor that also contains the input */
+        div[data-testid=\"stVerticalBlock\"]:has(.chat-scroll-marker):not(:has(div[data-testid='stChatInput'])) {
             max-height: 520px; /* adjust as needed */
             overflow-y: auto;
             padding: 6px 8px;
             border: 1px solid #EEF2FF;
             border-radius: 12px;
             background: #FFFFFF;
+            scroll-behavior: smooth;
         }
-        /* Smooth scrolling feel (optional) */
-        div[data-testid="stVerticalBlock"]:has(.chat-scroll-marker) { scroll-behavior: smooth; }
         </style>
         """,
         unsafe_allow_html=True,
