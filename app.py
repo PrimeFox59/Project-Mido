@@ -11,6 +11,7 @@ import math
 import time
 import os
 import re
+import requests
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
@@ -69,6 +70,20 @@ def init_db():
         c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_assign_tracer_unique_agreement ON assign_tracer(Agreement_No)")
     except Exception:
         # Will fail if duplicates already exist; app-level guards will still apply
+        pass
+
+    # 6) AI Knowledge base (for Chat AI)
+    try:
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ai_knowledge (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fact TEXT NOT NULL,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+            """
+        )
+    except Exception:
         pass
     try:
         c.execute("CREATE INDEX IF NOT EXISTS idx_assign_tracer_assigned_to ON assign_tracer(Assigned_To)")
@@ -507,6 +522,152 @@ def get_project_capacity_bytes(default_bytes: int = 2 * 1024 * 1024 * 1024) -> i
         return int(val)
     except Exception:
         return int(default_bytes)
+
+# -------------------------
+# Chat AI helpers (Gemini + Memory)
+# -------------------------
+def get_gemini_api_key():
+    """Fetch Gemini API key from secrets/env/session.
+    Priority: st.secrets['gemini']['api_key'] -> st.secrets['GEMINI_API_KEY'] -> env GEMINI_API_KEY -> st.session_state['gemini_api_key']
+    """
+    try:
+        # Nested object style
+        k = st.secrets.get('gemini', {}).get('api_key')
+        if k:
+            return str(k)
+    except Exception:
+        pass
+    try:
+        # Flat style
+        if 'GEMINI_API_KEY' in st.secrets:
+            return str(st.secrets['GEMINI_API_KEY'])
+    except Exception:
+        pass
+    try:
+        if os.environ.get('GEMINI_API_KEY'):
+            return os.environ.get('GEMINI_API_KEY')
+    except Exception:
+        pass
+    return st.session_state.get('gemini_api_key')
+
+def ai_add_knowledge(fact: str) -> bool:
+    """Insert a new fact into ai_knowledge table in the main app DB."""
+    if not fact or not fact.strip():
+        return False
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("INSERT INTO ai_knowledge (fact) VALUES (?)", (fact.strip(),))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception:
+        return False
+
+def ai_get_all_knowledge() -> str:
+    """Return all facts ordered by timestamp ASC, formatted for context."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("SELECT fact, timestamp FROM ai_knowledge ORDER BY datetime(timestamp) ASC, id ASC")
+        rows = cur.fetchall()
+        conn.close()
+        if not rows:
+            return ""
+        out = []
+        for fact, ts in rows:
+            try:
+                # SQLite CURRENT_TIMESTAMP => 'YYYY-MM-DD HH:MM:SS'
+                dt = datetime.strptime(str(ts), '%Y-%m-%d %H:%M:%S')
+                tag = dt.strftime('%d %b %Y %H:%M')
+            except Exception:
+                tag = str(ts)
+            out.append(f"- (Dicatat pada {tag}) {fact}")
+        return "\n".join(out)
+    except Exception:
+        return ""
+
+def ai_build_system_context() -> str:
+    """Small live snapshot of the app to help AI answer about the system."""
+    try:
+        total_users = (fetchone("SELECT COUNT(*) c FROM users WHERE approved=1") or {}).get('c', 0)
+    except Exception:
+        total_users = 0
+    try:
+        pending_approvals = (fetchone("SELECT COUNT(*) c FROM users WHERE approved=0") or {}).get('c', 0)
+    except Exception:
+        pending_approvals = 0
+    try:
+        completed_total = (fetchone("SELECT COUNT(DISTINCT Agreement_No) c FROM payments WHERE COALESCE(paid_amount,0) > 0") or {}).get('c', 0)
+    except Exception:
+        completed_total = 0
+    try:
+        assigned_total = (fetchone("SELECT COUNT(DISTINCT Agreement_No) c FROM agent_assignments WHERE IFNULL(active,1)=1") or {}).get('c', 0)
+    except Exception:
+        assigned_total = 0
+    pending_total = max(assigned_total - completed_total, 0)
+    try:
+        last_backup = fetchone("SELECT file_name, status, backup_time FROM backup_log ORDER BY id DESC LIMIT 1") or {}
+    except Exception:
+        last_backup = {}
+    # Short recent activity (5 entries)
+    try:
+        recent_logs = fetchall("SELECT timestamp, action, details FROM audit_logs ORDER BY id DESC LIMIT 5")
+    except Exception:
+        recent_logs = []
+    logs_lines = []
+    for r in (recent_logs or []):
+        logs_lines.append(f"{r.get('timestamp','')}: {r.get('action','')} — {r.get('details','')}")
+    snapshot = [
+        f"Total user aktif (approved): {total_users}",
+        f"Pending approval: {pending_approvals}",
+        f"Total assignment aktif: {assigned_total}",
+        f"Dokumen selesai (punya pembayaran): {completed_total}",
+        f"Dokumen pending: {pending_total}",
+        f"Backup terakhir: {last_backup.get('file_name','-')} | {last_backup.get('status','-')} @ {last_backup.get('backup_time','-')}",
+    ]
+    if logs_lines:
+        snapshot.append("Aktivitas terakhir:")
+        snapshot.extend(["  - "+x for x in logs_lines])
+    return "\n".join(snapshot)
+
+def ai_generate_response(prompt: str, chat_history_for_gemini: list, context_data: str = "") -> str:
+    """Call Gemini REST API to generate a response with system + memory context."""
+    api_key = get_gemini_api_key()
+    if not api_key:
+        return "Silakan set API key Gemini terlebih dahulu."
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+        headers = {'Content-Type': 'application/json'}
+        system_instruction = f"""
+Anda adalah Prime AI, sebuah persona digital dari Galih Primananda yang membantu pengguna memahami aplikasi ini.
+Fokuskan jawaban pada memori dan snapshot sistem di bawah. Bila ada informasi bertentangan, anggap yang PALING BARU (paling bawah) adalah yang benar.
+
+--- MEMORI & PENGETAHUAN (Kronologis) ---
+{context_data if context_data else "Belum ada memori yang tersimpan."}
+----------------------------------------
+
+Anda boleh menyimpulkan dan memberi langkah konkret. Jika tidak ada informasi yang relevan di memori, jujur katakan: "Berdasarkan memoriku, aku belum punya informasi tentang itu."
+Tanggal hari ini: {datetime.now().strftime("%A, %d %B %Y")} · Waktu: {datetime.now().strftime("%H:%M WIB")}.
+"""
+        payload_contents = chat_history_for_gemini + [{"role": "user", "parts": [{"text": prompt}]}]
+        payload = {
+            "contents": payload_contents,
+            "systemInstruction": {"parts": [{"text": system_instruction}]},
+            "generationConfig": {"temperature": 0.7, "topP": 0.95},
+        }
+        resp = requests.post(url, headers=headers, data=json.dumps(payload), timeout=60)
+        resp.raise_for_status()
+        data = resp.json()
+        return data['candidates'][0]['content']['parts'][0]['text']
+    except requests.exceptions.RequestException as e:
+        return f"Maaf, terjadi masalah koneksi ke server AI: {e}"
+    except Exception:
+        try:
+            txt = resp.text  # type: ignore[name-defined]
+        except Exception:
+            txt = ""
+        return "Maaf, saya menerima respons yang tidak terduga dari server AI." + (f" Raw: {txt}" if txt else "")
 
 # -------------------------
 # Backup helpers
@@ -981,6 +1142,7 @@ ALL_ROLES = ("Superuser", "Supervisor", "Tracer", "Agent")
 # Central menu/page configuration and allowed roles
 MENU_ITEMS = [
     {"label": "Dashboard",  "page": "Dashboard", "roles": ALL_ROLES, "primary": True},
+    {"label": "Chat AI",    "page": "Chat AI", "roles": ALL_ROLES, "primary": True},
     {"label": "Supervisor", "page": "Supervisor", "roles": ("Superuser", "Supervisor"), "primary": False},
     {"label": "Tracer",     "page": "Tracer", "roles": ("Superuser", "Supervisor", "Tracer"), "primary": False},
     {"label": "Agent",      "page": "Agent", "roles": ("Superuser", "Supervisor","Agent"), "primary": False},
@@ -1655,6 +1817,77 @@ def page_gdrive():
             "[+6289524257778](https://wa.me/6289524257778)"
         )
     
+def page_chat_ai():
+    """AI Chat page with memory and system-aware context."""
+    require_roles(ALL_ROLES)
+    st.title("🤖 Chat AI")
+    st.caption("Tanya apa pun terkait sistem ini atau gunakan memori khusus.")
+
+    # Layout: chat on left, memory and settings on right
+    left, right = st.columns([2, 1])
+
+    # Right: Memory center + API key
+    with right:
+        st.subheader("🧠 Memori")
+        with st.form("ai_mem_add_form", clear_on_submit=True):
+            new_fact = st.text_area("Tambahkan atau perbarui pengetahuan:", height=120)
+            sub = st.form_submit_button("Simpan ke Memori")
+            if sub and new_fact.strip():
+                if ai_add_knowledge(new_fact.strip()):
+                    st.success("Memori baru ditambahkan.")
+                    st.rerun()
+                else:
+                    st.error("Gagal menambahkan memori.")
+        st.markdown("---")
+        st.subheader("🔑 API Key")
+        if not get_gemini_api_key():
+            st.warning("API key Gemini belum diset. Masukkan sementara di bawah atau set di secrets.")
+        temp_key = st.text_input("GEMINI_API_KEY (opsional)", type="password", value=st.session_state.get('gemini_api_key',''))
+        if st.button("Simpan Sementara API Key"):
+            st.session_state['gemini_api_key'] = temp_key.strip()
+            st.success("API key disimpan untuk sesi ini.")
+        st.markdown("---")
+        st.subheader("📚 Basis Pengetahuan")
+        mem = ai_get_all_knowledge()
+        st.text_area("Memori Tersimpan (kronologis):", value=(mem if mem else "Memori masih kosong."), height=260, disabled=True)
+
+    # Left: Chat UI
+    with left:
+        if "ai_messages" not in st.session_state:
+            st.session_state.ai_messages = [
+                {"role": "assistant", "content": "Halo! Saya Prime AI. Apa yang bisa saya bantu?"}
+            ]
+        for msg in st.session_state.ai_messages:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+        user_input = st.chat_input("Tulis pesan Anda…")
+        if user_input:
+            st.session_state.ai_messages.append({"role": "user", "content": user_input})
+            with st.chat_message("user"):
+                st.markdown(user_input)
+
+            with st.spinner("Prime AI sedang memproses…"):
+                # Build combined context: memory + system snapshot
+                try:
+                    knowledge_context = ai_get_all_knowledge()
+                except Exception:
+                    knowledge_context = ""
+                try:
+                    sys_context = ai_build_system_context()
+                except Exception:
+                    sys_context = ""
+                context_combined = (knowledge_context or "") + ("\n\n--- Sistem Snapshot ---\n" + sys_context if sys_context else "")
+
+                # Map session messages to Gemini format
+                chat_history_for_api = [
+                    {"role": m["role"], "parts": [{"text": m["content"]}]} for m in st.session_state.ai_messages
+                ]
+                reply = ai_generate_response(user_input, chat_history_for_api, context_combined)
+                with st.chat_message("assistant"):
+                    st.markdown(reply)
+                st.session_state.ai_messages.append({"role": "assistant", "content": reply})
+
 def main():
     init_db()
 
@@ -1795,6 +2028,9 @@ def main():
         return
     if st.session_state.page == "Dashboard":
         page_dashboard()
+        return
+    if st.session_state.page == "Chat AI":
+        page_chat_ai()
         return
     if st.session_state.page == "Tracer":
         page_tracer()
