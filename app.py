@@ -632,6 +632,94 @@ def ai_build_system_context() -> str:
         snapshot.extend(["  - "+x for x in logs_lines])
     return "\n".join(snapshot)
 
+# ------- Optional: Summarize DB tables for AI context attachment -------
+SAFE_TABLES = {
+    # Operational tables (exclude sensitive user auth fields)
+    "assign_tracer",
+    "supervisor_data",
+    "payments",
+    "agent_assignments",
+    "trace_results",
+    "masked_companies",
+    "agent_results",
+    "backup_log",
+    "audit_logs",
+    "record_notes",
+}
+
+SECRET_COLUMN_BLACKLIST = {"password_hash", "service_account", "email_token"}
+
+def _get_table_columns(table: str) -> list:
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute(f"PRAGMA table_info({table})")
+        cols = [r[1] for r in cur.fetchall()]
+        conn.close()
+        return cols
+    except Exception:
+        return []
+
+def ai_summarize_table(table: str, filter_column: str | None = None, keyword: str | None = None, limit: int = 50) -> str:
+    """Return a compact, human-readable summary of a table with optional simple filter.
+    Safety: table and column are validated against whitelist and actual schema; values are parameterized.
+    """
+    table = str(table or "").strip()
+    if table not in SAFE_TABLES:
+        return "Tabel tidak diizinkan untuk dilampirkan."
+    try:
+        limit = max(1, min(int(limit or 50), 200))
+    except Exception:
+        limit = 50
+
+    cols = _get_table_columns(table)
+    cols = [c for c in cols if c and c not in SECRET_COLUMN_BLACKLIST]
+    if not cols:
+        return "Gagal membaca kolom tabel."
+
+    where = ""
+    params: list = []
+    if filter_column:
+        if filter_column not in cols:
+            return "Kolom filter tidak valid untuk tabel ini."
+        where = f" WHERE COALESCE({filter_column}, '') LIKE ?"
+        params.append(f"%{keyword or ''}%")
+
+    # Count rows (with filter)
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute(f"SELECT COUNT(*) AS c FROM {table}{where}", tuple(params))
+        total = (cur.fetchone() or {}).get("c", 0)
+        # Sample rows
+        cur.execute(
+            f"SELECT {', '.join(cols)} FROM {table}{where} ORDER BY 1 DESC LIMIT {limit}",
+            tuple(params),
+        )
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+    except Exception as e:
+        return f"Gagal mengambil data: {e}"
+
+    # Compose text summary
+    def _trunc(v):
+        s = str(v) if v is not None else ""
+        return (s[:120] + "…") if len(s) > 120 else s
+
+    lines = [
+        f"=== Lampiran: {table} ===",
+        f"Total baris (sesuai filter): {total}",
+        f"Kolom: {', '.join(cols)}",
+        f"Sampel {min(len(rows), limit)} baris:",
+    ]
+    for r in rows:
+        pair_str = ", ".join([f"{k}={_trunc(r.get(k))}" for k in cols[:8]])
+        lines.append(f"- {pair_str}")
+    if not rows:
+        lines.append("(Tidak ada baris contoh untuk filter ini)")
+    return "\n".join(lines)
+
 def ai_generate_response(prompt: str, chat_history_for_gemini: list, context_data: str = "") -> str:
     """Call Gemini REST API to generate a response with system + memory context."""
     api_key = get_gemini_api_key()
@@ -1881,6 +1969,34 @@ def page_chat_ai():
         else:
             st.markdown("<span class='pill pill-warning'>Not Configured</span>", unsafe_allow_html=True)
             st.caption("Tambahkan [gemini].api_key atau GEMINI_API_KEY di Streamlit Secrets, lalu jalankan ulang aplikasi.")
+        with st.expander("📎 Lampirkan Data dari Database (opsional)", expanded=False):
+            sel_table = st.selectbox("Pilih tabel", sorted(list(SAFE_TABLES)), key="ai_tbl_sel")
+            cols = _get_table_columns(sel_table) if sel_table else []
+            cols = [c for c in cols if c and c not in SECRET_COLUMN_BLACKLIST]
+            col1, col2 = st.columns(2)
+            with col1:
+                sel_col = st.selectbox("Filter kolom (opsional)", options=["(tanpa filter)"] + cols, index=0, key="ai_tbl_col")
+            with col2:
+                kw = st.text_input("Kata kunci contains", key="ai_tbl_kw", placeholder="misal: VA nomor / nama / status")
+            limit_n = st.number_input("Batas sampel baris", min_value=5, max_value=200, value=30, step=5, key="ai_tbl_lim")
+            col_btn1, col_btn2 = st.columns([1,1])
+            with col_btn1:
+                if st.button("Lampirkan ke konteks", key="ai_attach_btn"):
+                    summary = ai_summarize_table(
+                        sel_table,
+                        None if sel_col == "(tanpa filter)" else sel_col,
+                        kw if sel_col != "(tanpa filter)" else None,
+                        int(limit_n),
+                    )
+                    st.session_state["ai_attached_context"] = summary
+                    st.success("Lampiran siap dipakai dalam jawaban berikutnya.")
+            with col_btn2:
+                if st.button("Hapus lampiran", key="ai_clear_attach"):
+                    st.session_state.pop("ai_attached_context", None)
+                    st.info("Lampiran dihapus.")
+            preview = st.session_state.get("ai_attached_context")
+            if preview:
+                st.text_area("Preview Lampiran", value=preview, height=180, disabled=True)
 
         st.subheader("📚 Basis Pengetahuan")
         mem = ai_get_all_knowledge()
@@ -1912,7 +2028,13 @@ def page_chat_ai():
                     sys_context = ai_build_system_context()
                 except Exception:
                     sys_context = ""
-                context_combined = (knowledge_context or "") + ("\n\n--- Sistem Snapshot ---\n" + sys_context if sys_context else "")
+                # Combine memory, optional attached DB summary, and live system snapshot
+                attached = st.session_state.get("ai_attached_context")
+                context_combined = (
+                    (knowledge_context or "")
+                    + ("\n\n--- Lampiran Data ---\n" + attached if attached else "")
+                    + ("\n\n--- Sistem Snapshot ---\n" + sys_context if sys_context else "")
+                )
 
                 # Map session messages to Gemini format
                 chat_history_for_api = [
