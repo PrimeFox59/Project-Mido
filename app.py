@@ -89,29 +89,6 @@ def init_db():
         c.execute("CREATE INDEX IF NOT EXISTS idx_assign_tracer_assigned_to ON assign_tracer(Assigned_To)")
     except Exception:
         pass
-    # users
-    # Fresh schema includes login_id (Id for login) and full_name; keep legacy 'name' for backward-compat.
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        login_id TEXT UNIQUE,
-        password_hash TEXT,
-        full_name TEXT,
-        name TEXT, -- legacy
-        email TEXT UNIQUE,
-        role TEXT DEFAULT 'Agent', -- Superuser / Supervisor / Tracer / Agent
-        approved INTEGER DEFAULT 0,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )""")
-    # Migrate existing tables to ensure columns exist and are populated
-    try:
-        cols = [r['name'] for r in c.execute("PRAGMA table_info(users)").fetchall()]
-        if 'login_id' not in cols:
-            c.execute("ALTER TABLE users ADD COLUMN login_id TEXT")
-        if 'full_name' not in cols:
-            c.execute("ALTER TABLE users ADD COLUMN full_name TEXT")
-        # Ensure a unique index for login_id (SQLite cannot alter constraint easily)
-        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_login_id ON users(login_id)")
         # Soft-migrate deprecated 'department' column: keep if exists, but stop using it
         # Soft-migrate old role names to new role set
         try:
@@ -2009,7 +1986,8 @@ def page_chat_ai():
         /* Pin the chat input to the bottom of the viewport */
         div[data-testid="stChatInput"] {
             position: fixed;
-            left: 0;
+            /* Offset by sidebar width so it doesn't sit under the sidebar */
+            left: var(--sb-width, 0px);
             right: 0;
             bottom: 0;
             margin: 0; /* override margins so it sits flush */
@@ -2018,11 +1996,13 @@ def page_chat_ai():
             backdrop-filter: blur(4px);
             border-top: 1px solid #EEE;
             z-index: 1000;
+            width: calc(100vw - var(--sb-width, 0px));
+            box-sizing: border-box;
         }
 
         /* Add bottom padding to main content so last bubbles are not hidden behind the fixed input */
         [data-testid="stAppViewContainer"] .main .block-container {
-            padding-bottom: 150px !important;
+            padding-bottom: calc(150px + env(safe-area-inset-bottom, 0px)) !important;
         }
 
         /* Pills */
@@ -2035,6 +2015,26 @@ def page_chat_ai():
         .section { margin-bottom: 14px; }
         .section h3, .section h4 { margin-bottom: 6px; }
         </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    # Dynamically compute sidebar width to keep chat input clear of the sidebar
+    st.markdown(
+        """
+        <script>
+        (function(){
+            const setSBW = () => {
+                try {
+                    const sb = document.querySelector('[data-testid="stSidebar"]');
+                    const w = sb && getComputedStyle(sb).display !== 'none' ? sb.getBoundingClientRect().width : 0;
+                    document.documentElement.style.setProperty('--sb-width', (w||0) + 'px');
+                } catch(e) {}
+            };
+            new ResizeObserver(setSBW).observe(document.body);
+            window.addEventListener('resize', setSBW);
+            setSBW();
+        })();
+        </script>
         """,
         unsafe_allow_html=True,
     )
