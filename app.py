@@ -2006,7 +2006,24 @@ def page_chat_ai():
             background: #FDFDFE;
         }
         /* Chat input spacing */
-        div[data-testid="stChatInput"] { margin-top: 8px; }
+        /* Pin the chat input to the bottom of the viewport */
+        div[data-testid="stChatInput"] {
+            position: fixed;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            margin: 0; /* override margins so it sits flush */
+            padding: 10px 16px;
+            background: rgba(255,255,255,0.98);
+            backdrop-filter: blur(4px);
+            border-top: 1px solid #EEE;
+            z-index: 1000;
+        }
+
+        /* Add bottom padding to main content so last bubbles are not hidden behind the fixed input */
+        [data-testid="stAppViewContainer"] .main .block-container {
+            padding-bottom: 150px !important;
+        }
 
         /* Pills */
         .pill { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px; font-size:12px; font-weight:600; }
