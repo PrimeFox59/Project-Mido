@@ -1943,196 +1943,211 @@ def page_agent():
 # Dashboard Page (basic MVP)
 # -------------------------
 def page_dashboard():
+    """Clean, compact dashboard inspired by the provided mockup.
+    - Top header with logo and title
+    - 4 KPI cards: Pending, Selesai, Total User, Bulan Ini
+    - Pending approvals banner
+    - Recent Activity table and Upcoming PTP deadlines
+    """
     require_roles(ALL_ROLES)
-    st.title("🏠 Dashboard")
-    # Period filter (month/week)
-    colp1, colp2, colp3 = st.columns([1,1,2])
-    with colp1:
-        period = st.selectbox("Periode", ["Minggu Ini", "Bulan Ini", "30 Hari Terakhir"]) 
-    with colp2:
-        today = date.today()
-        if period == "Minggu Ini":
-            start_date = today - timedelta(days=today.weekday())
-        elif period == "Bulan Ini":
-            start_date = today.replace(day=1)
-        else:
-            start_date = today - timedelta(days=30)
-    st.caption(f"Rentang: {start_date.isoformat()} s/d {today.isoformat()}")
 
-    # STATUS counts: latest status per Agreement_No within selected period
-    rows = fetchall(
-        """
-        SELECT tr.status FROM trace_results tr
-        JOIN (
-            SELECT Agreement_No, MAX(touched_at) AS mt
-            FROM trace_results
-            WHERE DATE(touched_at) >= ?
-            GROUP BY Agreement_No
-        ) t ON t.Agreement_No = tr.Agreement_No AND t.mt = tr.touched_at
-        """,
-        (start_date.isoformat(),)
-    )
-    status_counts = {}
-    for r in rows:
-        s = (r.get('status') or '').strip().upper()
-        if not s:
-            continue
-        status_counts[s] = status_counts.get(s, 0) + 1
-    colA, colB, colC, colD = st.columns(4)
-    with colA:
-        st.metric("TRACED", status_counts.get("TRACED", 0))
-    with colB:
-        st.metric("EMAILED", status_counts.get("EMAILED", 0))
-    with colC:
-        st.metric("RTP", status_counts.get("RTP", 0))
-    with colD:
-        st.metric("PAYING", status_counts.get("PAYING", 0))
+    # Header
+    top_col1, top_col2 = st.columns([1, 6])
+    with top_col1:
+        try:
+            st.image("logo.png", width=96)
+        except Exception:
+            st.empty()
+    with top_col2:
+        st.markdown("<h2 style='margin-bottom:0'>Application Dashboard</h2>", unsafe_allow_html=True)
+        st.caption("Ringkasan aktivitas aplikasi dan tenggat terdekat.")
 
-    st.markdown("---")
-    # TRC Code (Tracer performance): count touches per tracer in period
-    tr_rows = fetchall("SELECT tracer, COUNT(*) as c FROM trace_results WHERE DATE(touched_at) >= ? GROUP BY tracer ORDER BY c DESC LIMIT 20", (start_date.isoformat(),))
-    if tr_rows:
-        df_tr = pd.DataFrame(tr_rows)
-        chart_tr = alt.Chart(df_tr).mark_bar().encode(
-            x=alt.X('c:Q', title='Touches'),
-            y=alt.Y('tracer:N', sort='-x', title='Tracer')
-        ).properties(title='Performa Tracer (Touches)', height=360)
-        st.altair_chart(chart_tr, use_container_width=True)
-    else:
-        st.info("Belum ada data tracer pada periode ini.")
-
-    # Agent Assigned performance: count loans assigned per agent in period
-    ag_rows = fetchall("SELECT Agent_Assigned_To as agent, COUNT(*) as c FROM agent_assignments WHERE DATE(assigned_at) >= ? GROUP BY Agent_Assigned_To ORDER BY c DESC LIMIT 20", (start_date.isoformat(),))
-    if ag_rows:
-        df_ag = pd.DataFrame(ag_rows)
-        chart_ag = alt.Chart(df_ag).mark_bar(color='#1E88E5').encode(
-            x=alt.X('c:Q', title='Loans Assigned'),
-            y=alt.Y('agent:N', sort='-x', title='Agent')
-        ).properties(title='Performa Agent (Assignment)', height=360)
-        st.altair_chart(chart_ag, use_container_width=True)
-    else:
-        st.info("Belum ada assignment agent pada periode ini.")
-
-    st.markdown("---")
-    # Latest Agent Status per Loan (within period)
-    agent_rows = fetchall(
-        """
-        SELECT ar.agent_status
-        FROM agent_results ar
-        JOIN (
-            SELECT Agreement_No, MAX(updated_at) AS mu
-            FROM agent_results
-            WHERE DATE(updated_at) >= ?
-            GROUP BY Agreement_No
-        ) t ON t.Agreement_No = ar.Agreement_No AND t.mu = ar.updated_at
-        """,
-        (start_date.isoformat(),)
-    )
-    if agent_rows:
-        agg = {}
-        for r in agent_rows:
-            s = (r.get('agent_status') or '').upper().strip()
-            if not s:
-                continue
-            agg[s] = agg.get(s, 0) + 1
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            st.metric("PTP (latest)", agg.get('PTP', 0))
-        with c2:
-            st.metric("PAID (latest)", agg.get('PAID', 0))
-        with c3:
-            st.metric("RTP (latest)", agg.get('RTP', 0))
-        with c4:
-            st.metric("FOLLOW UP (latest)", agg.get('FOLLOW UP', 0))
-    else:
-        st.info("Belum ada status agent pada periode ini.")
-
-    # Status-by-Agent (latest per loan)
-    agent_matrix = fetchall(
-        """
-        SELECT COALESCE(ar.agent,'(Unknown)') AS agent, COALESCE(ar.agent_status,'') AS status, COUNT(*) AS c
-        FROM agent_results ar
-        JOIN (
-            SELECT Agreement_No, MAX(updated_at) AS mu
-            FROM agent_results
-            WHERE DATE(updated_at) >= ?
-            GROUP BY Agreement_No
-        ) t ON t.Agreement_No = ar.Agreement_No AND t.mu = ar.updated_at
-        GROUP BY COALESCE(ar.agent,'(Unknown)'), COALESCE(ar.agent_status,'')
-        ORDER BY c DESC
-        LIMIT 200
-        """,
-        (start_date.isoformat(),)
-    )
-    if agent_matrix:
-        dfm = pd.DataFrame(agent_matrix)
-        chart_m = alt.Chart(dfm).mark_bar().encode(
-            x=alt.X('c:Q', title='Count'),
-            y=alt.Y('agent:N', sort='-x', title='Agent'),
-            color=alt.Color('status:N', title='Status'),
-            tooltip=['agent:N', 'status:N', 'c:Q']
-        ).properties(title='Latest Agent Status by Agent', height=360)
-        st.altair_chart(chart_m, use_container_width=True)
-    else:
-        st.info("Belum ada matriks status agent pada periode ini.")
-
-    st.markdown("---")
-    # Paid Amount trend (from payments)
-    pay_rows = fetchall("SELECT paid_date, SUM(paid_amount) as amount FROM payments WHERE DATE(paid_date) >= ? GROUP BY paid_date ORDER BY paid_date", (start_date.isoformat(),))
-    if pay_rows:
-        dfp = pd.DataFrame(pay_rows)
-        line = alt.Chart(dfp).mark_line(point=True).encode(
-            x=alt.X('paid_date:T', title='Tanggal'),
-            y=alt.Y('amount:Q', title='Paid Amount'),
-            tooltip=['paid_date:T','amount:Q']
-        ).properties(title='Paid Amount Harian')
-        st.altair_chart(line, use_container_width=True)
-    else:
-        st.info("Belum ada Payment Recap pada periode ini.")
-
-    st.markdown("---")
-    # Saving by Agent (sum of payments joined to agent assignments)
-    sav_rows = fetchall(
-        """
-        SELECT COALESCE(aa.Agent_Assigned_To, '(Unassigned)') AS agent, COALESCE(SUM(p.paid_amount),0) AS amount
-        FROM payments p
-        LEFT JOIN agent_assignments aa ON aa.Agreement_No = p.Agreement_No
-        WHERE DATE(p.paid_date) >= ?
-        GROUP BY COALESCE(aa.Agent_Assigned_To, '(Unassigned)')
-        ORDER BY amount DESC
-        LIMIT 20
-        """,
-        (start_date.isoformat(),)
-    )
-    if sav_rows:
-        df_sav = pd.DataFrame(sav_rows)
-        bar = alt.Chart(df_sav).mark_bar(color='#43A047').encode(
-            x=alt.X('amount:Q', title='Paid Amount'),
-            y=alt.Y('agent:N', sort='-x', title='Agent'),
-            tooltip=['agent:N','amount:Q']
-        ).properties(title='Saving by Agent', height=360)
-        st.altair_chart(bar, use_container_width=True)
-    else:
-        st.info("Belum ada saving pada periode ini.")
-
-    st.markdown("---")
-    # Saving comparison (MoM to date) — simple total comparison
-    this_month_start = today.replace(day=1)
-    last_month_end = this_month_start - timedelta(days=1)
+    # -------- KPI calculations --------
+    today = date.today()
+    start_of_week = today - timedelta(days=today.weekday())
+    start_of_month = today.replace(day=1)
+    last_month_end = start_of_month - timedelta(days=1)
     last_month_start = last_month_end.replace(day=1)
-    # up to same day-of-month if exists
-    day_to = min(today.day, (last_month_end.day if hasattr(last_month_end, 'day') else today.day))
-    this_to_date = fetchone("SELECT COALESCE(SUM(paid_amount),0) v FROM payments WHERE DATE(paid_date) BETWEEN ? AND ?", (this_month_start.isoformat(), today.isoformat()))['v']
-    last_to_date_end = last_month_start + timedelta(days=day_to-1)
-    last_to_date = fetchone("SELECT COALESCE(SUM(paid_amount),0) v FROM payments WHERE DATE(paid_date) BETWEEN ? AND ?", (last_month_start.isoformat(), last_to_date_end.isoformat()))['v']
-    colS1, colS2, colS3 = st.columns(3)
-    with colS1:
-        st.metric("This Month (to-date)", f"{this_to_date:,.0f}")
-    with colS2:
-        st.metric("Last Month (same days)", f"{last_to_date:,.0f}")
-    with colS3:
-        delta_val = (this_to_date - last_to_date)
-        st.metric("Delta", f"{delta_val:,.0f}", delta=f"{delta_val:,.0f}")
+
+    # Total users (approved)
+    total_users = (fetchone("SELECT COUNT(*) c FROM users WHERE approved=1") or {}).get('c', 0)
+    # Active (login) today
+    active_today = (fetchone("""
+        SELECT COUNT(DISTINCT user_id) c
+        FROM audit_logs
+        WHERE action='LOGIN' AND DATE(timestamp) = DATE(?)
+    """, (today.isoformat(),)) or {}).get('c', 0)
+
+    # Completed = agreements with any payment recorded
+    completed_total = (fetchone("SELECT COUNT(DISTINCT Agreement_No) c FROM payments WHERE COALESCE(paid_amount,0) > 0") or {}).get('c', 0)
+    # Total assigned loans (active)
+    assigned_total = (fetchone("SELECT COUNT(DISTINCT Agreement_No) c FROM agent_assignments WHERE IFNULL(active,1)=1") or {}).get('c', 0)
+    pending_total = max(assigned_total - completed_total, 0)
+
+    # Completed this week and this month (for tiny captions)
+    completed_week = (fetchone("SELECT COUNT(DISTINCT Agreement_No) c FROM payments WHERE DATE(paid_date) >= DATE(?)", (start_of_week.isoformat(),)) or {}).get('c', 0)
+    completed_month = (fetchone("SELECT COUNT(DISTINCT Agreement_No) c FROM payments WHERE DATE(paid_date) BETWEEN DATE(?) AND DATE(?)", (start_of_month.isoformat(), today.isoformat())) or {}).get('c', 0)
+
+    # Docs/new assignments this month vs last month
+    new_this_month = (fetchone("SELECT COUNT(DISTINCT Agreement_No) c FROM agent_assignments WHERE DATE(assigned_at) BETWEEN DATE(?) AND DATE(?)", (start_of_month.isoformat(), today.isoformat())) or {}).get('c', 0)
+    new_last_month = (fetchone("SELECT COUNT(DISTINCT Agreement_No) c FROM agent_assignments WHERE DATE(assigned_at) BETWEEN DATE(?) AND DATE(?)", (last_month_start.isoformat(), last_month_end.isoformat())) or {}).get('c', 0)
+    pct_vs_last = 0.0
+    try:
+        if new_last_month > 0:
+            pct_vs_last = (new_this_month / new_last_month) * 100.0
+    except Exception:
+        pct_vs_last = 0.0
+
+    # Pending delta vs yesterday
+    yesterday = today - timedelta(days=1)
+    assigned_y = (fetchone("SELECT COUNT(DISTINCT Agreement_No) c FROM agent_assignments WHERE DATE(assigned_at) <= DATE(?)", (yesterday.isoformat(),)) or {}).get('c', 0)
+    completed_y = (fetchone("SELECT COUNT(DISTINCT Agreement_No) c FROM payments WHERE DATE(paid_date) <= DATE(?)", (yesterday.isoformat(),)) or {}).get('c', 0)
+    pending_y = max(assigned_y - completed_y, 0)
+    delta_pending = pending_total - pending_y
+
+    # -------- KPI cards (styled) --------
+    st.markdown(
+        """
+        <style>
+        .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 12px 0 4px 0; }
+        .kpi-card { background: #fff; border: 1px solid #E9ECEF; border-radius: 12px; padding: 16px; box-shadow: 0 2px 6px rgba(16,24,40,0.04); }
+        .kpi-title { font-size: 13px; color: #475467; margin-bottom: 6px; display:flex; align-items:center; gap:8px; }
+        .kpi-value { font-size: 28px; font-weight: 700; color: #1F2937; }
+        .kpi-sub { font-size: 12px; color: #667085; }
+        .pill { display:inline-flex; align-items:center; gap:6px; padding:2px 8px; border-radius: 999px; font-size:12px; }
+        .pill-warning { background:#FFF7ED; color:#C2410C; }
+        .pill-success { background:#ECFDF3; color:#027A48; }
+        .pill-info { background:#EEF4FF; color:#3538CD; }
+        .pill-purple { background:#F4F3FF; color:#6941C6; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("<div class='kpi-grid'>", unsafe_allow_html=True)
+    # 1) Pending
+    st.markdown(
+        f"""
+        <div class='kpi-card'>
+          <div class='kpi-title'><span>🕒 Dokumen Pending</span></div>
+          <div class='kpi-value'>{pending_total:,}</div>
+          <div class='kpi-sub'>{{sign}}{abs(delta_pending):,} dari kemarin</div>
+        </div>
+        """.replace("{sign}", "+" if delta_pending>=0 else "-"),
+        unsafe_allow_html=True,
+    )
+    # 2) Selesai
+    st.markdown(
+        f"""
+        <div class='kpi-card'>
+          <div class='kpi-title'><span>✅ Dokumen Selesai</span></div>
+          <div class='kpi-value'>{completed_total:,}</div>
+          <div class='kpi-sub'>+{completed_week:,} minggu ini</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    # 3) Total User
+    st.markdown(
+        f"""
+        <div class='kpi-card'>
+          <div class='kpi-title'><span>👥 Total User</span></div>
+          <div class='kpi-value'>{total_users:,}</div>
+          <div class='kpi-sub'>{active_today:,} aktif hari ini</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    # 4) Dokumen Bulan Ini
+    st.markdown(
+        f"""
+        <div class='kpi-card'>
+          <div class='kpi-title'><span>📄 Dokumen Bulan Ini</span></div>
+          <div class='kpi-value'>{new_this_month:,}</div>
+          <div class='kpi-sub'>{(pct_vs_last or 0):.0f}% dari bulan lalu</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # -------- Pending approvals banner --------
+    pending_approvals = get_pending_users_count()
+    with st.container():
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+        st.markdown(
+            f"""
+            <div class='kpi-card' style='padding:14px;'>
+              <div class='kpi-title' style='margin-bottom:2px'>📝 Pending User Approvals</div>
+              <div style='display:flex; align-items:center; gap:12px;'>
+                <div class='pill pill-info'><strong>{pending_approvals}</strong></div>
+                <div class='kpi-sub'>Number of newly registered accounts waiting for admin approval.</div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("---")
+
+    # -------- Bottom tables: Recent logs | Upcoming deadlines --------
+    left, right = st.columns([3, 2])
+
+    # Recent Activity Logs
+    with left:
+        st.subheader("Recent Activity Logs 🧾")
+        logs = fetchall(
+            """
+            SELECT audit_logs.timestamp, COALESCE(users.full_name, users.name, users.login_id) AS user,
+                   audit_logs.action, audit_logs.details
+            FROM audit_logs
+            LEFT JOIN users ON users.id = audit_logs.user_id
+            ORDER BY audit_logs.id DESC LIMIT 10
+            """
+        )
+        if logs:
+            # Format to local GMT+7 display similar to Audit page
+            def _to_gmt7(ts):
+                try:
+                    dt = datetime.fromisoformat(ts)
+                    return (dt + timedelta(hours=7)).strftime("%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    return ts
+            df_logs = pd.DataFrame([
+                {"timestamp": _to_gmt7(r.get("timestamp","")), "user": r.get("user",""), "action": r.get("action",""), "detail": r.get("details",""),}
+                for r in logs
+            ])
+            show_cols = [c for c in ["timestamp","user","action","detail"] if c in df_logs.columns]
+            st.dataframe(df_logs[show_cols], hide_index=True, use_container_width=True)
+        else:
+            st.info("Belum ada aktivitas.")
+
+    # Upcoming Document Deadlines (PTP)
+    with right:
+        st.subheader("Upcoming Document Deadlines ⏰")
+        ptps = fetchall(
+            """
+            SELECT Agreement_No, agent, agent_ptp_amount, agent_ptp_date, agent_status
+            FROM agent_results
+            WHERE COALESCE(agent_status,'')='PTP' AND DATE(agent_ptp_date) >= DATE(?)
+            ORDER BY DATE(agent_ptp_date) ASC
+            LIMIT 10
+            """,
+            (today.isoformat(),)
+        )
+        if ptps:
+            df_ptp = pd.DataFrame([
+                {
+                    "Nomor Dokumen": r.get('Agreement_No'),
+                    "Agent": r.get('agent'),
+                    "PTP Amount": r.get('agent_ptp_amount'),
+                    "Batas Waktu": r.get('agent_ptp_date'),
+                    "Status": r.get('agent_status'),
+                } for r in ptps
+            ])
+            st.dataframe(df_ptp, use_container_width=True, hide_index=True)
+        else:
+            st.info("Tidak ada PTP yang akan jatuh tempo.")
 
 # -------------------------
 # User Setting Page
