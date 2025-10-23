@@ -2013,28 +2013,8 @@ def page_chat_ai():
         div[data-testid="stChatMessage"]:has(svg[data-testid="stChatMessageAvatarIcon"]) {
             background: #FDFDFE;
         }
-        /* Chat input spacing */
-        /* Pin the chat input to the bottom of the viewport */
-        div[data-testid="stChatInput"] {
-            position: fixed;
-            /* Offset by sidebar width so it doesn't sit under the sidebar */
-            left: var(--sb-width, 0px);
-            right: 0;
-            bottom: 0;
-            margin: 0; /* override margins so it sits flush */
-            padding: 10px 16px;
-            background: rgba(255,255,255,0.98);
-            backdrop-filter: blur(4px);
-            border-top: 1px solid #EEE;
-            z-index: 1000;
-            width: calc(100vw - var(--sb-width, 0px));
-            box-sizing: border-box;
-        }
-
-        /* Add bottom padding to main content so last bubbles are not hidden behind the fixed input */
-        [data-testid="stAppViewContainer"] .main .block-container {
-            padding-bottom: calc(150px + env(safe-area-inset-bottom, 0px)) !important;
-        }
+        /* Chat input spacing (default behavior, simple spacing only) */
+        div[data-testid="stChatInput"] { margin-top: 8px; }
 
         /* Pills */
         .pill { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px; font-size:12px; font-weight:600; }
@@ -2049,26 +2029,7 @@ def page_chat_ai():
         """,
         unsafe_allow_html=True,
     )
-    # Dynamically compute sidebar width to keep chat input clear of the sidebar
-    st.markdown(
-        """
-        <script>
-        (function(){
-            const setSBW = () => {
-                try {
-                    const sb = document.querySelector('[data-testid="stSidebar"]');
-                    const w = sb && getComputedStyle(sb).display !== 'none' ? sb.getBoundingClientRect().width : 0;
-                    document.documentElement.style.setProperty('--sb-width', (w||0) + 'px');
-                } catch(e) {}
-            };
-            new ResizeObserver(setSBW).observe(document.body);
-            window.addEventListener('resize', setSBW);
-            setSBW();
-        })();
-        </script>
-        """,
-        unsafe_allow_html=True,
-    )
+    # (Input follows Streamlit default positioning; no JS injection needed)
 
     # Layout: chat on left, memory and settings on right
     left, right = st.columns([2, 1])
