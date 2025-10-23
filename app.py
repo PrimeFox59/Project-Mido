@@ -1824,6 +1824,39 @@ def page_chat_ai():
     st.title("🤖 Chat AI")
     st.caption("Tanya apa pun terkait sistem ini atau gunakan memori khusus.")
 
+    # Scoped CSS for Chat AI aesthetics (lightweight, page-local intent)
+    st.markdown(
+        """
+        <style>
+        /* Chat message bubble styling */
+        div[data-testid="stChatMessage"] {
+            background: #F8FAFF;
+            border: 1px solid #EEF2FF;
+            border-radius: 12px;
+            padding: 8px 12px;
+            margin: 8px 0;
+        }
+        /* Slightly different background for assistant to improve contrast */
+        div[data-testid="stChatMessage"]:has(svg[data-testid="stChatMessageAvatarIcon"]) {
+            background: #FDFDFE;
+        }
+        /* Chat input spacing */
+        div[data-testid="stChatInput"] { margin-top: 8px; }
+
+        /* Pills */
+        .pill { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px; font-size:12px; font-weight:600; }
+        .pill-success { background:#ECFDF3; color:#027A48; border:1px solid #A6F4C5; }
+        .pill-warning { background:#FFF7ED; color:#C2410C; border:1px solid #FED7AA; }
+        .muted { color:#667085; font-size:12px; }
+
+        /* Right column subtle section spacing */
+        .section { margin-bottom: 14px; }
+        .section h3, .section h4 { margin-bottom: 6px; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     # Layout: chat on left, memory and settings on right
     left, right = st.columns([2, 1])
 
@@ -1839,13 +1872,16 @@ def page_chat_ai():
                     st.rerun()
                 else:
                     st.error("Gagal menambahkan memori.")
-        st.markdown("---")
+        st.markdown("")
         st.subheader("🔐 Status Koneksi AI")
-        if get_gemini_api_key():
-            st.success("API key Gemini ditemukan di Streamlit Secrets dan siap digunakan.")
+        has_key = bool(get_gemini_api_key())
+        if has_key:
+            st.markdown("<span class='pill pill-success'>Connected</span>", unsafe_allow_html=True)
+            st.caption("API key ditemukan di Streamlit Secrets dan siap digunakan.")
         else:
-            st.error("API key Gemini belum ada di Streamlit Secrets. Tambahkan [gemini].api_key atau GEMINI_API_KEY, lalu jalankan ulang aplikasi.")
-        st.markdown("---")
+            st.markdown("<span class='pill pill-warning'>Not Configured</span>", unsafe_allow_html=True)
+            st.caption("Tambahkan [gemini].api_key atau GEMINI_API_KEY di Streamlit Secrets, lalu jalankan ulang aplikasi.")
+
         st.subheader("📚 Basis Pengetahuan")
         mem = ai_get_all_knowledge()
         st.text_area("Memori Tersimpan (kronologis):", value=(mem if mem else "Memori masih kosong."), height=260, disabled=True)
