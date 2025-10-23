@@ -2025,6 +2025,19 @@ def page_chat_ai():
         /* Right column subtle section spacing */
         .section { margin-bottom: 14px; }
         .section h3, .section h4 { margin-bottom: 6px; }
+
+        /* Scrollable chat area: constrain height and enable vertical scroll */
+        /* We target the specific container that includes a small marker element */
+        div[data-testid="stVerticalBlock"]:has(.chat-scroll-marker) {
+            max-height: 520px; /* adjust as needed */
+            overflow-y: auto;
+            padding: 6px 8px;
+            border: 1px solid #EEF2FF;
+            border-radius: 12px;
+            background: #FFFFFF;
+        }
+        /* Smooth scrolling feel (optional) */
+        div[data-testid="stVerticalBlock"]:has(.chat-scroll-marker) { scroll-behavior: smooth; }
         </style>
         """,
         unsafe_allow_html=True,
@@ -2051,10 +2064,8 @@ def page_chat_ai():
         has_key = bool(get_gemini_api_key())
         if has_key:
             st.markdown("<span class='pill pill-success'>Connected</span>", unsafe_allow_html=True)
-            st.caption("API key ditemukan di Streamlit Secrets dan siap digunakan.")
         else:
             st.markdown("<span class='pill pill-warning'>Not Configured</span>", unsafe_allow_html=True)
-            st.caption("Tambahkan [gemini].api_key atau GEMINI_API_KEY di Streamlit Secrets, lalu jalankan ulang aplikasi.")
         with st.expander("📎 Lampirkan Data dari Database (opsional)", expanded=False):
             sel_table = st.selectbox("Pilih tabel", sorted(list(SAFE_TABLES)), key="ai_tbl_sel")
             cols = _get_table_columns(sel_table) if sel_table else []
@@ -2110,9 +2121,15 @@ def page_chat_ai():
             st.session_state.ai_messages = [
                 {"role": "assistant", "content": "Halo! Saya Prime AI. Apa yang bisa saya bantu?"}
             ]
-        for msg in st.session_state.ai_messages:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
+
+        # Wrap chat messages inside a scrollable container (bounded area)
+        chat_box = st.container()
+        with chat_box:
+            # Marker element for CSS :has() selector to apply scroll box styling
+            st.markdown("<div class='chat-scroll-marker'></div>", unsafe_allow_html=True)
+            for msg in st.session_state.ai_messages:
+                with st.chat_message(msg["role"]):
+                    st.markdown(msg["content"])
 
         user_input = st.chat_input("Tulis pesan Anda…")
         if user_input:
