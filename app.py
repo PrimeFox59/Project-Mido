@@ -2009,12 +2009,21 @@ def page_dashboard():
     st.markdown(
         """
         <style>
-        /* KPI in vertical rows (single column) */
-        .kpi-grid { display: grid; grid-template-columns: 1fr; gap: 12px; margin: 12px 0 4px 0; }
-        .kpi-card { background: #fff; border: 1px solid #E9ECEF; border-radius: 12px; padding: 16px; box-shadow: 0 2px 6px rgba(16,24,40,0.04); }
-        .kpi-title { font-size: 13px; color: #475467; margin-bottom: 6px; display:flex; align-items:center; gap:8px; }
-        .kpi-value { font-size: 28px; font-weight: 700; color: #1F2937; }
-        .kpi-sub { font-size: 12px; color: #667085; }
+        /* KPI cards - row of 4 with soft accent circle like the reference */
+        .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 12px 0 4px 0; }
+        @media (max-width: 1100px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+        @media (max-width: 700px) { .kpi-grid { grid-template-columns: 1fr; } }
+        .kpi-card { position: relative; overflow: hidden; background: #fff; border: 1px solid #E9ECEF; border-radius: 16px; padding: 18px; box-shadow: 0 2px 6px rgba(16,24,40,0.05); }
+        .kpi-card::after { content:""; position:absolute; right:-30px; top:-40px; width:180px; height:180px; border-radius: 50%; background: radial-gradient(circle at center, var(--accent-light, #EEF4FF), rgba(255,255,255,0) 65%); opacity:.8; }
+        .kpi-title { letter-spacing: .4px; text-transform: uppercase; font-size: 12px; color: #475467; margin-bottom: 8px; }
+        .kpi-value { font-size: 30px; font-weight: 800; color: var(--accent, #1F2937); line-height: 1.1; }
+        .kpi-sub { font-size: 12px; color: #667085; margin-top: 6px; }
+        /* Accent variants */
+        .accent-orange { --accent: #F97316; --accent-light: #FFF7ED; }
+        .accent-blue   { --accent: #2563EB; --accent-light: #EEF4FF; }
+        .accent-purple { --accent: #9333EA; --accent-light: #F4F3FF; }
+        .accent-green  { --accent: #16A34A; --accent-light: #ECFDF3; }
+        /* Pills (still used in approvals banner) */
         .pill { display:inline-flex; align-items:center; gap:6px; padding:2px 8px; border-radius: 999px; font-size:12px; }
         .pill-warning { background:#FFF7ED; color:#C2410C; }
         .pill-success { background:#ECFDF3; color:#027A48; }
@@ -2029,10 +2038,10 @@ def page_dashboard():
     # 1) Pending
     st.markdown(
         f"""
-        <div class='kpi-card'>
-          <div class='kpi-title'><span>🕒 Dokumen Pending</span></div>
-          <div class='kpi-value'>{pending_total:,}</div>
-          <div class='kpi-sub'>{{sign}}{abs(delta_pending):,} dari kemarin</div>
+        <div class='kpi-card accent-orange'>
+            <div class='kpi-title'>Dokumen Pending</div>
+            <div class='kpi-value'>{pending_total:,}</div>
+            <div class='kpi-sub'>{{sign}}{abs(delta_pending):,} dari kemarin</div>
         </div>
         """.replace("{sign}", "+" if delta_pending>=0 else "-"),
         unsafe_allow_html=True,
@@ -2040,10 +2049,10 @@ def page_dashboard():
     # 2) Selesai
     st.markdown(
         f"""
-        <div class='kpi-card'>
-          <div class='kpi-title'><span>✅ Dokumen Selesai</span></div>
-          <div class='kpi-value'>{completed_total:,}</div>
-          <div class='kpi-sub'>+{completed_week:,} minggu ini</div>
+        <div class='kpi-card accent-blue'>
+            <div class='kpi-title'>Dokumen Selesai</div>
+            <div class='kpi-value'>{completed_total:,}</div>
+            <div class='kpi-sub'>+{completed_week:,} minggu ini</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -2051,10 +2060,10 @@ def page_dashboard():
     # 3) Total User
     st.markdown(
         f"""
-        <div class='kpi-card'>
-          <div class='kpi-title'><span>👥 Total User</span></div>
-          <div class='kpi-value'>{total_users:,}</div>
-          <div class='kpi-sub'>{active_today:,} aktif hari ini</div>
+        <div class='kpi-card accent-purple'>
+            <div class='kpi-title'>Total User</div>
+            <div class='kpi-value'>{total_users:,}</div>
+            <div class='kpi-sub'>{active_today:,} aktif hari ini</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -2062,10 +2071,10 @@ def page_dashboard():
     # 4) Dokumen Bulan Ini
     st.markdown(
         f"""
-        <div class='kpi-card'>
-          <div class='kpi-title'><span>📄 Dokumen Bulan Ini</span></div>
-          <div class='kpi-value'>{new_this_month:,}</div>
-          <div class='kpi-sub'>{(pct_vs_last or 0):.0f}% dari bulan lalu</div>
+        <div class='kpi-card accent-green'>
+            <div class='kpi-title'>Dokumen Bulan Ini</div>
+            <div class='kpi-value'>{new_this_month:,}</div>
+            <div class='kpi-sub'>{(pct_vs_last or 0):.0f}% dari bulan lalu</div>
         </div>
         """,
         unsafe_allow_html=True,
