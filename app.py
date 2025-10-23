@@ -527,8 +527,9 @@ def get_project_capacity_bytes(default_bytes: int = 2 * 1024 * 1024 * 1024) -> i
 # Chat AI helpers (Gemini + Memory)
 # -------------------------
 def get_gemini_api_key():
-    """Fetch Gemini API key from secrets/env/session.
-    Priority: st.secrets['gemini']['api_key'] -> st.secrets['GEMINI_API_KEY'] -> env GEMINI_API_KEY -> st.session_state['gemini_api_key']
+    """Fetch Gemini API key from Streamlit secrets or environment.
+    Priority: st.secrets['gemini']['api_key'] -> st.secrets['GEMINI_API_KEY'] -> env GEMINI_API_KEY
+    (No in-app manual entry; configured via Streamlit secrets only.)
     """
     try:
         # Nested object style
@@ -548,7 +549,7 @@ def get_gemini_api_key():
             return os.environ.get('GEMINI_API_KEY')
     except Exception:
         pass
-    return st.session_state.get('gemini_api_key')
+    return None
 
 def ai_add_knowledge(fact: str) -> bool:
     """Insert a new fact into ai_knowledge table in the main app DB."""
@@ -635,7 +636,7 @@ def ai_generate_response(prompt: str, chat_history_for_gemini: list, context_dat
     """Call Gemini REST API to generate a response with system + memory context."""
     api_key = get_gemini_api_key()
     if not api_key:
-        return "Silakan set API key Gemini terlebih dahulu."
+        return "API key Gemini belum dikonfigurasi di Streamlit secrets. Tambahkan [gemini].api_key atau GEMINI_API_KEY di Secrets."
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
         headers = {'Content-Type': 'application/json'}
@@ -1826,7 +1827,7 @@ def page_chat_ai():
     # Layout: chat on left, memory and settings on right
     left, right = st.columns([2, 1])
 
-    # Right: Memory center + API key
+    # Right: Memory center + AI status (no manual key input)
     with right:
         st.subheader("🧠 Memori")
         with st.form("ai_mem_add_form", clear_on_submit=True):
@@ -1839,13 +1840,11 @@ def page_chat_ai():
                 else:
                     st.error("Gagal menambahkan memori.")
         st.markdown("---")
-        st.subheader("🔑 API Key")
-        if not get_gemini_api_key():
-            st.warning("API key Gemini belum diset. Masukkan sementara di bawah atau set di secrets.")
-        temp_key = st.text_input("GEMINI_API_KEY (opsional)", type="password", value=st.session_state.get('gemini_api_key',''))
-        if st.button("Simpan Sementara API Key"):
-            st.session_state['gemini_api_key'] = temp_key.strip()
-            st.success("API key disimpan untuk sesi ini.")
+        st.subheader("🔐 Status Koneksi AI")
+        if get_gemini_api_key():
+            st.success("API key Gemini ditemukan di Streamlit Secrets dan siap digunakan.")
+        else:
+            st.error("API key Gemini belum ada di Streamlit Secrets. Tambahkan [gemini].api_key atau GEMINI_API_KEY, lalu jalankan ulang aplikasi.")
         st.markdown("---")
         st.subheader("📚 Basis Pengetahuan")
         mem = ai_get_all_knowledge()
