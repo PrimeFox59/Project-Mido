@@ -2146,6 +2146,11 @@ def page_chat_ai():
                 with st.chat_message("assistant"):
                     st.markdown(reply)
                 st.session_state.ai_messages.append({"role": "assistant", "content": reply})
+                # Rerun to reflow layout so the typing box sits below the latest bubbles
+                try:
+                    st.rerun()
+                except Exception:
+                    pass
 
 def main():
     init_db()
