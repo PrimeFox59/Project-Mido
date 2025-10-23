@@ -33,8 +33,14 @@ _icon_arg = ICON_PATH if os.path.exists(ICON_PATH) else "icon.png"
 st.set_page_config(layout="wide", page_icon=_icon_arg, page_title="Minama Felonic Solutions")
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
     conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA busy_timeout=10000;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+    except Exception:
+        pass
     return conn
 
 def init_db():
@@ -329,10 +335,35 @@ def init_db():
     except Exception:
         pass
 
-    # ensure at least one user exists (seed)
-    c.execute("SELECT COUNT(*) as cnt FROM users")
-    row = c.fetchone()
-    if row['cnt'] == 0:
+    # ensure at least one user exists (seed) — robust against transient locks
+    try:
+        c.execute("SELECT COUNT(*) as cnt FROM users")
+        row = c.fetchone()
+        cnt_users = row['cnt'] if row and 'cnt' in row.keys() else 0
+    except Exception:
+        # As a fallback, ensure table exists, then attempt again using a short-lived cursor
+        try:
+            c.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                login_id TEXT UNIQUE,
+                password_hash TEXT,
+                full_name TEXT,
+                name TEXT,
+                email TEXT UNIQUE,
+                role TEXT DEFAULT 'Agent',
+                approved INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+            """)
+            conn.commit()
+            c2 = conn.cursor()
+            c2.execute("SELECT COUNT(*) as cnt FROM users")
+            row2 = c2.fetchone()
+            cnt_users = row2['cnt'] if row2 else 0
+        except Exception:
+            cnt_users = 0
+    if cnt_users == 0:
         # Create default users for each role
         users_to_seed = [
             {"login_id": "superuser", "full_name": "Superuser", "email": "superuser", "password": "superuser123", "role": "Superuser", "approved": 1},
@@ -353,7 +384,7 @@ def init_db():
                 # User might already exist, skip.
                 pass
         
-        conn.commit()
+    conn.commit()
 
     # Always ensure at least one approved user exists for each role (idempotent)
     try:
