@@ -2994,6 +2994,150 @@ def page_supervisor():
             st.dataframe(pd.DataFrame(mc_rows), use_container_width=True, hide_index=True)
 
         st.markdown("---")
+        st.subheader("📥 Upload Masked Company Dictionary (CSV/XLSX)")
+        st.caption("Header minimal: Masked Company Name, Decoded Company Name. Duplikat akan diperbarui (upsert by masked_name). Opsi kolom 'Notes' bersifat opsional.")
+        # Downloadable CSV template
+        try:
+            _tpl_df = pd.DataFrame({
+                "Masked Company Name": ["VI****** CA** IN******* PT"],
+                "Decoded Company Name": ["VICTORIA CARE INDONESIA PT"],
+            })
+            _tpl_csv = _tpl_df.to_csv(index=False).encode("utf-8")
+            st.download_button("Download template CSV", data=_tpl_csv, file_name="masked_company_template.csv", mime="text/csv", key="masked_dict_tpl_dl")
+        except Exception:
+            pass
+
+        mc_file = st.file_uploader("Pilih file dictionary", type=["csv", "xlsx"], key="masked_dict_upload")
+        if mc_file is not None:
+            try:
+                if mc_file.name.lower().endswith(".csv"):
+                    dfm = pd.read_csv(mc_file)
+                else:
+                    try:
+                        # Prefer openpyxl if available (xlsx)
+                        dfm = pd.read_excel(mc_file, engine="openpyxl")
+                    except Exception:
+                        dfm = pd.read_excel(mc_file)
+
+                # Normalize/alias headers to internal names
+                def _norm_mc(s: str) -> str:
+                    if s is None:
+                        return ""
+                    s = str(s).replace("\ufeff", "").strip()
+                    s = re.sub(r"\s+", " ", s)
+                    return s.lower()
+
+                alias_map_mc = {
+                    # masked name
+                    "masked company name": "masked_name",
+                    "masked_name": "masked_name",
+                    "masked": "masked_name",
+                    # canonical/decoded name
+                    "decoded company name": "canonical_name",
+                    "decoded company name (nama perusahaan sebenarnya)": "canonical_name",
+                    "canonical name": "canonical_name",
+                    "canonical_name": "canonical_name",
+                    "nama perusahaan sebenarnya": "canonical_name",
+                    "decoded": "canonical_name",
+                    # optional notes
+                    "notes": "mapping_notes",
+                    "note": "mapping_notes",
+                    "catatan": "mapping_notes",
+                    "mapping notes": "mapping_notes",
+                    "mapping_notes": "mapping_notes",
+                }
+
+                new_cols = []
+                for c in list(dfm.columns):
+                    key = _norm_mc(c)
+                    new_cols.append(alias_map_mc.get(key, key))
+                dfm.columns = new_cols
+
+                required = {"masked_name", "canonical_name"}
+                if not required.issubset(set(dfm.columns)):
+                    st.error(f"Kolom wajib tidak lengkap. Ditemukan: {list(dfm.columns)}")
+                else:
+                    # clean values
+                    try:
+                        dfm["masked_name"] = dfm["masked_name"].astype(str).str.strip()
+                    except Exception:
+                        pass
+                    try:
+                        dfm["canonical_name"] = dfm["canonical_name"].astype(str).str.strip()
+                    except Exception:
+                        pass
+                    if "mapping_notes" in dfm.columns:
+                        try:
+                            dfm["mapping_notes"] = dfm["mapping_notes"].astype(str).str.strip()
+                        except Exception:
+                            pass
+                    dfm = dfm[dfm["masked_name"] != ""]
+
+                    # Prefetch existing masked names to count insert/update
+                    try:
+                        existing_set = {r.get('masked_name') for r in fetchall("SELECT masked_name FROM masked_companies") if r.get('masked_name')}
+                    except Exception:
+                        existing_set = set()
+
+                    inserted = 0; updated = 0; skipped = 0
+                    # Batch upsert in a single transaction
+                    try:
+                        conn = sqlite3.connect(DB_PATH, timeout=30)
+                        try:
+                            conn.execute("PRAGMA journal_mode=WAL;")
+                            conn.execute("PRAGMA busy_timeout=10000;")
+                            conn.execute("PRAGMA synchronous=NORMAL;")
+                        except Exception:
+                            pass
+                        cur = conn.cursor()
+
+                        has_notes = "mapping_notes" in dfm.columns
+                        for _, r in dfm.iterrows():
+                            m = (r.get("masked_name") or "").strip()
+                            c = (r.get("canonical_name") or "").strip()
+                            n = (r.get("mapping_notes") or None) if has_notes else None
+                            if not m:
+                                skipped += 1
+                                continue
+                            try:
+                                if has_notes:
+                                    cur.execute(
+                                        """
+                                        INSERT INTO masked_companies (masked_name, canonical_name, mapping_notes)
+                                        VALUES (?,?,?)
+                                        ON CONFLICT(masked_name) DO UPDATE SET
+                                            canonical_name=excluded.canonical_name,
+                                            mapping_notes=COALESCE(excluded.mapping_notes, masked_companies.mapping_notes)
+                                        """,
+                                        (m, c or None, n)
+                                    )
+                                else:
+                                    cur.execute(
+                                        """
+                                        INSERT INTO masked_companies (masked_name, canonical_name)
+                                        VALUES (?,?)
+                                        ON CONFLICT(masked_name) DO UPDATE SET
+                                            canonical_name=excluded.canonical_name
+                                        """,
+                                        (m, c or None)
+                                    )
+                                if m in existing_set:
+                                    updated += 1
+                                else:
+                                    inserted += 1
+                                    existing_set.add(m)
+                            except Exception:
+                                skipped += 1
+
+                        conn.commit()
+                        conn.close()
+                        st.success(f"Upload selesai. Insert baru: {inserted}, Update: {updated}, Dilewati: {skipped}.")
+                    except Exception as e:
+                        st.error(f"Gagal memproses upload: {e}")
+            except Exception as e:
+                st.error(f"Gagal membaca file: {e}")
+
+        st.markdown("---")
         st.subheader("💸 Upload Payment Recap (CSV/XLSX)")
         st.caption("Kolom minimal: Agreement_No, paid_amount, paid_date, status. Duplikat (Agreement_No, paid_date) akan diabaikan.")
         pay_file = st.file_uploader("Pilih file payment recap", type=["csv", "xlsx"], key="pay_recap_supervisor")
