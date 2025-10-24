@@ -318,6 +318,27 @@ def init_db():
         c.execute("CREATE INDEX IF NOT EXISTS idx_agent_results_agent ON agent_results(agent)")
     except Exception:
         pass
+    # 6) Frozen entities (freeze by NIK or Agreement_No to prevent future assignments)
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS frozen_entities (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            NIK_KTP TEXT,
+            Agreement_No TEXT,
+            reason TEXT,
+            note TEXT,
+            active INTEGER DEFAULT 1,
+            created_by TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+    )
+    try:
+        c.execute("CREATE INDEX IF NOT EXISTS idx_frozen_nik ON frozen_entities(NIK_KTP)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_frozen_agr ON frozen_entities(Agreement_No)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_frozen_active ON frozen_entities(active)")
+    except Exception:
+        pass
     # ensure assign_tracer has optional masked company name field
     try:
         cols = [r['name'] for r in c.execute("PRAGMA table_info(assign_tracer)").fetchall()]
@@ -537,6 +558,37 @@ def get_project_capacity_bytes(default_bytes: int = 2 * 1024 * 1024 * 1024) -> i
         return int(val)
     except Exception:
         return int(default_bytes)
+
+# -------------------------
+# Freeze helpers
+# -------------------------
+def is_frozen_by_nik(nik: str) -> bool:
+    try:
+        nik = (nik or '').strip()
+        if not nik:
+            return False
+        row = fetchone("SELECT 1 AS x FROM frozen_entities WHERE active=1 AND NIK_KTP=? LIMIT 1", (nik,))
+        return bool(row)
+    except Exception:
+        return False
+
+def is_frozen_by_agreement(agreement_no: str) -> bool:
+    try:
+        agr = (agreement_no or '').strip()
+        if not agr:
+            return False
+        # Direct freeze by Agreement_No
+        row = fetchone("SELECT 1 AS x FROM frozen_entities WHERE active=1 AND Agreement_No=? LIMIT 1", (agr,))
+        if row:
+            return True
+        # Indirect via NIK of this Agreement_No
+        info = fetchone("SELECT NIK_KTP FROM assign_tracer WHERE Agreement_No=?", (agr,)) or {}
+        nik = (info.get('NIK_KTP') or '').strip()
+        if not nik:
+            return False
+        return is_frozen_by_nik(nik)
+    except Exception:
+        return False
 
 # -------------------------
 # Chat AI helpers (Gemini + Memory)
@@ -2754,7 +2806,7 @@ def page_supervisor():
     require_roles(("Superuser", "Supervisor"))
     st.title("Supervisor Menu")
     # Monitoring first so it's the default view
-    tabs = st.tabs(["Monitoring", "Input", "Trace Assigning", "Agent Assigning", "Trace Results", "Enriched & Lookup"])
+    tabs = st.tabs(["Monitoring", "Input", "Trace Assigning", "Agent Assigning", "Trace Results", "Enriched & Lookup", "Freeze Manager"])
 
     # --- Monitoring Tab ---
     with tabs[0]:
@@ -3004,9 +3056,22 @@ def page_supervisor():
                 st.error(f"Gagal membaca file: {e}")
 
     with tabs[2]:
-        unassigned_rows = fetchall("SELECT id FROM assign_tracer WHERE IFNULL(Assigned_To,'')='' ORDER BY id DESC")
-        unassigned_count = len(unassigned_rows)
+        # Pull minimal fields to evaluate freeze status
+        unassigned_rows = fetchall("SELECT id, Agreement_No, NIK_KTP FROM assign_tracer WHERE IFNULL(Assigned_To,'')='' ORDER BY id DESC")
+        # Filter out frozen rows (by Agreement_No or by NIK)
+        filtered_rows = []
+        frozen_skipped = 0
+        for r in unassigned_rows:
+            agr = (r.get('Agreement_No') or '').strip()
+            nik = (r.get('NIK_KTP') or '').strip()
+            if is_frozen_by_agreement(agr) or (nik and is_frozen_by_nik(nik)):
+                frozen_skipped += 1
+                continue
+            filtered_rows.append(r)
+        unassigned_count = len(filtered_rows)
         st.info(f"Baris belum ter-assign saat ini: {unassigned_count}")
+        if frozen_skipped:
+            st.warning(f"{frozen_skipped} baris dilewati karena status Freeze (berdasarkan NIK/Agreement_No).")
 
         if unassigned_count > 0:
             # Build tracer options in this scope (approved users)
@@ -3037,7 +3102,7 @@ def page_supervisor():
                 if not selected_tracers or len(selected_tracers) < 1:
                     st.warning("Pilih minimal 1 tracer.")
                 else:
-                    ids = [r['id'] for r in unassigned_rows]
+                    ids = [r['id'] for r in filtered_rows]
                     try:
                         import random
                         if st.session_state.get("multi_assign_shuffle", True):
@@ -3046,7 +3111,7 @@ def page_supervisor():
                         limit_val = st.session_state.get("multi_assign_limit", 0)
                         if limit_val and limit_val > 0:
                             ids = ids[: min(limit_val, len(ids))]
-                        # Round-robin distribution
+                        # Round-robin distribution (only for non-frozen rows)
                         updates = []  # list of tuples (assignee, id)
                         for idx, rec_id in enumerate(ids):
                             assignee = selected_tracers[idx % len(selected_tracers)]
@@ -3270,6 +3335,14 @@ def page_supervisor():
                                     else:
                                         skipped += 1
                                 else:
+                                    # If frozen by NIK/Agreement, force unassigned to prevent new assignments
+                                    try:
+                                        nik = (str(row.get('NIK_KTP') or '').strip())
+                                        agr_n = (str(row.get('Agreement_No') or '').strip())
+                                        if (nik and is_frozen_by_nik(nik)) or (agr_n and is_frozen_by_agreement(agr_n)):
+                                            assignee = ""
+                                    except Exception:
+                                        pass
                                     values = [trc_val] + [row.get(f) for f in tracer_fields] + [assignee]
                                     cur.execute(
                                         f"INSERT INTO assign_tracer ({','.join(insert_fields)}) VALUES ({','.join(['?' for _ in insert_fields])})",
@@ -3297,7 +3370,7 @@ def page_supervisor():
         # Determine unassigned agreements from assign_tracer
         base_unassigned = fetchall(
             """
-            SELECT a.Agreement_No, a.Assigned_To AS tracer, a.Masked_Company_Name
+            SELECT a.Agreement_No, a.Assigned_To AS tracer, a.Masked_Company_Name, a.NIK_KTP
             FROM assign_tracer a
             LEFT JOIN agent_assignments ag ON ag.Agreement_No = a.Agreement_No
             WHERE IFNULL(a.Agreement_No,'')<>'' AND ag.Agreement_No IS NULL
@@ -3318,14 +3391,23 @@ def page_supervisor():
         with f3:
             filter_mask = st.text_input("Filter by Masked Company (opsional)")
 
-        # Build filtered list
+        # Build filtered list (exclude frozen by Agreement_No or NIK)
         loans = []
+        frozen_skip_agent = 0
         for r in base_unassigned:
             if filter_tracer and filter_tracer.strip().lower() not in (r.get('tracer') or '').lower():
                 continue
             if filter_mask and filter_mask.strip().lower() not in (r.get('Masked_Company_Name') or '').lower():
                 continue
-            loans.append(r['Agreement_No'])
+            agr = (r.get('Agreement_No') or '').strip()
+            nik = (r.get('NIK_KTP') or '').strip()
+            if is_frozen_by_agreement(agr) or (nik and is_frozen_by_nik(nik)):
+                frozen_skip_agent += 1
+                continue
+            loans.append(agr)
+
+        if frozen_skip_agent:
+            st.warning(f"{frozen_skip_agent} loan dilewati karena status Freeze (NIK/Agreement_No).")
 
         cset1, cset2 = st.columns(2)
         with cset1:
@@ -3377,6 +3459,13 @@ def page_supervisor():
                     offset = int(start_offset) % n_agents
                     for i, agr in enumerate(ids):
                         agent_to = selected_agents[(i + offset) % n_agents]
+                        # Double-check freeze before writing
+                        if is_frozen_by_agreement(agr):
+                            continue
+                        info = fetchone("SELECT NIK_KTP FROM assign_tracer WHERE Agreement_No=?", (agr,)) or {}
+                        nik = (info.get('NIK_KTP') or '').strip()
+                        if nik and is_frozen_by_nik(nik):
+                            continue
                         ins_rows.append((agr, agent_to, by))
                     try:
                         conn = sqlite3.connect(DB_PATH)
@@ -3404,6 +3493,111 @@ def page_supervisor():
                         st.rerun()
                 except Exception as e:
                     st.error(f"Gagal assign: {e}")
+
+    # --- Freeze Manager Tab ---
+    with tabs[6]:
+        st.subheader("Freeze Manager (NIK / Agreement_No)")
+        st.caption("Gunakan fitur ini untuk mem-freeze debitur berdasarkan NIK atau kontrak tertentu. Data yang di-freeze tidak akan dapat di-assign ke Tracer maupun Agent.")
+
+        col_fz1, col_fz2 = st.columns(2)
+        with col_fz1:
+            st.markdown("#### Freeze by NIK")
+            nik_in = st.text_input("NIK_KTP", key="freeze_nik")
+            reason_nik = st.text_input("Alasan (opsional)", key="freeze_reason_nik")
+            note_nik = st.text_area("Catatan (opsional)", key="freeze_note_nik", height=80)
+            if st.button("Freeze NIK", key="btn_freeze_nik", type="primary"):
+                nik_val = (nik_in or '').strip()
+                if not nik_val:
+                    st.warning("Masukkan NIK terlebih dahulu.")
+                else:
+                    try:
+                        # If already active, no-op
+                        exists = fetchone("SELECT id FROM frozen_entities WHERE active=1 AND NIK_KTP=? LIMIT 1", (nik_val,))
+                        if exists:
+                            st.info("NIK ini sudah dalam status Freeze.")
+                        else:
+                            u = current_user() or {}
+                            execute(
+                                "INSERT INTO frozen_entities (NIK_KTP, reason, note, created_by) VALUES (?,?,?,?)",
+                                (nik_val, (reason_nik or '').strip() or None, (note_nik or '').strip() or None, (u.get('full_name') or u.get('login_id') or '-'))
+                            )
+                            st.success("Berhasil mem-freeze NIK.")
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"Gagal menyimpan: {e}")
+
+        with col_fz2:
+            st.markdown("#### Freeze by Contract (Agreement_No)")
+            agr_in = st.text_input("Agreement_No", key="freeze_agr")
+            reason_agr = st.text_input("Alasan (opsional)", key="freeze_reason_agr")
+            note_agr = st.text_area("Catatan (opsional)", key="freeze_note_agr", height=80)
+            # Show quick NIK lookup for info
+            if (agr_in or '').strip():
+                info = fetchone("SELECT Debtor_Name, NIK_KTP FROM assign_tracer WHERE Agreement_No=?", ((agr_in or '').strip(),)) or {}
+                if info:
+                    st.caption(f"Debtor: {info.get('Debtor_Name') or '-'} | NIK: {info.get('NIK_KTP') or '-'}")
+            if st.button("Freeze Agreement_No", key="btn_freeze_agr", type="primary"):
+                agr_val = (agr_in or '').strip()
+                if not agr_val:
+                    st.warning("Masukkan Agreement_No terlebih dahulu.")
+                else:
+                    try:
+                        exists = fetchone("SELECT id FROM frozen_entities WHERE active=1 AND Agreement_No=? LIMIT 1", (agr_val,))
+                        if exists:
+                            st.info("Agreement_No ini sudah dalam status Freeze.")
+                        else:
+                            u = current_user() or {}
+                            execute(
+                                "INSERT INTO frozen_entities (Agreement_No, reason, note, created_by) VALUES (?,?,?,?)",
+                                (agr_val, (reason_agr or '').strip() or None, (note_agr or '').strip() or None, (u.get('full_name') or u.get('login_id') or '-'))
+                            )
+                            st.success("Berhasil mem-freeze Agreement_No.")
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"Gagal menyimpan: {e}")
+
+        st.markdown("---")
+        st.markdown("#### Daftar Freeze Aktif")
+        rows = fetchall("SELECT id, NIK_KTP, Agreement_No, reason, note, created_by, created_at FROM frozen_entities WHERE active=1 ORDER BY datetime(created_at) DESC")
+        if not rows:
+            st.info("Belum ada entri Freeze aktif.")
+        else:
+            # Compute impacted count for display
+            disp = []
+            for r in rows:
+                nik = (r.get('NIK_KTP') or '').strip()
+                agr = (r.get('Agreement_No') or '').strip()
+                if nik:
+                    cnt = (fetchone("SELECT COUNT(*) c FROM assign_tracer WHERE COALESCE(NIK_KTP,'')=?", (nik,)) or {}).get('c', 0)
+                    target = f"NIK {nik}"
+                elif agr:
+                    cnt = (fetchone("SELECT COUNT(*) c FROM assign_tracer WHERE Agreement_No=?", (agr,)) or {}).get('c', 0)
+                    target = f"AGR {agr}"
+                else:
+                    cnt = 0
+                    target = "-"
+                disp.append({
+                    "ID": r.get('id'),
+                    "Target": target,
+                    "Reason": r.get('reason') or '',
+                    "Note": r.get('note') or '',
+                    "Impacted rows": cnt,
+                    "Created By": r.get('created_by') or '-',
+                    "Created At": r.get('created_at') or '-',
+                })
+            st.dataframe(pd.DataFrame(disp))
+
+            # Unfreeze control
+            st.markdown("##### Unfreeze")
+            unfreeze_id = st.text_input("Masukkan ID untuk Unfreeze", key="unfreeze_id")
+            if st.button("Unfreeze", key="btn_unfreeze"):
+                try:
+                    uid = int((unfreeze_id or '0').strip())
+                    execute("UPDATE frozen_entities SET active=0 WHERE id=?", (uid,))
+                    st.success("Berhasil unfreeze.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Gagal unfreeze: {e}")
 
         st.markdown("---")
         st.subheader("Upload Agent Assignments (CSV/XLSX)")
@@ -3433,6 +3627,18 @@ def page_supervisor():
                         if not agr or not agt:
                             skip += 1
                             continue
+                        # Enforce freeze for Agent assignment upload
+                        try:
+                            if is_frozen_by_agreement(agr):
+                                skip += 1
+                                continue
+                            info = fetchone("SELECT NIK_KTP FROM assign_tracer WHERE Agreement_No=?", (agr,)) or {}
+                            nik = (info.get('NIK_KTP') or '').strip()
+                            if nik and is_frozen_by_nik(nik):
+                                skip += 1
+                                continue
+                        except Exception:
+                            pass
                         try:
                             execute("INSERT OR IGNORE INTO agent_assignments (Agreement_No, Agent_Assigned_To, assigned_by) VALUES (?,?,?)", (agr, agt, by))
                             ok += 1
