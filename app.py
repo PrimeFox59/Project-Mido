@@ -425,6 +425,13 @@ def current_user():
 
 def login_user(user_row):
     st.session_state["user"] = dict(user_row)
+    # Setelah login, langsung arahkan ke halaman pertama yang diizinkan untuk role ini
+    try:
+        role = (user_row.get('role') if isinstance(user_row, dict) else None)
+        st.session_state['page'] = first_allowed_page_for_role(role) if role else 'Dashboard'
+    except Exception:
+        # fallback ke Dashboard bila terjadi error
+        st.session_state['page'] = 'Dashboard'
 
 def logout_user():
     # Lakukan backup saat logout (jika kredensial tersedia)
