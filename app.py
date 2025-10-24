@@ -1962,8 +1962,8 @@ def page_gdrive():
             {"category": "Used", "bytes": used_clamped},
             {"category": "Free", "bytes": free_bytes},
         ])
-        # Blue-brown theme colors
-        color_scale = alt.Scale(domain=["Used", "Free"], range=["#8D6E63", "#1E88E5"]) if CAPACITY_BYTES > 0 else alt.Undefined
+        # Use neutral blue/green colors (avoid brown tones); fall back to Altair defaults if capacity unknown
+        color_scale = alt.Scale(domain=["Used", "Free"], range=["#1E88E5", "#4CAF50"]) if CAPACITY_BYTES > 0 else alt.Undefined
         bar = (
             alt.Chart(df_bar)
             .mark_bar(height=36)
