@@ -1322,6 +1322,7 @@ MENU_ITEMS = [
     {"label": "Agent",      "page": "Agent", "roles": ("Superuser", "Supervisor","Agent"), "primary": False},
     {"label": "G Drive",    "page": "G Drive", "roles": ("Superuser", "Supervisor"), "primary": True},
     {"label": "User Setting","page": "User Setting", "roles": ALL_ROLES, "primary": False},
+    {"label": "Guide",       "page": "Guide", "roles": ALL_ROLES, "primary": False},
     {"label": "Audit Log",  "page": "Audit Log", "roles": ("Superuser", "Supervisor","Tracer","Agent"), "primary": False},
 ]
 
@@ -2320,6 +2321,9 @@ def main():
         return
     if st.session_state.page == "G Drive":
         page_gdrive()
+        return
+    if st.session_state.page == "Guide":
+        page_guide()
         return
     if st.session_state.page == "Audit Log":
         page_audit_log()
@@ -3714,6 +3718,136 @@ def page_tracer():
                 st.rerun()
             except Exception as e:
                 st.error(f"Gagal update: {e}")
+
+def page_guide():
+    """User Guide page with detailed application description and quick how-to."""
+    # Accessible to all roles by MENU_ITEMS
+    require_roles(ALL_ROLES)
+    st.title("📘 Panduan Pengguna — Minama Felonic Solutions")
+
+    st.markdown("""
+    ## ⚙️ Gambaran Umum
+    Sistem ini dibangun seperti rantai tiga tahap:
+    1. Supervisor mengunggah dan menugaskan data kasus (nasabah bermasalah, DPD tinggi, dsb).
+    2. Tracer melakukan trace — mencari dan memverifikasi status debitur (apakah masih aktif, bisa dihubungi, dll).
+    3. Agent menindaklanjuti hasil trace dengan penagihan atau negosiasi pembayaran.
+
+    Semua aktivitas disimpan dalam database SQLite (`minama.db`), dan secara rutin di-backup ke Google Drive agar tidak ada kehilangan data.
+    """, unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    st.header("1) Supervisor — Input Data & Penugasan")
+    st.markdown("""
+    - Menu: **Supervisor → Upload Excel/CSV Supervisor Data**.
+    - File yang diunggah akan diparse ke tabel `supervisor_data`.
+    - Setiap baris mewakili 1 pinjaman (Agreement_No / Case_ID) — berisi identitas debitur, kontak, DPD, dan outstanding.
+    - Aplikasi memeriksa header dan menyimpan ke SQLite (`minama.db`).
+    - Supervisor dapat meninjau data, memperbarui baris, dan memilih beberapa Agreement_No untuk ditugaskan ke tracer.
+    - Penugasan dicatat pada tabel `assign_tracer`. Setelah tracer menyerahkan hasil, supervisor dapat menugaskan ke agent (tabel `agent_assignments`).
+    """, unsafe_allow_html=True)
+
+    st.header("2) Tracer — Verifikasi & Investigasi")
+    st.markdown("""
+    - Login sebagai tracer (misal: `tracer` / password seed `tracer123` jika belum diubah).
+    - Buka menu **Tracer** untuk melihat daftar assignment yang ditugaskan kepadamu (dari `assign_tracer`).
+    - Lakukan tracing lapangan/telepon: konfirmasi identitas, status pekerjaan, alamat, catat hasil.
+    - Setiap interaksi disimpan di `trace_results` dengan kolom: `Agreement_No`, `status`, `notes`, `touch_type`, `party`, `created_by`.
+    - Sistem menyimpan banyak touch record per Agreement_No untuk audit trail.
+    """, unsafe_allow_html=True)
+
+    st.header("3) Agent — Penagihan & Pembayaran")
+    st.markdown("""
+    - Setelah tracer mengonfirmasi debitur, supervisor dapat menugaskan Agreement_No ke agent (tabel `agent_assignments`).
+    - Agent login melihat penugasan di menu **Agent**.
+    - Agent melaporkan hasil ke `agent_results` dengan field: `Agreement_No`, `agent_status` (PTP/Paid/Refused), `agent_ptp_amount`, `agent_ptp_date`, `agent_notes`.
+    - Jika pembayaran terjadi, supervisor bisa menambahkan bukti ke tabel `payments` (`Agreement_No`, `paid_amount`, `paid_date`, `status`, `source_file`, `uploaded_by`).
+    """, unsafe_allow_html=True)
+
+    st.header("4) Monitoring & Analytics")
+    st.markdown("""
+    - Dashboard menampilkan KPI: jumlah pinjaman aktif, sudah lunas, pending, dan metrik per role.
+    - Data diambil dari tabel `supervisor_data`, `trace_results`, `agent_results`, dan `payments`.
+    - Visualisasi dapat menggunakan Pandas/Altair pada Streamlit.
+    """, unsafe_allow_html=True)
+
+    st.header("5) Backup & Auto-Restore")
+    st.markdown("""
+    - Semua aktivitas penting dicatat di `audit_logs`.
+    - Backup otomatis ke Google Drive lewat fungsi `perform_backup()` dan log di `backup_log`.
+    - Jika aplikasi restart dan DB terdeteksi fresh (kosong), fungsi `attempt_auto_restore_if_seed()` mencoba restore dari backup Drive terbaru.
+    - Pastikan `service_account` disimpan di `st.secrets` untuk mengaktifkan Drive integration.
+    """, unsafe_allow_html=True)
+
+    st.header("6) Kontrol Peran & Keamanan")
+    st.markdown("""
+    - Role yang tersedia: `Superuser`, `Supervisor`, `Tracer`, `Agent`.
+    - Akses halaman dikontrol oleh `MENU_ITEMS` dan fungsi `require_roles()`.
+    - Autentikasi password di-hash dengan SHA256 (`hash_password()`); akun baru harus disetujui (`approved` flag).
+    """, unsafe_allow_html=True)
+
+    st.header("7) Modul Chat AI")
+    st.markdown("""
+    - Menu **Chat AI** terhubung ke Google Gemini (API key via `st.secrets` atau env var).
+    - AI dapat membaca lampiran konteks dari tabel aman (`ai_build_context_pack()`) dan menghasilkan jawaban lewat `ai_generate_response()`.
+    - Kolom sensitif (mis. password, service_account, email_token) dikecualikan dari lampiran.
+    """, unsafe_allow_html=True)
+
+    st.header("8) Aliran Data (Ringkas)")
+    st.markdown("""
+    Supervisor Uploads Data
+        ↓
+      `supervisor_data`
+        ↓
+    Tracer Assignment → `assign_tracer`
+        ↓
+    Tracer Updates Status → `trace_results`
+        ↓
+    Supervisor Assigns to Agent → `agent_assignments`
+        ↓
+    Agent Collects Payments → `agent_results` & `payments`
+        ↓
+    Dashboard / Analytics / AI Chat
+
+    Setiap tahap meninggalkan jejak di database dan `audit_logs`, serta disinkronkan ke Google Drive.
+    """, unsafe_allow_html=True)
+
+    st.markdown("---")
+    st.subheader("Dokumentasi Teknis: Ringkasan Tabel Utama")
+    st.markdown("""
+    - `supervisor_data`: menyimpan semua baris input dari file supervisor (kolom: Customer_name, DPD, Principle_Outstanding, Phone_Number_1, dll.)
+    - `assign_tracer`: daftar penugasan tracer (Agreement_No, Debtor_Name, NIK_KTP, Assigned_To)
+    - `trace_results`: hasil tracing / touch logs (Agreement_No, tracer, status, notes, touch_type, party, touched_at)
+    - `agent_assignments`: assignment ke agent (Agreement_No, Agent_Assigned_To, assigned_at, active)
+    - `agent_results`: hasil penagihan (Agreement_No, agent, agent_status, agent_ptp_amount, agent_ptp_date, agent_notes)
+    - `payments`: rekapan pembayaran (Agreement_No, paid_amount, paid_date, status, source_file)
+    - `backup_log`, `audit_logs`, `app_settings`, `ai_knowledge` untuk operasional dan audit
+    """, unsafe_allow_html=True)
+
+    st.subheader("Contoh Alur Singkat — Kasus Nyata")
+    st.markdown("""
+    1. Supervisor mengunggah `supervisor_data_dummy.xlsx` berisi 100 baris. Data tersimpan di `supervisor_data`.
+    2. Supervisor memilih 20 Agreement_No dan menugaskan ke `tracer` — entri dibuat di `assign_tracer`.
+    3. Tracer membuka menu Tracer, melihat 20 assignment, dan membuat 1–3 touch per debitur; hasil masuk ke `trace_results`.
+    4. Supervisor melihat hasil trace, menugaskan 15 kasus ke `agent` — entri di `agent_assignments`.
+    5. Agent mendatangi debitur; 5 kasus menghasilkan pembayaran → disimpan di `payments`; agent juga mengisi `agent_results`.
+    6. Dashboard menampilkan metrik: conversion rate agent, success tracer, outstanding reductions.
+    """, unsafe_allow_html=True)
+
+    st.subheader("FAQ & Troubleshooting Singkat")
+    st.markdown("""
+    Q: Bagaimana jika upload CSV gagal?
+    A: Periksa header file sesuai contoh, pastikan kolom `Agreement_No`/`Case_ID` ada, dan tidak ada duplikat yang memicu constraint.
+
+    Q: Backup Drive tidak berfungsi?
+    A: Pastikan `service_account` tersedia di `st.secrets` dan folder `FOLDER_ID_DEFAULT` benar; cek `backup_log` untuk pesan error.
+
+    Q: Restore otomatis tidak terjadi setelah restart?
+    A: Fungsi `attempt_auto_restore_if_seed()` hanya berjalan jika DB terdeteksi fresh (few users, empty backup_log). Periksa `app_settings` dan `auto_restore_enabled`.
+    """, unsafe_allow_html=True)
+
+    st.markdown("---")
+    st.caption("Panduan ini dibuat otomatis dari struktur aplikasi. Untuk tambahan (contoh CSV/Excel, diagram alir, atau export), minta file contoh dan saya tambahkan.")
 
 if __name__ == '__main__':
     main()
