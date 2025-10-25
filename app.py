@@ -3008,7 +3008,7 @@ def page_supervisor():
                     if s is None:
                         return ""
                     s = str(s).replace("\ufeff", "").strip()
-                    s = re.sub(r"\s+", " ")
+                    s = re.sub(r"\s+", " ", s)
                     s = s.replace(" ", "_")
                     return s.lower()
 
