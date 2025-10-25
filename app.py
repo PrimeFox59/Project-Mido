@@ -2821,6 +2821,15 @@ def page_supervisor():
         with c4:
             q_customer = st.text_input("Customer name", key="monitor_customer_name")
 
+        # Quick KPI: total rows in system
+        try:
+            _total_rows_supervisor = (fetchone("SELECT COUNT(*) c FROM supervisor_data") or {}).get('c', 0)
+        except Exception:
+            _total_rows_supervisor = 0
+        kpi_col = st.columns(4)
+        with kpi_col[0]:
+            st.metric("Total data di sistem", f"{_total_rows_supervisor:,}")
+
         # Advanced filters in expander
         # All additional fields except the four primary ones
         base_filter_fields = [
@@ -2864,6 +2873,11 @@ def page_supervisor():
             st.info("Tidak ada data supervisor ditemukan.")
         else:
             df = pd.DataFrame(rows)
+            # Optional small caption to indicate filtered vs total
+            try:
+                st.caption(f"Menampilkan {len(df):,} dari total {_total_rows_supervisor:,} baris.")
+            except Exception:
+                pass
             # Pastikan kolom id ada untuk identifikasi & hapus
             if 'id' not in df.columns:
                 # Jika tidak ada, buat id sementara dari index (tidak digunakan untuk hapus DB)
