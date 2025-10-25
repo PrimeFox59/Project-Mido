@@ -2845,6 +2845,19 @@ def page_supervisor():
                 with cols[i % len(cols)]:
                     extra_filters[f] = st.text_input(f.replace('_',' '), key=f"monitor_extra_{f}")
 
+        # Row display limit control
+        disp_c1, disp_c2 = st.columns([1,3])
+        with disp_c1:
+            rows_limit = st.number_input(
+                "Jumlah baris ditampilkan",
+                min_value=10,
+                max_value=2000,
+                value=100,
+                step=50,
+                key="monitor_limit_rows",
+                help="Atur berapa banyak baris yang ditampilkan di tabel Monitoring (default 100)."
+            )
+
         # Build query
         query = "SELECT * FROM supervisor_data WHERE 1=1"
         params = []
@@ -2866,7 +2879,12 @@ def page_supervisor():
             if v:
                 query += f" AND {f} LIKE ?"
                 params.append(f"%{v}%")
-        query += " ORDER BY id DESC LIMIT 200"
+        try:
+            _lim = int(rows_limit) if rows_limit else 100
+        except Exception:
+            _lim = 100
+        _lim = max(1, min(2000, _lim))
+        query += f" ORDER BY id DESC LIMIT {_lim}"
 
         rows = fetchall(query, tuple(params))
         if not rows:
