@@ -3012,6 +3012,11 @@ def page_supervisor():
         field_names = [
             "DT", "Lending_Entity", "Date", "Case_ID", "Task_ID", "Customer_name", "email", "Gender", "Customer_Occupation", "DPD", "Principle_Outstanding", "Principal_Overdue_CURR", "Interest_Overdue_CURR", "Last_Late_Fee", "Return_Date", "Detail", "Loan_Type", "Third_Uid", "Product", "Home_Address", "Province", "City", "Street", "RoomNumber", "Postcode", "Assignment_Date", "Withdrawal_Date", "Phone_Number_1", "Phone_Number_2", "Contact_Type_1", "Contact_Name_1", "Contact_Phone_1", "Contact_Type_2", "Contact_Name_2", "Contact_Phone_2", "Contact_Type_3", "Contact_Name_3", "Contact_Phone_3", "Contact_Type_4", "Contact_Name_4", "Contact_Phone_4", "Contact_Type_5", "Contact_Name_5", "Contact_Phone_5", "Contact_Type_6", "Contact_Name_6", "Contact_Phone_6", "Contact_Type_7", "Contact_Name_7", "Contact_Phone_7", "Contact_Type_8", "Contact_Name_8", "Contact_Phone_8", "Total_debt_in_third_party", "Repayment_on_third_Party", "Remaining_Loan_on_third_Party", "Virtual_Account_Number"
         ]
+        # Tampilkan pesan hasil upload sebelumnya (sekali tampil)
+        _upload_result_msg = st.session_state.pop('sup_upload_result', None)
+        if _upload_result_msg:
+            st.success(_upload_result_msg)
+
         uploaded = st.file_uploader("Upload file Excel/CSV", type=["csv", "xlsx"], key="sup_upload_file")
         if uploaded is not None:
             # Step 1: Parse and preview ONLY (no insert yet)
@@ -3060,7 +3065,11 @@ def page_supervisor():
                     with b1:
                         do_commit = st.button("Upload ke sistem", type="primary", key="btn_commit_supervisor")
                     with b2:
-                        st.button("Batalkan & Clear", key="btn_clear_supervisor", on_click=lambda: (st.session_state.pop('sup_upload_file', None), st.rerun()))
+                        st.button(
+                            "Batalkan & Clear",
+                            key="btn_clear_supervisor",
+                            on_click=lambda: (st.session_state.__setitem__('sup_upload_file', None), st.rerun())
+                        )
 
                     if do_commit:
                         # Re-read from the uploader because stream was consumed above
@@ -3132,7 +3141,8 @@ def page_supervisor():
                                         saved += 1
                                     except Exception as e:
                                         skipped += 1
-                                st.success(f"Upload selesai. Disimpan: {saved:,}. Dilewati: {skipped:,}.")
+                                # Simpan pesan hasil agar tampil sekali setelah rerun
+                                st.session_state['sup_upload_result'] = f"Upload selesai. Disimpan: {saved:,}. Dilewati: {skipped:,}."
                                 # Audit log
                                 u = current_user() or {}
                                 try:
@@ -3143,10 +3153,7 @@ def page_supervisor():
                                 except Exception:
                                     pass
                                 # Clear uploader to prevent re-upload on rerun
-                                try:
-                                    st.session_state.pop('sup_upload_file', None)
-                                except Exception:
-                                    pass
+                                st.session_state['sup_upload_file'] = None
                                 st.rerun()
             except Exception as e:
                 st.error(f"Gagal memproses file: {e}")
