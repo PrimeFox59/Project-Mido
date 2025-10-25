@@ -2994,103 +2994,144 @@ def page_supervisor():
         field_names = [
             "DT", "Lending_Entity", "Date", "Case_ID", "Task_ID", "Customer_name", "email", "Gender", "Customer_Occupation", "DPD", "Principle_Outstanding", "Principal_Overdue_CURR", "Interest_Overdue_CURR", "Last_Late_Fee", "Return_Date", "Detail", "Loan_Type", "Third_Uid", "Product", "Home_Address", "Province", "City", "Street", "RoomNumber", "Postcode", "Assignment_Date", "Withdrawal_Date", "Phone_Number_1", "Phone_Number_2", "Contact_Type_1", "Contact_Name_1", "Contact_Phone_1", "Contact_Type_2", "Contact_Name_2", "Contact_Phone_2", "Contact_Type_3", "Contact_Name_3", "Contact_Phone_3", "Contact_Type_4", "Contact_Name_4", "Contact_Phone_4", "Contact_Type_5", "Contact_Name_5", "Contact_Phone_5", "Contact_Type_6", "Contact_Name_6", "Contact_Phone_6", "Contact_Type_7", "Contact_Name_7", "Contact_Phone_7", "Contact_Type_8", "Contact_Name_8", "Contact_Phone_8", "Total_debt_in_third_party", "Repayment_on_third_Party", "Remaining_Loan_on_third_Party", "Virtual_Account_Number"
         ]
-        uploaded = st.file_uploader("Upload file Excel/CSV", type=["csv", "xlsx"])
-        if uploaded:
-            user = current_user()
+        uploaded = st.file_uploader("Upload file Excel/CSV", type=["csv", "xlsx"], key="sup_upload_file")
+        if uploaded is not None:
+            # Step 1: Parse and preview ONLY (no insert yet)
             try:
-                if uploaded.name.endswith(".csv"):
-                    df = pd.read_csv(uploaded)
+                if uploaded.name.lower().endswith(".csv"):
+                    df_preview = pd.read_csv(uploaded)
                 else:
-                    df = pd.read_excel(uploaded)
-                # --- Normalize header names to match expected fields ---
+                    df_preview = pd.read_excel(uploaded)
+
+                # Normalize columns to expected headers (preview uses same logic)
                 def _norm_col(s: str) -> str:
                     if s is None:
                         return ""
                     s = str(s).replace("\ufeff", "").strip()
-                    s = re.sub(r"\s+", " ", s)  # collapse spaces
+                    s = re.sub(r"\s+", " ")
                     s = s.replace(" ", "_")
                     return s.lower()
 
-                # Known typo mappings (normalized form)
-                typo_map = {
-                    _norm_col("Repayment_on_thrid_Party"): _norm_col("Repayment_on_third_Party"),
-                }
-                # Build map from normalized -> canonical expected name
+                typo_map = { _norm_col("Repayment_on_thrid_Party"): _norm_col("Repayment_on_third_Party") }
                 expected_map = { _norm_col(k): k for k in field_names }
                 new_cols = []
-                for c in df.columns:
+                for c in df_preview.columns:
                     nc = _norm_col(c)
-                    # Fix known typos first
                     if nc in typo_map:
                         nc = typo_map[nc]
-                    # Map to canonical if matches
-                    if nc in expected_map:
-                        new_cols.append(expected_map[nc])
-                    else:
-                        new_cols.append(c)
-                df.columns = new_cols
-                # Pastikan urutan kolom sesuai field_names
-                missing = [f for f in field_names if f not in df.columns]
+                    new_cols.append(expected_map.get(nc, c))
+                df_preview.columns = new_cols
+
+                missing = [f for f in field_names if f not in df_preview.columns]
                 if missing:
                     st.error(f"Kolom berikut tidak ditemukan di file: {missing}")
                     st.caption("Tips: header akan dicocokkan tanpa spasi/kapital dan perbaikan typo umum (thrid->third). Pastikan nama kolom sesuai template.")
+                    st.button("Clear file", on_click=lambda: (st.session_state.pop('sup_upload_file', None), st.rerun()))
                 else:
-                    # Helper to coerce values into SQLite-friendly types
-                    def _to_sql_value(v):
-                        try:
-                            import pandas as _pd
-                            import numpy as _np
-                        except Exception:
-                            _pd = None; _np = None
-                        # Treat NaN/NaT as NULL
-                        try:
-                            if _pd is not None and (_pd.isna(v) if not isinstance(v, str) else False):
-                                return None
-                        except Exception:
-                            pass
-                        # Pandas Timestamp -> ISO string
-                        try:
-                            if _pd is not None and isinstance(v, _pd.Timestamp):
-                                # keep space separator for readability
-                                return v.to_pydatetime().isoformat(sep=' ')
-                        except Exception:
-                            pass
-                        # Python datetime/date -> ISO string
-                        from datetime import datetime as _dt, date as _d
-                        if isinstance(v, _dt):
-                            return v.isoformat(sep=' ')
-                        if isinstance(v, _d):
-                            return v.isoformat()
-                        # Numpy scalars -> Python scalars
-                        try:
-                            if hasattr(v, 'item'):
-                                return v.item()
-                        except Exception:
-                            pass
-                        return v
-
-                    count = 0
-                    placeholders = ','.join(['?' for _ in field_names])
-                    for _, row in df.iterrows():
-                        try:
-                            vals = []
-                            for f in field_names:
-                                vals.append(_to_sql_value(row.get(f)))
-                            execute(
-                                f"INSERT INTO supervisor_data ({','.join(field_names)}) VALUES ({placeholders})",
-                                tuple(vals)
-                            )
-                            count += 1
-                        except Exception as e:
-                            st.warning(f"Baris gagal: {e}")
-                    st.success(f"Berhasil input {count} data supervisor.")
-                    # Audit log supervisor upload
+                    total_rows_file = len(df_preview)
+                    st.info(f"File terdeteksi: {uploaded.name} — {total_rows_file:,} baris. Ini baru preview, data BELUM masuk ke sistem.")
+                    # Show 5 random rows (or all if <5)
                     try:
-                        execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (user.get('id') if user else None, "UPLOAD_SUPERVISOR", f"Uploaded supervisor data: {count} rows from '{uploaded.name}'"))
+                        sample_df = df_preview.sample(n=min(5, len(df_preview)), random_state=42)
                     except Exception:
-                        pass
+                        sample_df = df_preview.head(min(5, len(df_preview)))
+                    st.dataframe(sample_df, use_container_width=True, hide_index=True)
+
+                    # Action buttons
+                    b1, b2 = st.columns([1,1])
+                    with b1:
+                        do_commit = st.button("Upload ke sistem", type="primary", key="btn_commit_supervisor")
+                    with b2:
+                        st.button("Batalkan & Clear", key="btn_clear_supervisor", on_click=lambda: (st.session_state.pop('sup_upload_file', None), st.rerun()))
+
+                    if do_commit:
+                        # Re-read from the uploader because stream was consumed above
+                        try:
+                            uploaded.seek(0)
+                        except Exception:
+                            pass
+                        try:
+                            if uploaded.name.lower().endswith(".csv"):
+                                df_full = pd.read_csv(uploaded)
+                            else:
+                                df_full = pd.read_excel(uploaded)
+                        except Exception as e:
+                            st.error(f"Gagal membaca file saat upload: {e}")
+                            df_full = None
+
+                        if df_full is not None:
+                            # Apply same header normalization to full DF
+                            new_cols2 = []
+                            for c in df_full.columns:
+                                nc = _norm_col(str(c))
+                                if nc in typo_map:
+                                    nc = typo_map[nc]
+                                new_cols2.append(expected_map.get(nc, c))
+                            df_full.columns = new_cols2
+
+                            miss2 = [f for f in field_names if f not in df_full.columns]
+                            if miss2:
+                                st.error(f"Kolom wajib hilang saat upload: {miss2}")
+                            else:
+                                # Helper to coerce values
+                                def _to_sql_value(v):
+                                    try:
+                                        import pandas as _pd
+                                    except Exception:
+                                        _pd = None
+                                    try:
+                                        if _pd is not None and (_pd.isna(v) if not isinstance(v, str) else False):
+                                            return None
+                                    except Exception:
+                                        pass
+                                    try:
+                                        if _pd is not None and isinstance(v, _pd.Timestamp):
+                                            return v.to_pydatetime().isoformat(sep=' ')
+                                    except Exception:
+                                        pass
+                                    from datetime import datetime as _dt, date as _d
+                                    if isinstance(v, _dt):
+                                        return v.isoformat(sep=' ')
+                                    if isinstance(v, _d):
+                                        return v.isoformat()
+                                    try:
+                                        if hasattr(v, 'item'):
+                                            return v.item()
+                                    except Exception:
+                                        pass
+                                    return v
+
+                                placeholders = ','.join(['?' for _ in field_names])
+                                saved = 0
+                                skipped = 0
+                                for _, row in df_full.iterrows():
+                                    try:
+                                        vals = [_to_sql_value(row.get(f)) for f in field_names]
+                                        execute(
+                                            f"INSERT INTO supervisor_data ({','.join(field_names)}) VALUES ({placeholders})",
+                                            tuple(vals)
+                                        )
+                                        saved += 1
+                                    except Exception as e:
+                                        skipped += 1
+                                st.success(f"Upload selesai. Disimpan: {saved:,}. Dilewati: {skipped:,}.")
+                                # Audit log
+                                u = current_user() or {}
+                                try:
+                                    execute(
+                                        "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                                        (u.get('id') if u else None, "UPLOAD_SUPERVISOR", f"Uploaded supervisor data: {saved} rows from '{uploaded.name}' (skipped: {skipped})")
+                                    )
+                                except Exception:
+                                    pass
+                                # Clear uploader to prevent re-upload on rerun
+                                try:
+                                    st.session_state.pop('sup_upload_file', None)
+                                except Exception:
+                                    pass
+                                st.rerun()
             except Exception as e:
-                st.error(f"Gagal membaca file: {e}")
+                st.error(f"Gagal memproses file: {e}")
 
         st.markdown("---")
         st.subheader("📘 Masked Company Dictionary")
