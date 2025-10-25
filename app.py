@@ -318,7 +318,26 @@ def init_db():
         c.execute("CREATE INDEX IF NOT EXISTS idx_agent_results_agent ON agent_results(agent)")
     except Exception:
         pass
-    # 6) Frozen entities (freeze by NIK or Agreement_No to prevent future assignments)
+    # 6) Internal memos (Agent  Supervisor communication)
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS memos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            Agreement_No TEXT,
+            author_role TEXT,
+            author_name TEXT,
+            target_role TEXT,
+            message TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+    )
+    try:
+        c.execute("CREATE INDEX IF NOT EXISTS idx_memos_agreement ON memos(Agreement_No)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_memos_target ON memos(target_role)")
+    except Exception:
+        pass
+    # 7) Frozen entities (freeze by NIK or Agreement_No to prevent future assignments)
     c.execute(
         """
         CREATE TABLE IF NOT EXISTS frozen_entities (
@@ -342,91 +361,278 @@ def init_db():
     # ensure assign_tracer has optional masked company name field
     try:
         cols = [r['name'] for r in c.execute("PRAGMA table_info(assign_tracer)").fetchall()]
-        if 'Masked_Company_Name' not in cols:
-            c.execute("ALTER TABLE assign_tracer ADD COLUMN Masked_Company_Name TEXT")
-    except Exception:
-        pass
-    conn.commit()
+        def page_agent():
+            require_roles(("Superuser", "Agent"))
+            u = current_user()
+            agent_name = (u.get('full_name') or u.get('login_id') or '-') if u else '-'
+            st.title("Agent Menu")
 
-    # Seed default settings (idempotent)
-    try:
-        c.execute("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('auto_restore_enabled','true')")
-        # Could add future defaults here
-        conn.commit()
-    except Exception:
-        pass
-
-    # ensure at least one user exists (seed) — robust against transient locks
-    try:
-        c.execute("SELECT COUNT(*) as cnt FROM users")
-        row = c.fetchone()
-        cnt_users = row['cnt'] if row and 'cnt' in row.keys() else 0
-    except Exception:
-        # As a fallback, ensure table exists, then attempt again using a short-lived cursor
-        try:
-            c.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                login_id TEXT UNIQUE,
-                password_hash TEXT,
-                full_name TEXT,
-                name TEXT,
-                email TEXT UNIQUE,
-                role TEXT DEFAULT 'Agent',
-                approved INTEGER DEFAULT 0,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-            """)
-            conn.commit()
-            c2 = conn.cursor()
-            c2.execute("SELECT COUNT(*) as cnt FROM users")
-            row2 = c2.fetchone()
-            cnt_users = row2['cnt'] if row2 else 0
-        except Exception:
-            cnt_users = 0
-    if cnt_users == 0:
-        # Create default users for each role
-        users_to_seed = [
-            {"login_id": "superuser", "full_name": "Superuser", "email": "superuser", "password": "superuser123", "role": "Superuser", "approved": 1},
-            {"login_id": "supervisor", "full_name": "Supervisor", "email": "supervisor", "password": "supervisor123", "role": "Supervisor", "approved": 1},
-            {"login_id": "tracer", "full_name": "Tracer", "email": "tracer", "password": "tracer123", "role": "Tracer", "approved": 1},
-            {"login_id": "agent", "full_name": "Agent", "email": "agent", "password": "agent123", "role": "Agent", "approved": 1},
-        ]
-        
-        for user in users_to_seed:
+            # PTP reminder for today
+            today_str = date.today().isoformat()
             try:
-                hashed_pw = hash_password(user['password'])
-                # Insert with new schema; also fill legacy 'name' for compatibility
-                c.execute(
-                    "INSERT INTO users (login_id, full_name, name, email, password_hash, role, approved) VALUES (?,?,?,?,?,?,?)",
-                    (user['login_id'], user['full_name'], user['full_name'], user['email'], hashed_pw, user['role'], user['approved'])
-                )
-            except sqlite3.IntegrityError:
-                # User might already exist, skip.
-                pass
-        
-    conn.commit()
+                ptp_today = fetchone(
+                    "SELECT COUNT(*) c FROM agent_results WHERE agent=? AND agent_status='PTP' AND DATE(agent_ptp_date)=?",
+                    (agent_name, today_str)
+                ) or {"c": 0}
+                count_ptp = ptp_today.get('c', 0) or 0
+                if count_ptp > 0:
+                    st.success(f"Hai {agent_name}, hari ini kamu ada {count_ptp} PTP.")
+            except Exception:
+                count_ptp = 0
 
-    # Always ensure at least one approved user exists for each role (idempotent)
-    try:
-        ensure_roles = [
-            ("Superuser", "superuser", "Superuser", "superuser", "superuser123"),
-            ("Supervisor", "supervisor", "Supervisor", "supervisor", "supervisor123"),
-            ("Tracer", "tracer", "Tracer", "tracer", "tracer123"),
-            ("Agent", "agent", "Agent", "agent", "agent123"),
-        ]
-        for role_name, login_id_def, full_name_def, email_def, pw_def in ensure_roles:
-            r_cnt = c.execute("SELECT COUNT(*) AS c FROM users WHERE role=?", (role_name,)).fetchone()
-            cnt_val = (r_cnt[0] if r_cnt and 0 in r_cnt.keys() else r_cnt['c']) if isinstance(r_cnt, sqlite3.Row) else (r_cnt[0] if r_cnt else 0)
-            if not cnt_val:
-                try:
-                    c.execute(
-                        "INSERT INTO users (login_id, full_name, name, email, password_hash, role, approved) VALUES (?,?,?,?,?,?,?)",
-                        (login_id_def, full_name_def, full_name_def, email_def, hash_password(pw_def), role_name, 1)
-                    )
-                except sqlite3.IntegrityError:
-                    pass
-        conn.commit()
+            tabs = st.tabs([
+                "Data",
+                "Report a Payment/PTP",
+                "Internal Memo",
+                "My PTP",
+                "Monthly Payment Recap",
+                "All-time Payment Recap",
+            ])
+
+            # Fetch assignments once for reuse
+            assignments = fetchall(
+                "SELECT Agreement_No, assigned_at FROM agent_assignments WHERE Agent_Assigned_To=? ORDER BY assigned_at DESC LIMIT 1000",
+                (agent_name,)
+            )
+
+            # --- Data tab ---
+            with tabs[0]:
+                if not assignments:
+                    st.info("Belum ada assignment untuk Anda.")
+                else:
+                    q_ag = st.text_input("Cari Agreement_No (Loan Number)", key="ag_q_no")
+                    filtered = [r for r in assignments if (not q_ag or q_ag.strip() in str(r.get('Agreement_No') or ''))]
+
+                    st.subheader("Assignments")
+                    st.dataframe(pd.DataFrame(filtered), use_container_width=True, hide_index=True)
+
+                    sel = st.selectbox("Pilih Loan Number", [r['Agreement_No'] for r in filtered], key="ag_sel")
+                    if sel:
+                        st.markdown("---")
+                        st.subheader(f"Loan Details: {sel}")
+                        info = fetchone("SELECT Debtor_Name, NIK_KTP FROM assign_tracer WHERE Agreement_No=?", (sel,)) or {}
+                        c1, c2, c3 = st.columns(3)
+                        with c1:
+                            st.text_input("Debtor Name", value=info.get('Debtor_Name',''), disabled=True)
+                        with c2:
+                            st.text_input("NIK", value=info.get('NIK_KTP',''), disabled=True)
+                        with c3:
+                            sup = fetchone(
+                                "SELECT Phone_Number_1 FROM supervisor_data WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=? LIMIT 1",
+                                (sel, sel, sel)
+                            )
+                            phone = (sup.get('Phone_Number_1') if sup else '') or ''
+                            st.text_input("Phone", value=phone, disabled=True)
+                        if phone:
+                            st.markdown(f"[Click to call]({'tel:'+str(phone)})  |  [SIP]({'sip:'+str(phone)})")
+
+                        st.markdown("---")
+                        st.subheader("Email Templates")
+                        st.caption("Pilih template lalu salin konten untuk dikirim via email/WA.")
+                        tpl = st.selectbox("Kategori", ["COMPANY", "RELATIVES", "PERSONAL"], index=0)
+                        debtor = info.get('Debtor_Name','') if isinstance(info, dict) else ''
+                        nik = info.get('NIK_KTP','') if isinstance(info, dict) else ''
+                        if tpl == "COMPANY":
+                            body = f"Yth. HRD,\n\nMohon bantuan verifikasi karyawan atas nama {debtor} (NIK {nik}) terkait kewajiban pembayaran pinjaman. Harap hubungi kami.\n\nTerima kasih."
+                        elif tpl == "RELATIVES":
+                            body = f"Halo, kami menghubungi keluarga dari {debtor} (NIK {nik}) untuk menyampaikan informasi penting terkait kewajiban pembayaran. Mohon bantu sampaikan agar yang bersangkutan segera menghubungi kami. Terima kasih."
+                        else:
+                            body = f"Halo {debtor},\n\nKami mengingatkan adanya kewajiban pembayaran yang belum diselesaikan. Mohon segera menghubungi kami untuk penyelesaian. Terima kasih."
+                        st.text_area("Preview", value=body, height=140)
+
+            # --- Report a Payment/PTP tab ---
+            with tabs[1]:
+                st.subheader("Report a Payment/PTP")
+                if not assignments:
+                    st.info("Tidak ada Agreement_No yang ditugaskan.")
+                else:
+                    sel2 = st.selectbox("Pilih Agreement_No", [r['Agreement_No'] for r in assignments], key="ag_rep_sel")
+                    mode = st.radio("Jenis Laporan", ["Payment", "PTP"], horizontal=True)
+                    if mode == "Payment":
+                        with st.form("form_report_payment"):
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                amount = st.number_input("Paid Amount", min_value=0.0, step=10000.0)
+                            with col2:
+                                paid_date = st.date_input("Paid Date", value=date.today())
+                            status = st.text_input("Status (opsional)", value="PAID")
+                            ref = st.text_input("Referensi (opsional)", placeholder="mis. link WA, catatan singkat")
+                            submit_p = st.form_submit_button("Simpan Payment")
+                            if submit_p:
+                                try:
+                                    execute(
+                                        "INSERT INTO payments (Agreement_No, paid_amount, paid_date, status, source_file, uploaded_by) VALUES (?,?,?,?,?,?)",
+                                        (sel2, float(amount or 0), (paid_date.isoformat() if paid_date else None), (status.strip() or None), (ref.strip() or None), agent_name)
+                                    )
+                                    try:
+                                        execute(
+                                            "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                                            (u.get('id'), 'AGENT_REPORT_PAYMENT', f"{sel2}|{amount}|{paid_date}")
+                                        )
+                                    except Exception:
+                                        pass
+                                    st.success("Payment tersimpan.")
+                                except Exception as e:
+                                    st.error(f"Gagal menyimpan payment: {e}")
+                    else:
+                        # PTP
+                        with st.form("form_report_ptp"):
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                ptp_amount = st.number_input("PTP Amount", min_value=0.0, step=10000.0)
+                            with col2:
+                                ptp_date = st.date_input("PTP Date", value=date.today())
+                            notes = st.text_area("Catatan (opsional)")
+                            submit_t = st.form_submit_button("Simpan PTP")
+                            if submit_t:
+                                try:
+                                    execute(
+                                        "INSERT INTO agent_results (Agreement_No, agent, agent_status, agent_ptp_amount, agent_ptp_date, agent_notes) VALUES (?,?,?,?,?,?)",
+                                        (sel2, agent_name, 'PTP', float(ptp_amount or 0), (ptp_date.isoformat() if ptp_date else None), (notes.strip() or None))
+                                    )
+                                    try:
+                                        execute(
+                                            "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                                            (u.get('id'), 'AGENT_REPORT_PTP', f"{sel2}|{ptp_amount}|{ptp_date}")
+                                        )
+                                    except Exception:
+                                        pass
+                                    st.success("PTP tersimpan.")
+                                except Exception as e:
+                                    st.error(f"Gagal menyimpan PTP: {e}")
+
+            # --- Internal Memo tab ---
+            with tabs[2]:
+                st.subheader("Internal Memo")
+                if not assignments:
+                    st.info("Tidak ada Agreement_No yang ditugaskan.")
+                else:
+                    # List incoming memos from Supervisor for this agent's loans
+                    my_agreements = [r['Agreement_No'] for r in assignments]
+                    placeholders = ",".join(["?"] * len(my_agreements)) if my_agreements else "?"
+                    try:
+                        incoming = fetchall(
+                            f"SELECT * FROM memos WHERE target_role='Agent' AND Agreement_No IN ({placeholders}) ORDER BY id DESC LIMIT 200",
+                            tuple(my_agreements) if my_agreements else ("",)
+                        )
+                    except Exception:
+                        incoming = []
+                    # My memos sent to Supervisor
+                    try:
+                        mine = fetchall(
+                            f"SELECT * FROM memos WHERE author_role='Agent' AND author_name=? AND Agreement_No IN ({placeholders}) ORDER BY id DESC LIMIT 200",
+                            (agent_name, *my_agreements) if my_agreements else (agent_name,)
+                        )
+                    except Exception:
+                        mine = []
+
+                    colA, colB = st.columns(2)
+                    with colA:
+                        st.caption("Dari Supervisor → Agent")
+                        if incoming:
+                            df_in = pd.DataFrame([
+                                {"Agreement_No": r.get('Agreement_No'), "Waktu": r.get('created_at'), "Pesan": r.get('message')}
+                                for r in incoming
+                            ])
+                            st.dataframe(df_in, use_container_width=True, hide_index=True)
+                        else:
+                            st.info("Belum ada memo dari Supervisor.")
+                    with colB:
+                        st.caption("Memo Saya ke Supervisor")
+                        if mine:
+                            df_my = pd.DataFrame([
+                                {"Agreement_No": r.get('Agreement_No'), "Waktu": r.get('created_at'), "Pesan": r.get('message')}
+                                for r in mine
+                            ])
+                            st.dataframe(df_my, use_container_width=True, hide_index=True)
+                        else:
+                            st.info("Belum ada memo yang Anda kirim.")
+
+                    st.markdown("---")
+                    st.subheader("Kirim Memo ke Supervisor")
+                    with st.form("form_send_memo"):
+                        selm = st.selectbox("Agreement_No", [r['Agreement_No'] for r in assignments], key="ag_memo_sel")
+                        msg = st.text_area("Pesan", placeholder="Tulis pertanyaan/catatan untuk SPV...")
+                        send = st.form_submit_button("Kirim Memo")
+                        if send:
+                            if not msg or not msg.strip():
+                                st.warning("Pesan tidak boleh kosong.")
+                            else:
+                                try:
+                                    execute(
+                                        "INSERT INTO memos (Agreement_No, author_role, author_name, target_role, message) VALUES (?,?,?,?,?)",
+                                        (selm, 'Agent', agent_name, 'Supervisor', msg.strip())
+                                    )
+                                    try:
+                                        execute(
+                                            "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                                            (u.get('id'), 'AGENT_MEMO_CREATE', f"{selm} | {msg[:60]}")
+                                        )
+                                    except Exception:
+                                        pass
+                                    st.success("Memo terkirim ke Supervisor.")
+                                except Exception as e:
+                                    st.error(f"Gagal mengirim memo: {e}")
+
+            # --- My PTP tab ---
+            with tabs[3]:
+                st.subheader("Janji Bayar Saya (PTP)")
+                rows = fetchall(
+                    "SELECT Agreement_No, agent_ptp_amount, agent_ptp_date, agent_notes FROM agent_results WHERE agent=? AND agent_status='PTP' ORDER BY agent_ptp_date ASC",
+                    (agent_name,)
+                )
+                if not rows:
+                    st.info("Belum ada PTP yang tercatat.")
+                else:
+                    df = pd.DataFrame([
+                        {
+                            "Agreement_No": r.get('Agreement_No'),
+                            "PTP Date": r.get('agent_ptp_date'),
+                            "Amount": r.get('agent_ptp_amount'),
+                            "Notes": r.get('agent_notes'),
+                        }
+                        for r in rows
+                    ])
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+
+            # --- Monthly Payment Recap tab ---
+            with tabs[4]:
+                st.subheader("Rekap Pembayaran Bulan Ini")
+                today = date.today()
+                start_of_month = today.replace(day=1).isoformat()
+                end_date = today.isoformat()
+                rows = fetchall(
+                    "SELECT Agreement_No, paid_amount, paid_date, status FROM payments WHERE uploaded_by=? AND DATE(paid_date) BETWEEN DATE(?) AND DATE(?) ORDER BY paid_date DESC",
+                    (agent_name, start_of_month, end_date)
+                )
+                total_amt = sum([float(r.get('paid_amount') or 0) for r in rows]) if rows else 0.0
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.metric("Total Amount (This Month)", f"{total_amt:,.0f}")
+                with c2:
+                    st.metric("Count", len(rows))
+                if rows:
+                    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+                else:
+                    st.info("Belum ada laporan pembayaran bulan ini.")
+
+            # --- All-time Payment Recap tab ---
+            with tabs[5]:
+                st.subheader("Rekap Pembayaran Sepanjang Waktu")
+                rows = fetchall(
+                    "SELECT Agreement_No, paid_amount, paid_date, status FROM payments WHERE uploaded_by=? ORDER BY paid_date DESC",
+                    (agent_name,)
+                )
+                total_amt = sum([float(r.get('paid_amount') or 0) for r in rows]) if rows else 0.0
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.metric("Total Amount (All-time)", f"{total_amt:,.0f}")
+                with c2:
+                    st.metric("Count", len(rows))
+                if rows:
+                    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+                else:
+                    st.info("Belum ada laporan pembayaran.")
     except Exception:
         pass
 
