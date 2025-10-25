@@ -2939,6 +2939,39 @@ def page_supervisor():
                     except Exception as e:
                         st.error(f"Gagal menghapus data: {e}")
 
+            # Dangerous zone: delete ALL data
+            st.markdown("---")
+            with st.expander("Hapus SEMUA data (berbahaya)"):
+                total_rows = 0
+                try:
+                    total_rows = (fetchone("SELECT COUNT(*) c FROM supervisor_data") or {}).get('c', 0)
+                except Exception:
+                    pass
+                st.warning(f"Total baris saat ini di supervisor_data: {total_rows}")
+                ack = st.checkbox("Saya paham tindakan ini permanen dan tidak dapat dibatalkan.", key="confirm_delete_all_ack")
+                confirm_text = st.text_input("Ketik: HAPUS SEMUA", key="confirm_delete_all_text", placeholder="HAPUS SEMUA")
+                btn_all = st.button("Hapus semua data supervisor_data", type="secondary", help="Menghapus semua baris pada tabel supervisor_data.")
+                if btn_all:
+                    if not ack or (confirm_text or '').strip().upper() != "HAPUS SEMUA":
+                        st.error("Konfirmasi tidak valid. Centang persetujuan dan ketik persis: HAPUS SEMUA")
+                    else:
+                        try:
+                            deleted_before = (fetchone("SELECT COUNT(*) c FROM supervisor_data") or {}).get('c', 0)
+                            execute("DELETE FROM supervisor_data")
+                            # Audit log
+                            try:
+                                u = current_user() or {}
+                                execute(
+                                    "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                                    (u.get('id') if u else None, "DELETE_SUPERVISOR_ALL", f"Deleted all rows from supervisor_data (approx {deleted_before} rows)")
+                                )
+                            except Exception:
+                                pass
+                            st.success(f"Berhasil menghapus semua data (±{deleted_before} baris).")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Gagal menghapus semua data: {e}")
+
         # Enriched Monitoring & Lookup NIK dipindahkan ke tab khusus "Enriched & Lookup"
 
     # --- Input Tab ---
