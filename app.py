@@ -222,6 +222,17 @@ def init_db():
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
     """)
+    # Ensure recent required columns exist in supervisor_data (idempotent ALTERs)
+    try:
+        cols = [r['name'] for r in c.execute("PRAGMA table_info(supervisor_data)").fetchall()]
+        for col in [
+            'NIK_KTP', 'EMPLOYMENT_UPDATE', 'EMPLOYER',
+            'Debtor_Legal_Name', 'Employee_Name', 'Employee_ID_Number', 'Debtor_Relation_to_Employee'
+        ]:
+            if col not in cols:
+                c.execute(f"ALTER TABLE supervisor_data ADD COLUMN {col} TEXT")
+    except Exception:
+        pass
     # --- New foundational tables ---
     # 1) Agent assignments (one agent per Agreement_No)
     c.execute(
@@ -3216,7 +3227,9 @@ def page_supervisor():
     with tabs[1]:
         st.subheader("Upload Excel/CSV Supervisor Data")
         field_names = [
-            "DT", "Lending_Entity", "Date", "Case_ID", "Task_ID", "Customer_name", "email", "Gender", "Customer_Occupation", "DPD", "Principle_Outstanding", "Principal_Overdue_CURR", "Interest_Overdue_CURR", "Last_Late_Fee", "Return_Date", "Detail", "Loan_Type", "Third_Uid", "Product", "Home_Address", "Province", "City", "Street", "RoomNumber", "Postcode", "Assignment_Date", "Withdrawal_Date", "Phone_Number_1", "Phone_Number_2", "Contact_Type_1", "Contact_Name_1", "Contact_Phone_1", "Contact_Type_2", "Contact_Name_2", "Contact_Phone_2", "Contact_Type_3", "Contact_Name_3", "Contact_Phone_3", "Contact_Type_4", "Contact_Name_4", "Contact_Phone_4", "Contact_Type_5", "Contact_Name_5", "Contact_Phone_5", "Contact_Type_6", "Contact_Name_6", "Contact_Phone_6", "Contact_Type_7", "Contact_Name_7", "Contact_Phone_7", "Contact_Type_8", "Contact_Name_8", "Contact_Phone_8", "Total_debt_in_third_party", "Repayment_on_third_Party", "Remaining_Loan_on_third_Party", "Virtual_Account_Number"
+            "DT", "Lending_Entity", "Date", "Case_ID", "Task_ID", "Customer_name", "email", "Gender", "Customer_Occupation", "DPD", "Principle_Outstanding", "Principal_Overdue_CURR", "Interest_Overdue_CURR", "Last_Late_Fee", "Return_Date", "Detail", "Loan_Type", "Third_Uid", "Product", "Home_Address", "Province", "City", "Street", "RoomNumber", "Postcode", "Assignment_Date", "Withdrawal_Date", "Phone_Number_1", "Phone_Number_2", "Contact_Type_1", "Contact_Name_1", "Contact_Phone_1", "Contact_Type_2", "Contact_Name_2", "Contact_Phone_2", "Contact_Type_3", "Contact_Name_3", "Contact_Phone_3", "Contact_Type_4", "Contact_Name_4", "Contact_Phone_4", "Contact_Type_5", "Contact_Name_5", "Contact_Phone_5", "Contact_Type_6", "Contact_Name_6", "Contact_Phone_6", "Contact_Type_7", "Contact_Name_7", "Contact_Phone_7", "Contact_Type_8", "Contact_Name_8", "Contact_Phone_8", "Total_debt_in_third_party", "Repayment_on_third_Party", "Remaining_Loan_on_third_Party", "Virtual_Account_Number",
+            # Newly added meta fields required by user
+            "NIK_KTP", "EMPLOYMENT_UPDATE", "EMPLOYER", "Debtor_Legal_Name", "Employee_Name", "Employee_ID_Number", "Debtor_Relation_to_Employee"
         ]
         # Tampilkan pesan hasil upload sebelumnya (sekali tampil)
         _upload_result_msg = st.session_state.pop('sup_upload_result', None)
@@ -3720,9 +3733,12 @@ def page_supervisor():
                         st.error(f"Gagal unassign: {e}")
 
         # Base tracer fields from upload/form (TRC_Code will be generated if missing)
-        tracer_fields = [
-            "Agreement_No", "Debtor_Name", "NIK_KTP", "EMPLOYMENT_UPDATE", "EMPLOYER", "Debtor_Legal_Name", "Employee_Name", "Employee_ID_Number", "Debtor_Relation_to_Employee"
+        # Agreement_No maps to Case_ID (source); other fields optional
+        tracer_required_min = ["Agreement_No"]
+        tracer_optional_fields = [
+            "Debtor_Name", "NIK_KTP", "EMPLOYMENT_UPDATE", "EMPLOYER", "Debtor_Legal_Name", "Employee_Name", "Employee_ID_Number", "Debtor_Relation_to_Employee"
         ]
+        tracer_fields = tracer_required_min + tracer_optional_fields
 
         # Default assignee for upload rows (used when file has no Assigned_To)
         _user_rows_up = fetchall("SELECT COALESCE(full_name, name) AS full_name FROM users WHERE approved=1 AND role='Tracer' ORDER BY COALESCE(full_name,name) ASC")
@@ -3762,6 +3778,7 @@ def page_supervisor():
                     "agreement_no": "Agreement_No",
                     "agreement_number": "Agreement_No",
                     "virtual_account_number": "Agreement_No",
+                    "case_id": "Agreement_No",
                     "tracer": "Assigned_To",
                     "assigned_to": "Assigned_To",
                     "trace_date": "Trace_Date",  # optional, currently unused
@@ -3778,8 +3795,8 @@ def page_supervisor():
                         target = expected_map_tr.get(key, c)
                     new_cols.append(target)
                 tracer_df.columns = new_cols
-                # Validate base required columns
-                missing = [f for f in tracer_fields if f not in tracer_df.columns]
+                # Validate base required columns (Agreement_No only)
+                missing = [f for f in tracer_required_min if f not in tracer_df.columns]
                 if missing:
                     st.error(f"Kolom berikut tidak ditemukan di file: {missing}")
                 else:
@@ -3811,7 +3828,7 @@ def page_supervisor():
                             suffix = "XXX"
                         ymd = datetime.now().strftime('%y%m%d')
                         return f"TRC-{ymd}-{suffix}"
-                    insert_fields = ["TRC_Code"] + tracer_fields + ["Assigned_To"]
+                    insert_fields = ["TRC_Code"] + tracer_required_min + ["Assigned_To"]
                     updated = 0
                     skipped = 0
                     # Use single connection and transaction to avoid locks
@@ -3879,11 +3896,25 @@ def page_supervisor():
                                             assignee = ""
                                     except Exception:
                                         pass
-                                    values = [trc_val] + [row.get(f) for f in tracer_fields] + [assignee]
+                                    values = [trc_val] + [row.get(f) for f in tracer_required_min] + [assignee]
                                     cur.execute(
                                         f"INSERT INTO assign_tracer ({','.join(insert_fields)}) VALUES ({','.join(['?' for _ in insert_fields])})",
                                         tuple(values)
                                     )
+                                    # Backfill Debtor_Name from supervisor_data.Customer_name by Case_ID if missing
+                                    try:
+                                        cur.execute(
+                                            """
+                                            UPDATE assign_tracer
+                                            SET Debtor_Name = COALESCE(Debtor_Name, (
+                                                SELECT Customer_name FROM supervisor_data WHERE Case_ID=? LIMIT 1
+                                            ))
+                                            WHERE Agreement_No=?
+                                            """,
+                                            (agr, agr)
+                                        )
+                                    except Exception:
+                                        pass
                                     count += 1
                             except Exception as e:
                                 st.warning(f"Baris gagal: {e}")
