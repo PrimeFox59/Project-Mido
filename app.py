@@ -2864,7 +2864,80 @@ def page_supervisor():
             st.info("Tidak ada data supervisor ditemukan.")
         else:
             df = pd.DataFrame(rows)
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            # Pastikan kolom id ada untuk identifikasi & hapus
+            if 'id' not in df.columns:
+                # Jika tidak ada, buat id sementara dari index (tidak digunakan untuk hapus DB)
+                df.insert(0, 'id', pd.RangeIndex(start=1, stop=len(df)+1, step=1))
+
+            st.caption("Pilih satu atau lebih baris untuk dihapus.")
+            select_all = st.checkbox("Pilih semua pada tabel ini", value=False, key="monitor_select_all")
+
+            # Tambahkan kolom checkbox untuk memilih baris
+            if 'Selected' not in df.columns:
+                df.insert(0, 'Selected', select_all)
+            else:
+                df['Selected'] = df['Selected'].fillna(False) | bool(select_all)
+
+            # Render editable table: hanya kolom 'Selected' yang bisa diubah
+            try:
+                edited_df = st.data_editor(
+                    df,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        'Selected': st.column_config.CheckboxColumn(
+                            label=' ', help='Centang untuk memilih baris', default=select_all
+                        )
+                    },
+                    disabled=[c for c in df.columns if c != 'Selected'],
+                    key='monitor_table_editor'
+                )
+            except Exception:
+                # Fallback untuk versi Streamlit lama tanpa data_editor: tampilkan tabel biasa
+                edited_df = df.copy()
+                st.dataframe(df, use_container_width=True, hide_index=True)
+
+            # Kumpulkan id yang dipilih
+            try:
+                selected_ids = [int(x) for x in edited_df.loc[edited_df['Selected'] == True, 'id'].tolist()]
+            except Exception:
+                selected_ids = []
+
+            cdel1, cdel2 = st.columns([1, 6])
+            with cdel1:
+                do_delete = st.button(
+                    "Hapus yang dipilih",
+                    type="primary",
+                    help="Menghapus baris terpilih dari database"
+                )
+            with cdel2:
+                if selected_ids:
+                    st.warning(f"Akan menghapus {len(selected_ids)} baris.")
+                else:
+                    st.caption("Tidak ada baris yang dipilih.")
+
+            if do_delete:
+                if not selected_ids:
+                    st.warning("Pilih minimal satu baris terlebih dahulu.")
+                else:
+                    try:
+                        placeholders = ",".join(["?"] * len(selected_ids))
+                        execute(f"DELETE FROM supervisor_data WHERE id IN ({placeholders})", tuple(selected_ids))
+                        # Audit log
+                        try:
+                            u = current_user() or {}
+                            sample_ids = selected_ids[:20]
+                            more = "..." if len(selected_ids) > 20 else ""
+                            execute(
+                                "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                                (u.get('id') if u else None, "DELETE_SUPERVISOR_ROWS", f"Deleted {len(selected_ids)} rows: {sample_ids}{more}")
+                            )
+                        except Exception:
+                            pass
+                        st.success(f"Berhasil menghapus {len(selected_ids)} baris.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Gagal menghapus data: {e}")
 
         # Enriched Monitoring & Lookup NIK dipindahkan ke tab khusus "Enriched & Lookup"
 
