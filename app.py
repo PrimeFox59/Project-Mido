@@ -3605,6 +3605,74 @@ def page_supervisor():
                 st.error(f"Gagal membaca file: {e}")
 
     with tabs[2]:
+        st.subheader("Assign ke Tracer (berdasarkan Case_ID dari Supervisor)")
+        # Pilih satu user dengan role Tracer
+        tracer_users = fetchall("SELECT COALESCE(full_name, name) AS full_name FROM users WHERE approved=1 AND role='Tracer' ORDER BY COALESCE(full_name,name)")
+        tracer_list = [r.get('full_name') for r in tracer_users if r.get('full_name')]
+        col_as1, col_as2 = st.columns([2, 1])
+        with col_as1:
+            target_tracer = st.selectbox("Pilih Tracer", options=tracer_list, index=0 if tracer_list else None, key="ta_sel_tracer")
+        with col_as2:
+            st.caption("Paste daftar Case_ID, satu per baris")
+        case_ids_text = st.text_area("Daftar Case_ID", height=140, placeholder="Contoh:\nVA123456\nVA987654\n...")
+        if st.button("Buat Assignment", type="primary", key="btn_make_assign_from_sup"):
+            ids = [s.strip() for s in (case_ids_text or "").splitlines() if s.strip()]
+            if not ids:
+                st.warning("Masukkan minimal satu Case_ID.")
+            elif not target_tracer:
+                st.warning("Pilih tracer terlebih dahulu.")
+            else:
+                try:
+                    conn = sqlite3.connect(DB_PATH, timeout=30)
+                    conn.row_factory = sqlite3.Row
+                    cur = conn.cursor()
+                    # helpers
+                    def _gen_trc_code(name: str) -> str:
+                        try:
+                            prefix = (name or '').split(' ')[0][:3].upper()
+                            if not prefix:
+                                prefix = 'TRC'
+                        except Exception:
+                            prefix = 'TRC'
+                        return f"TRC-{datetime.now().strftime('%y%m%d')}-{prefix}"
+
+                    inserted = 0; updated = 0; missing = 0
+                    for cid in ids:
+                        # Ambil data dasar dari supervisor_data
+                        sup = fetchone("SELECT Customer_name, NIK_KTP FROM supervisor_data WHERE Case_ID=? LIMIT 1", (cid,))
+                        if not sup:
+                            missing += 1
+                            continue
+                        debtor = sup.get('Customer_name')
+                        nik = sup.get('NIK_KTP')
+                        cur.execute("SELECT id FROM assign_tracer WHERE Agreement_No=?", (cid,))
+                        row = cur.fetchone()
+                        if row:
+                            cur.execute(
+                                """
+                                UPDATE assign_tracer
+                                SET Assigned_To=?, Debtor_Name=COALESCE(?, Debtor_Name), NIK_KTP=COALESCE(?, NIK_KTP)
+                                WHERE Agreement_No=?
+                                """,
+                                (target_tracer, debtor, nik, cid)
+                            )
+                            updated += 1
+                        else:
+                            trc_code = _gen_trc_code(target_tracer)
+                            cur.execute(
+                                """
+                                INSERT INTO assign_tracer (TRC_Code, Agreement_No, Debtor_Name, NIK_KTP, Assigned_To)
+                                VALUES (?,?,?,?,?)
+                                """,
+                                (trc_code, cid, debtor, nik, target_tracer)
+                            )
+                            inserted += 1
+                    conn.commit(); conn.close()
+                    st.success(f"Assignment selesai. Baru: {inserted}, Update: {updated}, Tidak ditemukan di supervisor: {missing}.")
+                except Exception as e:
+                    st.error(f"Gagal membuat assignment: {e}")
+
+        st.markdown("---")
         # Pull minimal fields to evaluate freeze status
         unassigned_rows = fetchall("SELECT id, Agreement_No, NIK_KTP FROM assign_tracer WHERE IFNULL(Assigned_To,'')='' ORDER BY id DESC")
         # Filter out frozen rows (by Agreement_No or by NIK)
@@ -3734,11 +3802,18 @@ def page_supervisor():
 
         # Base tracer fields from upload/form (TRC_Code will be generated if missing)
         # Agreement_No maps to Case_ID (source); other fields optional
-        tracer_required_min = ["Agreement_No"]
-        tracer_optional_fields = [
-            "Debtor_Name", "NIK_KTP", "EMPLOYMENT_UPDATE", "EMPLOYER", "Debtor_Legal_Name", "Employee_Name", "Employee_ID_Number", "Debtor_Relation_to_Employee"
+        tracer_required_min = ["Agreement_No"]  # internal key
+        # Upload khusus tracer: header Wajib lengkap sesuai spesifikasi
+        tracer_upload_required_headers = [
+            "Case_ID",
+            "Customer_name",
+            "EMPLOYMENT_UPDATE",
+            "EMPLOYER",
+            "Debtor_Legal_Name",
+            "Employee_Name",
+            "Employee_ID_Number",
+            "Debtor_Relation_to_Employee",
         ]
-        tracer_fields = tracer_required_min + tracer_optional_fields
 
         # Default assignee for upload rows (used when file has no Assigned_To)
         _user_rows_up = fetchall("SELECT COALESCE(full_name, name) AS full_name FROM users WHERE approved=1 AND role='Tracer' ORDER BY COALESCE(full_name,name) ASC")
@@ -3773,47 +3848,28 @@ def page_supervisor():
                     s = s.replace(" ", "_")
                     return s.lower()
                 # Header aliasing for friendlier uploads
+                # Map headers to canonical names; accept small alias set
                 alias_map = {
-                    "agreement_no.": "Agreement_No",
-                    "agreement_no": "Agreement_No",
-                    "agreement_number": "Agreement_No",
-                    "virtual_account_number": "Agreement_No",
-                    "case_id": "Agreement_No",
-                    "tracer": "Assigned_To",
-                    "assigned_to": "Assigned_To",
-                    "trace_date": "Trace_Date",  # optional, currently unused
-                    "trc_code": "TRC_Code",
+                    "case id": "Case_ID",
+                    "case_id": "Case_ID",
+                    "customer name": "Customer_name",
+                    "customer_name": "Customer_name",
                 }
-                expected_map_tr = { _norm_col2(k): k for k in (tracer_fields + ["Assigned_To", "TRC_Code"]) }
+                expected_map_tr = { _norm_col2(k): k for k in tracer_upload_required_headers }
                 new_cols = []
                 for c in tracer_df.columns:
                     key = _norm_col2(c)
-                    # map via alias first, then to expected target
-                    if key in alias_map:
-                        target = alias_map[key]
-                    else:
-                        target = expected_map_tr.get(key, c)
-                    new_cols.append(target)
+                    # alias first
+                    key = _norm_col2(alias_map.get(key, c))
+                    new_cols.append(expected_map_tr.get(key, c))
                 tracer_df.columns = new_cols
-                # Validate base required columns (Agreement_No only)
-                missing = [f for f in tracer_required_min if f not in tracer_df.columns]
+                # Validate required upload headers (all must be present)
+                missing = [f for f in tracer_upload_required_headers if f not in tracer_df.columns]
                 if missing:
                     st.error(f"Kolom berikut tidak ditemukan di file: {missing}")
                 else:
-                    # If Assigned_To column not in file, use default selection; allow Unassigned
-                    if 'Assigned_To' not in tracer_df.columns:
-                        if default_assigned == "(Unassigned)":
-                            tracer_df['Assigned_To'] = ""
-                        elif not default_assigned:
-                            st.error("File tidak memiliki kolom 'Assigned_To'. Pilih tracer default atau pilih '(Unassigned)'.")
-                            return
-                        else:
-                            tracer_df['Assigned_To'] = default_assigned
-                    # Clean Agreement_No and drop empty/duplicates inside the file
-                    try:
-                        tracer_df['Agreement_No'] = tracer_df['Agreement_No'].astype(str).str.strip()
-                    except Exception:
-                        pass
+                    # Build Agreement_No from Case_ID and clean
+                    tracer_df['Agreement_No'] = tracer_df['Case_ID'].astype(str).str.strip()
                     tracer_df = tracer_df[tracer_df['Agreement_No'] != '']
                     _rows_before = len(tracer_df)
                     tracer_df = tracer_df.drop_duplicates(subset=['Agreement_No'], keep='first')
@@ -3844,7 +3900,7 @@ def page_supervisor():
                         cur = conn.cursor()
                         for _, row in tracer_df.iterrows():
                             try:
-                                assignee = row.get('Assigned_To')
+                                assignee = default_assigned if default_assigned != "(Unassigned)" else ""
                                 trc_val = row.get('TRC_Code') if 'TRC_Code' in tracer_df.columns else None
                                 if not trc_val or str(trc_val).strip() == "":
                                     trc_val = _gen_trc_code(assignee)
@@ -3855,44 +3911,39 @@ def page_supervisor():
                                 cur.execute("SELECT id, Assigned_To, COALESCE(TRC_Code,'') AS TRC_Code FROM assign_tracer WHERE Agreement_No=?", (agr,))
                                 existing = cur.fetchone()
                                 if existing:
-                                    if update_existing:
-                                        params = [
-                                            trc_val,
-                                            row.get('Debtor_Name'),
-                                            row.get('NIK_KTP'),
-                                            row.get('EMPLOYMENT_UPDATE'),
-                                            row.get('EMPLOYER'),
-                                            row.get('Debtor_Legal_Name'),
-                                            row.get('Employee_Name'),
-                                            row.get('Employee_ID_Number'),
-                                            row.get('Debtor_Relation_to_Employee'),
-                                            agr
-                                        ]
-                                        cur.execute(
-                                            """
-                                            UPDATE assign_tracer SET
-                                                TRC_Code = COALESCE(NULLIF(TRC_Code,''), ?),
-                                                Debtor_Name = COALESCE(NULLIF(?,''), Debtor_Name),
-                                                NIK_KTP = COALESCE(NULLIF(?,''), NIK_KTP),
-                                                EMPLOYMENT_UPDATE = COALESCE(NULLIF(?,''), EMPLOYMENT_UPDATE),
-                                                EMPLOYER = COALESCE(NULLIF(?,''), EMPLOYER),
-                                                Debtor_Legal_Name = COALESCE(NULLIF(?,''), Debtor_Legal_Name),
-                                                Employee_Name = COALESCE(NULLIF(?,''), Employee_Name),
-                                                Employee_ID_Number = COALESCE(NULLIF(?,''), Employee_ID_Number),
-                                                Debtor_Relation_to_Employee = COALESCE(NULLIF(?,''), Debtor_Relation_to_Employee)
-                                            WHERE Agreement_No=?
-                                            """,
-                                            tuple(params)
-                                        )
-                                        updated += 1
-                                    else:
-                                        skipped += 1
+                                    # Always update tracer fields from upload (complete headers)
+                                    params = [
+                                        trc_val,
+                                        row.get('Customer_name'),
+                                        row.get('EMPLOYMENT_UPDATE'),
+                                        row.get('EMPLOYER'),
+                                        row.get('Debtor_Legal_Name'),
+                                        row.get('Employee_Name'),
+                                        row.get('Employee_ID_Number'),
+                                        row.get('Debtor_Relation_to_Employee'),
+                                        agr
+                                    ]
+                                    cur.execute(
+                                        """
+                                        UPDATE assign_tracer SET
+                                            TRC_Code = COALESCE(NULLIF(TRC_Code,''), ?),
+                                            Debtor_Name = COALESCE(NULLIF(?,''), Debtor_Name),
+                                            EMPLOYMENT_UPDATE = COALESCE(NULLIF(?,''), EMPLOYMENT_UPDATE),
+                                            EMPLOYER = COALESCE(NULLIF(?,''), EMPLOYER),
+                                            Debtor_Legal_Name = COALESCE(NULLIF(?,''), Debtor_Legal_Name),
+                                            Employee_Name = COALESCE(NULLIF(?,''), Employee_Name),
+                                            Employee_ID_Number = COALESCE(NULLIF(?,''), Employee_ID_Number),
+                                            Debtor_Relation_to_Employee = COALESCE(NULLIF(?,''), Debtor_Relation_to_Employee)
+                                        WHERE Agreement_No=?
+                                        """,
+                                        tuple(params)
+                                    )
+                                    updated += 1
                                 else:
-                                    # If frozen by NIK/Agreement, force unassigned to prevent new assignments
+                                    # New entry with values from upload; Assigned_To per default selection
                                     try:
-                                        nik = (str(row.get('NIK_KTP') or '').strip())
                                         agr_n = (str(row.get('Agreement_No') or '').strip())
-                                        if (nik and is_frozen_by_nik(nik)) or (agr_n and is_frozen_by_agreement(agr_n)):
+                                        if (agr_n and is_frozen_by_agreement(agr_n)):
                                             assignee = ""
                                     except Exception:
                                         pass
@@ -3901,17 +3952,30 @@ def page_supervisor():
                                         f"INSERT INTO assign_tracer ({','.join(insert_fields)}) VALUES ({','.join(['?' for _ in insert_fields])})",
                                         tuple(values)
                                     )
-                                    # Backfill Debtor_Name from supervisor_data.Customer_name by Case_ID if missing
+                                    # Set names/fields from upload row
                                     try:
                                         cur.execute(
                                             """
                                             UPDATE assign_tracer
-                                            SET Debtor_Name = COALESCE(Debtor_Name, (
-                                                SELECT Customer_name FROM supervisor_data WHERE Case_ID=? LIMIT 1
-                                            ))
+                                            SET Debtor_Name=?,
+                                                EMPLOYMENT_UPDATE=COALESCE(NULLIF(?,''), EMPLOYMENT_UPDATE),
+                                                EMPLOYER=COALESCE(NULLIF(?,''), EMPLOYER),
+                                                Debtor_Legal_Name=COALESCE(NULLIF(?,''), Debtor_Legal_Name),
+                                                Employee_Name=COALESCE(NULLIF(?,''), Employee_Name),
+                                                Employee_ID_Number=COALESCE(NULLIF(?,''), Employee_ID_Number),
+                                                Debtor_Relation_to_Employee=COALESCE(NULLIF(?,''), Debtor_Relation_to_Employee)
                                             WHERE Agreement_No=?
                                             """,
-                                            (agr, agr)
+                                            (
+                                                row.get('Customer_name'),
+                                                row.get('EMPLOYMENT_UPDATE'),
+                                                row.get('EMPLOYER'),
+                                                row.get('Debtor_Legal_Name'),
+                                                row.get('Employee_Name'),
+                                                row.get('Employee_ID_Number'),
+                                                row.get('Debtor_Relation_to_Employee'),
+                                                agr
+                                            )
                                         )
                                     except Exception:
                                         pass
