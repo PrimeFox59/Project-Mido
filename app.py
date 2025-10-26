@@ -2885,26 +2885,73 @@ def page_agent():
             if not sel:
                 st.info("Pilih Case ID pada tabel di atas terlebih dahulu.")
             else:
-                st.subheader("Internal Memo ke Supervisor")
-                with st.form("agent_internal_memo"):
-                    target = st.selectbox("Kirim ke", ["Supervisor"], index=0)
-                    msg = st.text_area("Pesan", height=120)
-                    send = st.form_submit_button("Kirim Memo")
+                st.subheader("Internal Memo (chat)")
+                # Chat-like CSS (scoped)
+                st.markdown(
+                    """
+                    <style>
+                    .chatbox { border:1px solid #E5E7EB; background:#FFFFFF; border-radius:12px; padding:8px; height:380px; overflow-y:auto; }
+                    .msg { display:flex; margin:8px 0; }
+                    .msg.left { justify-content:flex-start; }
+                    .msg.right { justify-content:flex-end; }
+                    .bubble { max-width:72%; padding:10px 12px; border-radius:14px; box-shadow: 0 1px 2px rgba(16,24,40,0.05); }
+                    .left .bubble { background:#F2F4F7; color:#111827; border-top-left-radius:6px; }
+                    .right .bubble { background:#DCFCE7; color:#111827; border-top-right-radius:6px; }
+                    .meta { font-size:11px; color:#667085; margin-top:6px; }
+                    .name { font-weight:600; font-size:12px; margin-bottom:4px; color:#344054; }
+                    </style>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+                # Load recent memos for this case (ascending for chat)
+                recent = fetchall(
+                    "SELECT author_role, author_name, target_role, message, created_at FROM memos WHERE Agreement_No=? ORDER BY id DESC LIMIT 100",
+                    (sel,)
+                ) or []
+                recent = list(reversed(recent))  # oldest at top
+
+                # Render chat messages
+                st.markdown('<div class="chatbox">', unsafe_allow_html=True)
+                for r in recent:
+                    author_role = (r.get('author_role') or '').strip()
+                    author_name = (r.get('author_name') or '').strip()
+                    msg = (r.get('message') or '').strip()
+                    ts = (r.get('created_at') or '').replace('T', ' ')
+                    mine = (author_role == 'Agent' and author_name == agent_name)
+                    side = 'right' if mine else 'left'
+                    name = 'Saya' if mine else (author_name or author_role or 'Supervisor')
+                    # Escape HTML special chars in message
+                    safe_msg = msg.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('\n','<br/>')
+                    html = f"""
+                        <div class='msg {side}'>
+                            <div class='bubble'>
+                                <div class='name'>{name}</div>
+                                <div class='text'>{safe_msg}</div>
+                                <div class='meta'>{ts}</div>
+                            </div>
+                        </div>
+                    """
+                    st.markdown(html, unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+
+                # Input send box (single line)
+                with st.form("agent_internal_memo_chat"):
+                    col_i1, col_i2 = st.columns([6,1])
+                    with col_i1:
+                        msg = st.text_input("Ketik pesan ke Supervisor", value="", placeholder="Tulis pesan…", label_visibility="collapsed")
+                    with col_i2:
+                        send = st.form_submit_button("Kirim")
                     if send and msg and msg.strip():
                         try:
                             execute(
                                 "INSERT INTO memos (Agreement_No, author_role, author_name, target_role, message) VALUES (?,?,?,?,?)",
-                                (sel, "Agent", agent_name, target, msg.strip())
+                                (sel, "Agent", agent_name, "Supervisor", msg.strip())
                             )
                             st.success("Memo terkirim.")
+                            st.rerun()
                         except Exception as e:
                             st.error(f"Gagal mengirim memo: {e}")
-
-                # Recent memos on this case
-                recent = fetchall("SELECT author_role, author_name, target_role, message, created_at FROM memos WHERE Agreement_No=? ORDER BY id DESC LIMIT 10", (sel,))
-                if recent:
-                    st.markdown("### Riwayat Memo Terbaru")
-                    st.dataframe(pd.DataFrame(recent), use_container_width=True, hide_index=True)
 
 
     # --- My PTP tab ---
