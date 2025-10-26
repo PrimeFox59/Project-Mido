@@ -3467,7 +3467,7 @@ def page_supervisor():
         
 
     with tabs[2]:
-        q1, q2, q4, q5 = st.columns([1.2, 1.2, 1.2, 1.2, 0.6])
+        q1, q2, q4, q5 = st.columns([1.2, 1.2, 1.2, 0.6])
         with q1:
             f_case = st.text_input("Filter Case_ID", key="ta_f_case")
         with q2:
