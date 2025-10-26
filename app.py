@@ -418,6 +418,8 @@ def init_db():
     # ensure assign_tracer has optional masked company name field
     try:
         cols = [r['name'] for r in c.execute("PRAGMA table_info(assign_tracer)").fetchall()]
+        if 'Masked_Company_Name' not in cols:
+            c.execute("ALTER TABLE assign_tracer ADD COLUMN Masked_Company_Name TEXT")
         def page_agent():
             require_roles(("Superuser", "Agent"))
             u = current_user()
