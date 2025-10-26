@@ -3486,7 +3486,7 @@ def page_supervisor():
         with q5:
             limit_rows = st.number_input("Limit", min_value=10, max_value=2000, value=200, step=10, key="ta_limit")
 
-        # Build SQL with filters
+    # Build SQL with filters
         where = ["Case_ID IS NOT NULL", "TRIM(Case_ID)<>''"]
         params = []
         if f_case:
@@ -3502,9 +3502,26 @@ def page_supervisor():
             where.append("(Phone_Number_1 LIKE ? OR Phone_Number_2 LIKE ?)")
             params.extend([f"%{f_phone.strip()}%", f"%{f_phone.strip()}%"])
         where_sql = " AND ".join(where) if where else "1=1"
+        # Determine available columns dynamically to avoid errors on older DBs
+        try:
+            sup_cols_info = fetchall("PRAGMA table_info(supervisor_data)") or []
+            sup_cols = {str(r.get('name')) for r in sup_cols_info}
+        except Exception:
+            sup_cols = set()
+        base_cols = ["id", "Case_ID", "Customer_name", "NIK_KTP", "DPD", "Phone_Number_1", "Phone_Number_2"]
+        extra_cols = [
+            "EMPLOYMENT_UPDATE",
+            "EMPLOYER",
+            "Debtor_Legal_Name",
+            "Employee_Name",
+            "Employee_ID_Number",
+            "Debtor_Relation_to_Employee",
+        ]
+        select_cols = base_cols + [c for c in extra_cols if c in sup_cols]
+        select_sql = ", ".join(select_cols)
         rows_sup = fetchall(
             f"""
-            SELECT id, Case_ID, Customer_name, NIK_KTP, DPD, Phone_Number_1, Phone_Number_2
+            SELECT {select_sql}
             FROM supervisor_data
             WHERE {where_sql}
             ORDER BY id DESC
@@ -3513,7 +3530,11 @@ def page_supervisor():
             tuple(params + [int(limit_rows)])
         )
         import pandas as _pd
-        df_sup = _pd.DataFrame(rows_sup) if rows_sup else _pd.DataFrame(columns=["id","Case_ID","Customer_name","NIK_KTP","DPD","Phone_Number_1","Phone_Number_2"])
+        df_sup = _pd.DataFrame(rows_sup) if rows_sup else _pd.DataFrame(columns=select_cols)
+        # Ensure extra columns exist in the DataFrame even if not in DB schema
+        for col in extra_cols:
+            if col not in df_sup.columns:
+                df_sup[col] = ""
         # Add selection column
         select_all = st.checkbox("Pilih semua yang ditampilkan", key="ta_select_all")
         if "Selected" not in df_sup.columns:
@@ -3536,8 +3557,13 @@ def page_supervisor():
                 "DPD": st.column_config.TextColumn("DPD", disabled=True),
                 "Phone_Number_1": st.column_config.TextColumn("Phone 1", disabled=True),
                 "Phone_Number_2": st.column_config.TextColumn("Phone 2", disabled=True),
+                "EMPLOYMENT_UPDATE": st.column_config.TextColumn("EMPLOYMENT_UPDATE", disabled=True),
+                "EMPLOYER": st.column_config.TextColumn("EMPLOYER", disabled=True),
+                "Debtor_Legal_Name": st.column_config.TextColumn("Debtor_Legal_Name", disabled=True),
+                "Employee_Name": st.column_config.TextColumn("Employee_Name", disabled=True),
+                "Employee_ID_Number": st.column_config.TextColumn("Employee_ID_Number", disabled=True),
+                "Debtor_Relation_to_Employee": st.column_config.TextColumn("Debtor_Relation_to_Employee", disabled=True),
             },
-            disabled=["Case_ID","Customer_name","NIK_KTP","DPD","Phone_Number_1","Phone_Number_2"],
             num_rows="fixed",
         )
 
