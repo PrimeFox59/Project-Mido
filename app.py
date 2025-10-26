@@ -2736,13 +2736,59 @@ def page_agent():
         filtered = [r for r in rows if (not q_ag or q_ag.strip() in str(r.get('Agreement_No') or ''))]
 
         st.subheader("Assignments")
-        _df = pd.DataFrame(filtered).rename(columns={'Agreement_No': 'Case_ID'})
-        st.dataframe(_df, use_container_width=True, hide_index=True)
+        # Build a monitoring-style selectable table
+        data = [
+            {
+                "Case_ID": r.get("Agreement_No"),
+                "assigned_at": r.get("assigned_at"),
+            }
+            for r in filtered
+        ]
+        df = pd.DataFrame(data)
+        prev_selected = set(st.session_state.get("agent_selected_list", []) or [])
+        # Select-all / clear options
+        col_sa, col_cl = st.columns([1, 1])
+        with col_sa:
+            select_all = st.checkbox("Pilih semua", key="ag_select_all")
+        with col_cl:
+            clear_all = st.checkbox("Kosongkan pilihan", key="ag_clear_all")
+        if not df.empty:
+            if select_all:
+                df.insert(0, "Selected", True)
+            elif clear_all:
+                df.insert(0, "Selected", False)
+            else:
+                df.insert(0, "Selected", df["Case_ID"].apply(lambda x: x in prev_selected))
+        else:
+            df["Selected"] = []
 
-        sel = st.selectbox("Pilih Case ID", [r['Agreement_No'] for r in filtered], key="ag_sel")
-        st.session_state['agent_selected'] = sel if sel else None
+        edited = st.data_editor(
+            df,
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "Selected": st.column_config.CheckboxColumn("Selected", help="Centang untuk memilih Case_ID"),
+                "Case_ID": st.column_config.TextColumn("Case_ID"),
+                "assigned_at": st.column_config.TextColumn("assigned_at"),
+            },
+            disabled=["Case_ID", "assigned_at"],
+        )
+
+        # Determine selections from edited table
+        selected_list = []
+        if edited is not None and not edited.empty:
+            try:
+                selected_list = [
+                    str(row["Case_ID"]) for _, row in edited.iterrows() if bool(row.get("Selected"))
+                ]
+            except Exception:
+                selected_list = []
+        st.session_state["agent_selected_list"] = selected_list
+        sel = selected_list[0] if selected_list else None
+        st.session_state["agent_selected"] = sel
+
         if not sel:
-            st.info("Pilih Case ID untuk melihat detail.")
+            st.info("Centang satu baris untuk melihat detail kasus.")
         else:
             st.markdown("---")
             st.subheader(f"Case Details: {sel}")
