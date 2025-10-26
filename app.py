@@ -3628,7 +3628,8 @@ def page_supervisor():
 
         # Process single assign
         if btn_assign_single:
-            sel = [r for _, r in (edited or _pd.DataFrame()).iterrows() if bool(r.get("Selected"))]
+            # Avoid ambiguous truth-value of DataFrame; use explicit None check
+            sel = [r for _, r in ((edited if edited is not None else _pd.DataFrame())).iterrows() if bool(r.get("Selected"))]
             if not sel:
                 st.warning("Pilih minimal satu baris pada tabel di atas.")
             elif not target_tracer_tbl:
