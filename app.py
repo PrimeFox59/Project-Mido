@@ -3710,7 +3710,6 @@ def page_supervisor():
                 continue
             filtered_rows.append(r)
         unassigned_count = len(filtered_rows)
-        st.info(f"Baris belum ter-assign saat ini: {unassigned_count}")
         if frozen_skipped:
             st.warning(f"{frozen_skipped} baris dilewati karena status Freeze (berdasarkan NIK/Agreement_No).")
 
