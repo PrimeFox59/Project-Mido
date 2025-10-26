@@ -3846,133 +3846,224 @@ def page_supervisor():
 
     # --- Agent Assigning Tab ---
     with tabs[3]:
-        st.subheader("Assign ke Agent (Round-robin)")
-        # Determine unassigned agreements from assign_tracer
-        base_unassigned = fetchall(
-            """
-            SELECT a.Agreement_No, a.Assigned_To AS tracer, a.Masked_Company_Name, a.NIK_KTP
-            FROM assign_tracer a
-            LEFT JOIN agent_assignments ag ON ag.Agreement_No = a.Agreement_No
-            WHERE IFNULL(a.Agreement_No,'')<>'' AND ag.Agreement_No IS NULL
-            ORDER BY a.id DESC
-            """
-        )
-        st.caption(f"Belum ter-assign ke Agent: {len(base_unassigned)} loan")
+        st.subheader("Assign ke Agent")
+        # Filters similar to Trace Assigning
+        q1, q2, q3, q4 = st.columns([1.2, 1.2, 1.2, 0.6])
+        with q1:
+            fa_case = st.text_input("Filter Case_ID", key="aa_f_case")
+        with q2:
+            fa_name = st.text_input("Filter Customer", key="aa_f_name")
+        with q3:
+            fa_phone = st.text_input("Filter Phone", key="aa_f_phone")
+        with q4:
+            fa_limit = st.number_input("Limit Row", min_value=10, max_value=2000, value=200, step=10, key="aa_limit")
 
-        # Filters
-        f1, f2, f3 = st.columns(3)
-        with f1:
-            # agent candidates (approved users, role Agent preferred)
-            agent_rows = fetchall("SELECT COALESCE(full_name,name) AS full_name, role FROM users WHERE approved=1 ORDER BY COALESCE(full_name,name)")
-            agent_names = [r['full_name'] for r in agent_rows if r.get('full_name') and (r.get('role') in ("Agent", "Superuser", "Supervisor"))]
-            selected_agents = st.multiselect("Pilih agent (>=2)", options=agent_names, default=[])
-        with f2:
-            filter_tracer = st.text_input("Filter by Tracer (opsional)")
-        with f3:
-            filter_mask = st.text_input("Filter by Masked Company (opsional)")
+        hide_assigned = st.checkbox("Sembunyikan yang sudah di-assign ke Agent", value=True, key="aa_hide_assigned")
 
-        # Build filtered list (exclude frozen by Agreement_No or NIK)
-        loans = []
-        frozen_skip_agent = 0
-        for r in base_unassigned:
-            if filter_tracer and filter_tracer.strip().lower() not in (r.get('tracer') or '').lower():
-                continue
-            if filter_mask and filter_mask.strip().lower() not in (r.get('Masked_Company_Name') or '').lower():
-                continue
-            agr = (r.get('Agreement_No') or '').strip()
-            nik = (r.get('NIK_KTP') or '').strip()
-            if is_frozen_by_agreement(agr) or (nik and is_frozen_by_nik(nik)):
-                frozen_skip_agent += 1
-                continue
-            loans.append(agr)
+        # Build SQL with filters
+        wh = ["Case_ID IS NOT NULL", "TRIM(Case_ID)<>''"]
+        par = []
+        if fa_case:
+            wh.append("Case_ID LIKE ?")
+            par.append(f"%{fa_case.strip()}%")
+        if fa_name:
+            wh.append("Customer_name LIKE ?")
+            par.append(f"%{fa_name.strip()}%")
+        if fa_phone:
+            wh.append("(Phone_Number_1 LIKE ? OR Phone_Number_2 LIKE ?)")
+            par.extend([f"%{fa_phone.strip()}%", f"%{fa_phone.strip()}%"])
+        if hide_assigned:
+            wh.append("Case_ID NOT IN (SELECT Agreement_No FROM agent_assignments WHERE IFNULL(active,1)=1)")
+        wh_sql = " AND ".join(wh) if wh else "1=1"
 
-        if frozen_skip_agent:
-            st.warning(f"{frozen_skip_agent} loan dilewati karena status Freeze (NIK/Agreement_No).")
-
-        cset1, cset2 = st.columns(2)
-        with cset1:
-            limit_n = st.number_input("Jumlah yang akan di-assign (0=semua)", min_value=0, value=min(len(loans), 100), step=1)
-        with cset2:
-            do_shuffle = st.checkbox("Acak urutan loan", value=True)
-
-        if selected_agents:
-            import math as _math
-            per_est = _math.ceil((len(loans) if (limit_n == 0) else min(limit_n, len(loans))) / max(len(selected_agents), 1))
-            st.caption(f"Perkiraan: ~{per_est} loan per agent")
-
-        # Load saved next offset if any
+        # Determine available columns dynamically
         try:
-            saved_off = int(get_setting('agent_rr_next_start', '0') or '0')
+            _sup_cols = fetchall("PRAGMA table_info(supervisor_data)") or []
+            sup_cols = {str(r.get('name')) for r in _sup_cols}
         except Exception:
-            saved_off = 0
-        rr1, rr2 = st.columns(2)
-        with rr1:
-            start_offset = st.number_input("Mulai dari agen ke- (offset)", min_value=0, value=int(saved_off), step=1, key="agent_rr_offset")
-        with rr2:
-            remember_idx = st.checkbox("Ingat offset berikutnya (auto resume)", value=False, key="agent_rr_remember")
-            st.caption(f"Offset tersimpan saat ini: {saved_off}")
-            if st.button("Hapus offset tersimpan"):
-                try:
-                    set_setting('agent_rr_next_start', '0')
-                    st.rerun()
-                except Exception:
-                    pass
+            sup_cols = set()
+        base_cols = ["id", "Case_ID", "Customer_name", "NIK_KTP", "DPD", "Phone_Number_1", "Phone_Number_2"]
+        extra_cols = [
+            # employment details (for context)
+            "EMPLOYMENT_UPDATE", "EMPLOYER", "Debtor_Legal_Name", "Employee_Name", "Employee_ID_Number", "Debtor_Relation_to_Employee",
+            # agent-editable fields (for visibility)
+            "STATUS", "REGISTERED_PHONE", "Additional_Contacts", "Remarks_Suggested_NIK_Prospect", "Payment", "Paid_Off_Status"
+        ]
+        sel_cols = base_cols + [c for c in extra_cols if c in sup_cols]
+        rows_sup = fetchall(
+            f"""
+            SELECT {', '.join(sel_cols)}
+            FROM supervisor_data
+            WHERE {wh_sql}
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            tuple(par + [int(fa_limit)])
+        )
+        import pandas as _pd
+        df = _pd.DataFrame(rows_sup) if rows_sup else _pd.DataFrame(columns=sel_cols)
+        for col in extra_cols:
+            if col not in df.columns:
+                df[col] = ""
 
-        if st.button("Assign ke Agent Sekarang", type="primary"):
-            if not selected_agents or len(selected_agents) < 2:
-                st.warning("Pilih minimal 2 agent.")
-            elif not loans:
-                st.info("Tidak ada loan memenuhi filter.")
-            else:
-                try:
-                    ids = list(loans)
-                    if do_shuffle:
-                        import random
-                        random.shuffle(ids)
-                    if limit_n and limit_n > 0:
-                        ids = ids[: min(len(ids), int(limit_n))]
-                    # Build inserts round-robin
-                    ins_rows = []
-                    u = current_user() or {}
-                    by = (u.get('full_name') or u.get('login_id') or '-')
-                    n_agents = max(len(selected_agents), 1)
-                    offset = int(start_offset) % n_agents
-                    for i, agr in enumerate(ids):
-                        agent_to = selected_agents[(i + offset) % n_agents]
-                        # Double-check freeze before writing
-                        if is_frozen_by_agreement(agr):
-                            continue
-                        info = fetchone("SELECT NIK_KTP FROM assign_tracer WHERE Agreement_No=?", (agr,)) or {}
-                        nik = (info.get('NIK_KTP') or '').strip()
-                        if nik and is_frozen_by_nik(nik):
-                            continue
-                        ins_rows.append((agr, agent_to, by))
+        # Selection controls
+        select_all = st.checkbox("Pilih semua yang ditampilkan", key="aa_select_all")
+        if "Selected" not in df.columns:
+            df.insert(0, "Selected", bool(select_all))
+        else:
+            try:
+                df["Selected"] = bool(select_all)
+            except Exception:
+                pass
+        st.caption(f"Menampilkan {len(df)} baris kandidat untuk assignment Agent")
+        try:
+            edited = st.data_editor(
+                df,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Selected": st.column_config.CheckboxColumn("Selected", default=select_all),
+                    "Case_ID": st.column_config.TextColumn("Case_ID", disabled=True),
+                    "Customer_name": st.column_config.TextColumn("Customer", disabled=True),
+                    "NIK_KTP": st.column_config.TextColumn("NIK", disabled=True),
+                    "DPD": st.column_config.TextColumn("DPD", disabled=True),
+                    "Phone_Number_1": st.column_config.TextColumn("Phone 1", disabled=True),
+                    "Phone_Number_2": st.column_config.TextColumn("Phone 2", disabled=True),
+                    "STATUS": st.column_config.TextColumn("STATUS", disabled=True),
+                    "REGISTERED_PHONE": st.column_config.TextColumn("REGISTERED PHONE", disabled=True),
+                    "Additional_Contacts": st.column_config.TextColumn("Additional Contacts", disabled=True),
+                    "Remarks_Suggested_NIK_Prospect": st.column_config.TextColumn("Remarks Suggested NIK Prospect", disabled=True),
+                    "Payment": st.column_config.TextColumn("Payment", disabled=True),
+                    "Paid_Off_Status": st.column_config.TextColumn("Paid Off Status", disabled=True),
+                },
+                num_rows="fixed"
+            )
+        except Exception:
+            edited = df
+            st.dataframe(df, use_container_width=True, hide_index=True)
+
+        try:
+            selected_rows = edited[edited["Selected"] == True]
+        except Exception:
+            selected_rows = _pd.DataFrame(columns=df.columns)
+
+        # Agent lists
+        agents = [
+            (r.get('n') or '-') for r in (fetchall("SELECT COALESCE(full_name, name, login_id) AS n FROM users WHERE role='Agent' AND approved=1 ORDER BY n") or [])
+        ]
+        agents = [a for a in agents if a and a.strip()]
+
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("#### Assign ke satu Agent")
+            sel_agent = st.selectbox("Pilih agent", options=["-"] + agents, index=0, key="aa_single_agent")
+            btn_single = st.button("Assign ke agent ini", type="primary", key="aa_btn_single")
+            if btn_single:
+                if not len(selected_rows):
+                    st.warning("Pilih minimal satu baris dahulu.")
+                elif not sel_agent or sel_agent == "-":
+                    st.warning("Pilih agent terlebih dahulu.")
+                else:
                     try:
-                        conn = sqlite3.connect(DB_PATH)
-                        cur = conn.cursor()
-                        cur.executemany("INSERT OR IGNORE INTO agent_assignments (Agreement_No, Agent_Assigned_To, assigned_by) VALUES (?,?,?)", ins_rows)
-                        conn.commit()
-                        conn.close()
-                    except Exception as e:
-                        st.error(f"Gagal menyimpan assign agent: {e}")
-                    else:
-                        st.success(f"Berhasil assign {len(ins_rows)} loan ke {len(selected_agents)} agent.")
-                        # Audit
-                        try:
-                            execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (u.get('id') if u else None, "AGENT_ASSIGN", f"Assign {len(ins_rows)} loans to {', '.join(selected_agents)}"))
-                        except Exception:
-                            pass
-                        # Auto-remember next offset globally
-                        if remember_idx and n_agents > 0:
+                        u = current_user() or {}
+                        by = (u.get('full_name') or u.get('login_id') or '-')
+                        frozen_skips = 0
+                        assigned = 0
+                        for _, r in selected_rows.iterrows():
+                            agr = str(r.get('Case_ID') or '').strip()
+                            if not agr:
+                                continue
+                            # Freeze check by Agreement_No
                             try:
-                                next_offset = (offset + len(ins_rows)) % n_agents
-                                set_setting('agent_rr_next_start', str(next_offset))
-                                st.caption(f"Offset berikutnya disimpan: {next_offset}")
+                                if is_frozen_by_agreement(agr):
+                                    frozen_skips += 1
+                                    continue
                             except Exception:
                                 pass
+                            try:
+                                execute(
+                                    """
+                                    INSERT INTO agent_assignments (Agreement_No, Agent_Assigned_To, assigned_by, active)
+                                    VALUES (?,?,?,1)
+                                    ON CONFLICT(Agreement_No) DO UPDATE SET
+                                        Agent_Assigned_To=excluded.Agent_Assigned_To,
+                                        assigned_at=CURRENT_TIMESTAMP,
+                                        assigned_by=excluded.assigned_by,
+                                        active=1
+                                    """,
+                                    (agr, sel_agent, by)
+                                )
+                                assigned += 1
+                            except Exception:
+                                pass
+                        # Audit
+                        try:
+                            execute(
+                                "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                                (u.get('id') if u else None, "AGENT_ASSIGN_FROM_SUP_TABLE", f"Assigned {assigned} to {sel_agent}; frozen skipped {frozen_skips}")
+                            )
+                        except Exception:
+                            pass
+                        st.success(f"Berhasil assign {assigned} dokumen. Dilewati (frozen): {frozen_skips}.")
                         st.rerun()
-                except Exception as e:
-                    st.error(f"Gagal assign: {e}")
+                    except Exception as e:
+                        st.error(f"Gagal assign: {e}")
+
+        with c2:
+            st.markdown("#### Distribusi acak ke beberapa Agent")
+            sel_agents = st.multiselect("Pilih beberapa agent", options=agents, key="aa_multi_agents")
+            btn_multi = st.button("Random distribute", key="aa_btn_multi")
+            if btn_multi:
+                if not len(selected_rows):
+                    st.warning("Pilih minimal satu baris dahulu.")
+                elif not sel_agents:
+                    st.warning("Pilih minimal satu agent.")
+                else:
+                    try:
+                        import random as _rand
+                        u = current_user() or {}
+                        by = (u.get('full_name') or u.get('login_id') or '-')
+                        ids = [str(x).strip() for x in selected_rows['Case_ID'].tolist() if str(x).strip()]
+                        _rand.shuffle(ids)
+                        assigned = 0
+                        frozen_skips = 0
+                        for i, agr in enumerate(ids):
+                            try:
+                                if is_frozen_by_agreement(agr):
+                                    frozen_skips += 1
+                                    continue
+                            except Exception:
+                                pass
+                            agent = sel_agents[i % len(sel_agents)]
+                            try:
+                                execute(
+                                    """
+                                    INSERT INTO agent_assignments (Agreement_No, Agent_Assigned_To, assigned_by, active)
+                                    VALUES (?,?,?,1)
+                                    ON CONFLICT(Agreement_No) DO UPDATE SET
+                                        Agent_Assigned_To=excluded.Agent_Assigned_To,
+                                        assigned_at=CURRENT_TIMESTAMP,
+                                        assigned_by=excluded.assigned_by,
+                                        active=1
+                                    """,
+                                    (agr, agent, by)
+                                )
+                                assigned += 1
+                            except Exception:
+                                pass
+                        # Audit
+                        try:
+                            execute(
+                                "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                                (u.get('id') if u else None, "AGENT_ASSIGN_RANDOM_FROM_SUP_TABLE", f"Assigned {assigned} among {len(sel_agents)} agents; frozen skipped {frozen_skips}")
+                            )
+                        except Exception:
+                            pass
+                        st.success(f"Distribusi selesai. Berhasil: {assigned}. Dilewati (frozen): {frozen_skips}.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Gagal melakukan distribusi: {e}")
+        
 
     # --- Freeze Manager Tab ---
     with tabs[6]:
