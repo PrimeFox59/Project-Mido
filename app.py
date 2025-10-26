@@ -461,16 +461,17 @@ def init_db():
                 if not assignments:
                     st.info("Belum ada assignment untuk Anda.")
                 else:
-                    q_ag = st.text_input("Cari Agreement_No (Loan Number)", key="ag_q_no")
+                    q_ag = st.text_input("Cari Case_ID", key="ag_q_no")
                     filtered = [r for r in assignments if (not q_ag or q_ag.strip() in str(r.get('Agreement_No') or ''))]
 
                     st.subheader("Assignments")
-                    st.dataframe(pd.DataFrame(filtered), use_container_width=True, hide_index=True)
+                    _df = pd.DataFrame(filtered).rename(columns={'Agreement_No': 'Case_ID'})
+                    st.dataframe(_df, use_container_width=True, hide_index=True)
 
-                    sel = st.selectbox("Pilih Loan Number", [r['Agreement_No'] for r in filtered], key="ag_sel")
+                    sel = st.selectbox("Pilih Case ID", [r['Agreement_No'] for r in filtered], key="ag_sel")
                     if sel:
                         st.markdown("---")
-                        st.subheader(f"Loan Details: {sel}")
+                        st.subheader(f"Case Details: {sel}")
                         info = fetchone("SELECT Debtor_Name, NIK_KTP FROM assign_tracer WHERE Agreement_No=?", (sel,)) or {}
                         c1, c2, c3 = st.columns(3)
                         with c1:
@@ -2718,19 +2719,20 @@ def page_agent():
         return
 
     # Optional quick search
-    q_ag = st.text_input("Cari Agreement_No (Loan Number)", key="ag_q_no")
+    q_ag = st.text_input("Cari Case_ID", key="ag_q_no")
     filtered = [r for r in rows if (not q_ag or q_ag.strip() in str(r.get('Agreement_No') or ''))]
 
     st.subheader("Assignments")
-    st.dataframe(pd.DataFrame(filtered), use_container_width=True, hide_index=True)
+    _df = pd.DataFrame(filtered).rename(columns={'Agreement_No': 'Case_ID'})
+    st.dataframe(_df, use_container_width=True, hide_index=True)
 
     # Select a loan to open detail
-    sel = st.selectbox("Pilih Loan Number", [r['Agreement_No'] for r in filtered], key="ag_sel")
+    sel = st.selectbox("Pilih Case ID", [r['Agreement_No'] for r in filtered], key="ag_sel")
     if not sel:
         return
 
     st.markdown("---")
-    st.subheader(f"Loan Details: {sel}")
+    st.subheader(f"Case Details: {sel}")
     # Fetch minimal debtor info (if present) from assign_tracer and supervisor_data
     info = fetchone("SELECT Debtor_Name, NIK_KTP FROM assign_tracer WHERE Agreement_No=?", (sel,)) or {}
     c1, c2, c3 = st.columns(3)
@@ -3759,7 +3761,7 @@ def page_supervisor():
             filtered_rows.append(r)
         unassigned_count = len(filtered_rows)
         if frozen_skipped:
-            st.warning(f"{frozen_skipped} baris dilewati karena status Freeze (berdasarkan NIK/Agreement_No).")
+            st.warning(f"{frozen_skipped} baris dilewati karena status Freeze (berdasarkan NIK/Case_ID).")
 
         if unassigned_count > 0:
             # Build tracer options in this scope (approved users)
@@ -3842,7 +3844,7 @@ def page_supervisor():
                     except Exception as e:
                         st.error(f"Gagal melakukan multi-assign: {e}")
         else:
-            st.caption("Tidak ada baris yang perlu di-assign saat ini.")
+            st.caption("---")
 
 
     # --- Agent Assigning Tab ---
@@ -4409,7 +4411,7 @@ def page_tracer():
     # Quick search
     qcol1, qcol2 = st.columns([2,1])
     with qcol1:
-        q_ag = st.text_input("Cari Agreement_No (Loan Number)", key="tr_q_ag")
+        q_ag = st.text_input("Cari Case_ID", key="tr_q_ag")
     with qcol2:
         q_nik = st.text_input("Cari NIK", key="tr_q_nik")
 
@@ -4427,7 +4429,7 @@ def page_tracer():
         {
             'ID': r['id'],
             'TRC Code': r['TRC_Code'],
-            'Agreement No.': r['Agreement_No'],
+            'Case ID': r['Agreement_No'],
             'Debtor Name': r['Debtor_Name'],
             'NIK KTP': r['NIK_KTP'],
             'Assigned At': r['created_at'],
@@ -4451,7 +4453,7 @@ def page_tracer():
         col1, col2 = st.columns(2)
         with col1:
             st.text_input("TRC Code", value=sel_row.get('TRC_Code',''), disabled=True, key="tr_v_trc")
-            st.text_input("Agreement No.", value=sel_row.get('Agreement_No',''), disabled=True, key="tr_v_agmt")
+            st.text_input("Case ID", value=sel_row.get('Agreement_No',''), disabled=True, key="tr_v_agmt")
             st.text_input("Debtor Name", value=sel_row.get('Debtor_Name',''), disabled=True, key="tr_v_debtor")
             st.text_input("NIK KTP", value=sel_row.get('NIK_KTP',''), disabled=True, key="tr_v_nik")
         with col2:
@@ -4526,9 +4528,9 @@ def page_guide():
     st.markdown("""
     - Menu: **Supervisor → Upload Excel/CSV Supervisor Data**.
     - File yang diunggah akan diparse ke tabel `supervisor_data`.
-    - Setiap baris mewakili 1 pinjaman (Agreement_No / Case_ID) — berisi identitas debitur, kontak, DPD, dan outstanding.
+    - Setiap baris mewakili 1 pinjaman (Case_ID) — berisi identitas debitur, kontak, DPD, dan outstanding.
     - Aplikasi memeriksa header dan menyimpan ke SQLite (`minama.db`).
-    - Supervisor dapat meninjau data, memperbarui baris, dan memilih beberapa Agreement_No untuk ditugaskan ke tracer.
+    - Supervisor dapat meninjau data, memperbarui baris, dan memilih beberapa Case_ID untuk ditugaskan ke tracer.
     - Penugasan dicatat pada tabel `assign_tracer`. Setelah tracer menyerahkan hasil, supervisor dapat menugaskan ke agent (tabel `agent_assignments`).
     """, unsafe_allow_html=True)
 
@@ -4537,16 +4539,16 @@ def page_guide():
     - Login sebagai tracer (misal: `tracer` / password seed `tracer123` jika belum diubah).
     - Buka menu **Tracer** untuk melihat daftar assignment yang ditugaskan kepadamu (dari `assign_tracer`).
     - Lakukan tracing lapangan/telepon: konfirmasi identitas, status pekerjaan, alamat, catat hasil.
-    - Setiap interaksi disimpan di `trace_results` dengan kolom: `Agreement_No`, `status`, `notes`, `touch_type`, `party`, `created_by`.
-    - Sistem menyimpan banyak touch record per Agreement_No untuk audit trail.
+    - Setiap interaksi disimpan di `trace_results` dengan kolom: `Case_ID`, `status`, `notes`, `touch_type`, `party`, `created_by`.
+    - Sistem menyimpan banyak touch record per Case_ID untuk audit trail.
     """, unsafe_allow_html=True)
 
     st.header("3) Agent — Penagihan & Pembayaran")
     st.markdown("""
-    - Setelah tracer mengonfirmasi debitur, supervisor dapat menugaskan Agreement_No ke agent (tabel `agent_assignments`).
+    - Setelah tracer mengonfirmasi debitur, supervisor dapat menugaskan Case_ID ke agent (tabel `agent_assignments`).
     - Agent login melihat penugasan di menu **Agent**.
-    - Agent melaporkan hasil ke `agent_results` dengan field: `Agreement_No`, `agent_status` (PTP/Paid/Refused), `agent_ptp_amount`, `agent_ptp_date`, `agent_notes`.
-    - Jika pembayaran terjadi, supervisor bisa menambahkan bukti ke tabel `payments` (`Agreement_No`, `paid_amount`, `paid_date`, `status`, `source_file`, `uploaded_by`).
+    - Agent melaporkan hasil ke `agent_results` dengan field: `Case_ID`, `agent_status` (PTP/Paid/Refused), `agent_ptp_amount`, `agent_ptp_date`, `agent_notes`.
+    - Jika pembayaran terjadi, supervisor bisa menambahkan bukti ke tabel `payments` (`Case_ID`, `paid_amount`, `paid_date`, `status`, `source_file`, `uploaded_by`).
     """, unsafe_allow_html=True)
 
     st.header("4) Monitoring & Analytics")
@@ -4601,18 +4603,18 @@ def page_guide():
     st.subheader("Dokumentasi Teknis: Ringkasan Tabel Utama")
     st.markdown("""
     - `supervisor_data`: menyimpan semua baris input dari file supervisor (kolom: Customer_name, DPD, Principle_Outstanding, Phone_Number_1, dll.)
-    - `assign_tracer`: daftar penugasan tracer (Agreement_No, Debtor_Name, NIK_KTP, Assigned_To)
-    - `trace_results`: hasil tracing / touch logs (Agreement_No, tracer, status, notes, touch_type, party, touched_at)
-    - `agent_assignments`: assignment ke agent (Agreement_No, Agent_Assigned_To, assigned_at, active)
-    - `agent_results`: hasil penagihan (Agreement_No, agent, agent_status, agent_ptp_amount, agent_ptp_date, agent_notes)
-    - `payments`: rekapan pembayaran (Agreement_No, paid_amount, paid_date, status, source_file)
+    - `assign_tracer`: daftar penugasan tracer (Case_ID, Debtor_Name, NIK_KTP, Assigned_To)
+    - `trace_results`: hasil tracing / touch logs (Case_ID, tracer, status, notes, touch_type, party, touched_at)
+    - `agent_assignments`: assignment ke agent (Case_ID, Agent_Assigned_To, assigned_at, active)
+    - `agent_results`: hasil penagihan (Case_ID, agent, agent_status, agent_ptp_amount, agent_ptp_date, agent_notes)
+    - `payments`: rekapan pembayaran (Case_ID, paid_amount, paid_date, status, source_file)
     - `backup_log`, `audit_logs`, `app_settings`, `ai_knowledge` untuk operasional dan audit
     """, unsafe_allow_html=True)
 
     st.subheader("Contoh Alur Singkat — Kasus Nyata")
     st.markdown("""
     1. Supervisor mengunggah `supervisor_data_dummy.xlsx` berisi 100 baris. Data tersimpan di `supervisor_data`.
-    2. Supervisor memilih 20 Agreement_No dan menugaskan ke `tracer` — entri dibuat di `assign_tracer`.
+    2. Supervisor memilih 20 Case_ID dan menugaskan ke `tracer` — entri dibuat di `assign_tracer`.
     3. Tracer membuka menu Tracer, melihat 20 assignment, dan membuat 1–3 touch per debitur; hasil masuk ke `trace_results`.
     4. Supervisor melihat hasil trace, menugaskan 15 kasus ke `agent` — entri di `agent_assignments`.
     5. Agent mendatangi debitur; 5 kasus menghasilkan pembayaran → disimpan di `payments`; agent juga mengisi `agent_results`.
@@ -4622,7 +4624,7 @@ def page_guide():
     st.subheader("FAQ & Troubleshooting Singkat")
     st.markdown("""
     Q: Bagaimana jika upload CSV gagal?
-    A: Periksa header file sesuai contoh, pastikan kolom `Agreement_No`/`Case_ID` ada, dan tidak ada duplikat yang memicu constraint.
+    A: Periksa header file sesuai contoh, pastikan kolom `Case_ID` ada, dan tidak ada duplikat yang memicu constraint.
 
     Q: Backup Drive tidak berfungsi?
     A: Pastikan `service_account` tersedia di `st.secrets` dan folder `FOLDER_ID_DEFAULT` benar; cek `backup_log` untuk pesan error.
