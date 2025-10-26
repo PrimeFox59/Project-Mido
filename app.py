@@ -46,6 +46,52 @@ def get_db():
 def init_db():
     conn = get_db()
     c = conn.cursor()
+    # Ensure users table exists (authentication)
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            full_name TEXT,
+            login_id TEXT,
+            email TEXT,
+            password_hash TEXT,
+            role TEXT,
+            approved INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+    )
+    try:
+        c.execute("CREATE INDEX IF NOT EXISTS idx_users_login ON users(login_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_users_approved ON users(approved)")
+    except Exception:
+        pass
+    # Seed default users if database is fresh
+    try:
+        cnt = (c.execute("SELECT COUNT(*) FROM users").fetchone()[0])
+    except Exception:
+        cnt = 0
+    if not cnt:
+        try:
+            # Minimal seed: Superuser admin + Tracer + Agent + Supervisor
+            def _hp(pw: str) -> str:
+                return hashlib.sha256(pw.encode()).hexdigest()
+            rows = [
+                ("admin", "Administrator", "admin", "", _hp("admin123"), "Superuser", 1),
+                ("supervisor", "Supervisor", "supervisor", "", _hp("supervisor123"), "Supervisor", 1),
+                ("tracer", "Tracer", "tracer", "", _hp("tracer123"), "Tracer", 1),
+                ("agent", "Agent", "agent", "", _hp("agent123"), "Agent", 1),
+            ]
+            c.executemany(
+                "INSERT INTO users (name, full_name, login_id, email, password_hash, role, approved) VALUES (?,?,?,?,?,?,?)",
+                rows
+            )
+            conn.commit()
+        except Exception:
+            pass
     # assign_tracer (for Trace Assigning tab)
     c.execute("""
     CREATE TABLE IF NOT EXISTS assign_tracer (
