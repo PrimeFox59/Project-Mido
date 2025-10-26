@@ -2721,9 +2721,6 @@ def page_agent():
     # Tabs layout to tidy up Agent Menu
     tabs = st.tabs([
         "Cases",
-        "Report Payment/PTP",
-        "Update Data",
-        "Internal Memo",
         "My PTP",
         "Monthly Payment Recap",
         "All-time Payment Recap",
@@ -2787,9 +2784,7 @@ def page_agent():
         sel = selected_list[0] if selected_list else None
         st.session_state["agent_selected"] = sel
 
-        if not sel:
-            st.info("Centang satu baris untuk melihat detail kasus.")
-        else:
+        if sel:
             st.markdown("---")
             st.subheader(f"Case Details: {sel}")
             info = fetchone("SELECT Debtor_Name, NIK_KTP FROM assign_tracer WHERE Agreement_No=?", (sel,)) or {}
@@ -2804,119 +2799,122 @@ def page_agent():
                 st.text_input("Phone", value=phone, disabled=True)
             if (locals().get('phone')):
                 st.markdown(f"[Click to call]({'tel:'+str(phone)})  |  [SIP]({'sip:'+str(phone)})")
-
-    # --- Report Payment/PTP tab ---
-    with tabs[1]:
-        sel = st.session_state.get('agent_selected')
-        if not sel:
-            st.info("Pilih Case ID di tab 'Cases' terlebih dahulu.")
         else:
-            st.subheader("Report Payment/PTP")
-            last = fetchone("SELECT * FROM agent_results WHERE Agreement_No=? AND agent=? ORDER BY id DESC LIMIT 1", (sel, agent_name)) or {}
-            with st.form("agent_result_form"):
-                ag_status = st.selectbox("Status", ["", "PTP", "PAID", "NO ANSWER", "RTP", "FOLLOW UP", "OTHER"], index=0)
-                colx, coly = st.columns(2)
-                with colx:
-                    ptp_amount = st.number_input("PTP Amount", min_value=0.0, value=float(last.get('agent_ptp_amount') or 0.0), step=10000.0)
-                with coly:
-                    ptp_date = st.date_input("PTP Date", value=date.today())
-                notes = st.text_area("Catatan", value=last.get('agent_notes') or "")
-                sub = st.form_submit_button("Simpan")
-                if sub:
-                    try:
-                        execute(
-                            "INSERT INTO agent_results (Agreement_No, agent, agent_status, agent_ptp_amount, agent_ptp_date, agent_notes) VALUES (?,?,?,?,?,?)",
-                            (sel, agent_name, ag_status or None, float(ptp_amount or 0), (ptp_date.isoformat() if ptp_date else None), (notes.strip() if notes else None))
-                        )
-                        st.success("Tersimpan.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Gagal menyimpan: {e}")
+            st.info("Centang satu baris untuk melihat detail kasus.")
 
-    # --- Update Data tab ---
-    with tabs[2]:
-        sel = st.session_state.get('agent_selected')
-        if not sel:
-            st.info("Pilih Case ID di tab 'Cases' terlebih dahulu.")
-        else:
-            st.subheader("Update Data untuk Supervisor (Agent fields)")
-            st.caption("Kolom-kolom ini berasal dari data upload supervisor dan diupdate oleh Agent.")
-            sup_agent = fetchone(
-                "SELECT id, STATUS, REGISTERED_PHONE, Additional_Contacts, Remarks_Suggested_NIK_Prospect, Payment, Paid_Off_Status "
-                "FROM supervisor_data WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=? ORDER BY id DESC LIMIT 1",
-                (sel, sel, sel)
-            ) or {}
-            with st.form("agent_update_supervisor_fields"):
-                csa, csb = st.columns(2)
-                with csa:
-                    v_status = st.text_input("STATUS", value=sup_agent.get('STATUS','') or "")
-                    v_reg_phone = st.text_input("REGISTERED PHONE", value=sup_agent.get('REGISTERED_PHONE','') or "")
-                    v_payment = st.text_input("Payment", value=str(sup_agent.get('Payment') or ""))
-                with csb:
-                    v_paid_off = st.text_input("Paid Off Status", value=sup_agent.get('Paid_Off_Status','') or "")
-                    v_add_contacts = st.text_area("Additional Contacts", value=sup_agent.get('Additional_Contacts','') or "", height=80)
-                    v_remarks = st.text_area("Remarks Suggested NIK Prospect", value=sup_agent.get('Remarks_Suggested_NIK_Prospect','') or "", height=80)
-                submit_sup = st.form_submit_button("Simpan ke supervisor_data")
-                if submit_sup:
-                    try:
-                        if sup_agent.get('id') is not None:
-                            execute(
-                                "UPDATE supervisor_data SET STATUS=?, REGISTERED_PHONE=?, Additional_Contacts=?, Remarks_Suggested_NIK_Prospect=?, Payment=?, Paid_Off_Status=? WHERE id=?",
-                                (v_status.strip(), v_reg_phone.strip(), v_add_contacts.strip(), v_remarks.strip(), v_payment.strip(), v_paid_off.strip(), sup_agent.get('id'))
-                            )
-                        else:
-                            execute(
-                                "UPDATE supervisor_data SET STATUS=?, REGISTERED_PHONE=?, Additional_Contacts=?, Remarks_Suggested_NIK_Prospect=?, Payment=?, Paid_Off_Status=? WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=?",
-                                (v_status.strip(), v_reg_phone.strip(), v_add_contacts.strip(), v_remarks.strip(), v_payment.strip(), v_paid_off.strip(), sel, sel, sel)
-                            )
+        # Inline sub-tabs for the selected case actions
+        sub_tabs = st.tabs(["Report Payment/PTP", "Update Data", "Internal Memo"]) 
+
+        # --- Report Payment/PTP sub-tab ---
+        with sub_tabs[0]:
+            if not sel:
+                st.info("Pilih Case ID pada tabel di atas terlebih dahulu.")
+            else:
+                st.subheader("Report Payment/PTP")
+                last = fetchone("SELECT * FROM agent_results WHERE Agreement_No=? AND agent=? ORDER BY id DESC LIMIT 1", (sel, agent_name)) or {}
+                with st.form("agent_result_form"):
+                    ag_status = st.selectbox("Status", ["", "PTP", "PAID", "NO ANSWER", "RTP", "FOLLOW UP", "OTHER"], index=0)
+                    colx, coly = st.columns(2)
+                    with colx:
+                        ptp_amount = st.number_input("PTP Amount", min_value=0.0, value=float(last.get('agent_ptp_amount') or 0.0), step=10000.0)
+                    with coly:
+                        ptp_date = st.date_input("PTP Date", value=date.today())
+                    notes = st.text_area("Catatan", value=last.get('agent_notes') or "")
+                    sub = st.form_submit_button("Simpan")
+                    if sub:
                         try:
-                            u = current_user() or {}
                             execute(
-                                "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
-                                (u.get('id') if u else None, "AGENT_UPDATE_SUP_FIELDS", f"{sel} -> STATUS='{v_status}' REG_PHONE='{v_reg_phone}'")
+                                "INSERT INTO agent_results (Agreement_No, agent, agent_status, agent_ptp_amount, agent_ptp_date, agent_notes) VALUES (?,?,?,?,?,?)",
+                                (sel, agent_name, ag_status or None, float(ptp_amount or 0), (ptp_date.isoformat() if ptp_date else None), (notes.strip() if notes else None))
                             )
-                        except Exception:
-                            pass
-                        st.success("Data supervisor berhasil diperbarui.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Gagal memperbarui data supervisor: {e}")
+                            st.success("Tersimpan.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Gagal menyimpan: {e}")
 
-    # --- Internal Memo tab ---
-    with tabs[3]:
-        sel = st.session_state.get('agent_selected')
-        if not sel:
-            st.info("Pilih Case ID di tab 'Cases' terlebih dahulu.")
-        else:
-            st.subheader("Internal Memo ke Supervisor")
-            with st.form("agent_internal_memo"):
-                target = st.selectbox("Kirim ke", ["Supervisor"], index=0)
-                msg = st.text_area("Pesan", height=120)
-                send = st.form_submit_button("Kirim Memo")
-                if send and msg and msg.strip():
-                    try:
-                        execute(
-                            "INSERT INTO memos (Agreement_No, author_role, author_name, target_role, message) VALUES (?,?,?,?,?)",
-                            (sel, "Agent", agent_name, target, msg.strip())
-                        )
-                        st.success("Memo terkirim.")
-                    except Exception as e:
-                        st.error(f"Gagal mengirim memo: {e}")
+        # --- Update Data sub-tab ---
+        with sub_tabs[1]:
+            if not sel:
+                st.info("Pilih Case ID pada tabel di atas terlebih dahulu.")
+            else:
+                st.subheader("Update Data untuk Supervisor (Agent fields)")
+                st.caption("Kolom-kolom ini berasal dari data upload supervisor dan diupdate oleh Agent.")
+                sup_agent = fetchone(
+                    "SELECT id, STATUS, REGISTERED_PHONE, Additional_Contacts, Remarks_Suggested_NIK_Prospect, Payment, Paid_Off_Status "
+                    "FROM supervisor_data WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=? ORDER BY id DESC LIMIT 1",
+                    (sel, sel, sel)
+                ) or {}
+                with st.form("agent_update_supervisor_fields"):
+                    csa, csb = st.columns(2)
+                    with csa:
+                        v_status = st.text_input("STATUS", value=sup_agent.get('STATUS','') or "")
+                        v_reg_phone = st.text_input("REGISTERED PHONE", value=sup_agent.get('REGISTERED_PHONE','') or "")
+                        v_payment = st.text_input("Payment", value=str(sup_agent.get('Payment') or ""))
+                    with csb:
+                        v_paid_off = st.text_input("Paid Off Status", value=sup_agent.get('Paid_Off_Status','') or "")
+                        v_add_contacts = st.text_area("Additional Contacts", value=sup_agent.get('Additional_Contacts','') or "", height=80)
+                        v_remarks = st.text_area("Remarks Suggested NIK Prospect", value=sup_agent.get('Remarks_Suggested_NIK_Prospect','') or "", height=80)
+                    submit_sup = st.form_submit_button("Simpan ke supervisor_data")
+                    if submit_sup:
+                        try:
+                            if sup_agent.get('id') is not None:
+                                execute(
+                                    "UPDATE supervisor_data SET STATUS=?, REGISTERED_PHONE=?, Additional_Contacts=?, Remarks_Suggested_NIK_Prospect=?, Payment=?, Paid_Off_Status=? WHERE id=?",
+                                    (v_status.strip(), v_reg_phone.strip(), v_add_contacts.strip(), v_remarks.strip(), v_payment.strip(), v_paid_off.strip(), sup_agent.get('id'))
+                                )
+                            else:
+                                execute(
+                                    "UPDATE supervisor_data SET STATUS=?, REGISTERED_PHONE=?, Additional_Contacts=?, Remarks_Suggested_NIK_Prospect=?, Payment=?, Paid_Off_Status=? WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=?",
+                                    (v_status.strip(), v_reg_phone.strip(), v_add_contacts.strip(), v_remarks.strip(), v_payment.strip(), v_paid_off.strip(), sel, sel, sel)
+                                )
+                            try:
+                                u = current_user() or {}
+                                execute(
+                                    "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                                    (u.get('id') if u else None, "AGENT_UPDATE_SUP_FIELDS", f"{sel} -> STATUS='{v_status}' REG_PHONE='{v_reg_phone}'")
+                                )
+                            except Exception:
+                                pass
+                            st.success("Data supervisor berhasil diperbarui.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Gagal memperbarui data supervisor: {e}")
 
-            # Recent memos on this case
-            recent = fetchall("SELECT author_role, author_name, target_role, message, created_at FROM memos WHERE Agreement_No=? ORDER BY id DESC LIMIT 10", (sel,))
-            if recent:
-                st.markdown("### Riwayat Memo Terbaru")
-                st.dataframe(pd.DataFrame(recent), use_container_width=True, hide_index=True)
+        # --- Internal Memo sub-tab ---
+        with sub_tabs[2]:
+            if not sel:
+                st.info("Pilih Case ID pada tabel di atas terlebih dahulu.")
+            else:
+                st.subheader("Internal Memo ke Supervisor")
+                with st.form("agent_internal_memo"):
+                    target = st.selectbox("Kirim ke", ["Supervisor"], index=0)
+                    msg = st.text_area("Pesan", height=120)
+                    send = st.form_submit_button("Kirim Memo")
+                    if send and msg and msg.strip():
+                        try:
+                            execute(
+                                "INSERT INTO memos (Agreement_No, author_role, author_name, target_role, message) VALUES (?,?,?,?,?)",
+                                (sel, "Agent", agent_name, target, msg.strip())
+                            )
+                            st.success("Memo terkirim.")
+                        except Exception as e:
+                            st.error(f"Gagal mengirim memo: {e}")
+
+                # Recent memos on this case
+                recent = fetchall("SELECT author_role, author_name, target_role, message, created_at FROM memos WHERE Agreement_No=? ORDER BY id DESC LIMIT 10", (sel,))
+                if recent:
+                    st.markdown("### Riwayat Memo Terbaru")
+                    st.dataframe(pd.DataFrame(recent), use_container_width=True, hide_index=True)
+
 
     # --- My PTP tab ---
-    with tabs[4]:
+    with tabs[1]:
         st.subheader("My PTP")
         ptps = fetchall("SELECT Agreement_No as Case_ID, agent_ptp_amount, agent_ptp_date, agent_status, updated_at FROM agent_results WHERE agent=? AND IFNULL(agent_status,'')='PTP' ORDER BY agent_ptp_date DESC LIMIT 500", (agent_name,))
         st.dataframe(pd.DataFrame(ptps), use_container_width=True, hide_index=True)
 
     # --- Monthly Payment Recap tab ---
-    with tabs[5]:
+    with tabs[2]:
         st.subheader("Monthly Payment Recap")
         start_of_month = date.today().replace(day=1)
         rec = fetchall(
@@ -2934,7 +2932,7 @@ def page_agent():
         st.metric("Total Bulan Ini", f"{total:,.0f}")
 
     # --- All-time Payment Recap tab ---
-    with tabs[6]:
+    with tabs[3]:
         st.subheader("All-time Payment Recap")
         rec_all = fetchall(
             """
@@ -2951,7 +2949,7 @@ def page_agent():
         st.metric("Total Sepanjang Waktu", f"{total_all:,.0f}")
 
     # --- Email Templates tab ---
-    with tabs[7]:
+    with tabs[4]:
         sel = st.session_state.get('agent_selected')
         info = fetchone("SELECT Debtor_Name, NIK_KTP FROM assign_tracer WHERE Agreement_No=?", (sel,)) or {} if sel else {}
         st.subheader("Email Templates")
