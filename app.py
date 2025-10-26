@@ -3170,7 +3170,6 @@ def page_supervisor():
                 # Jika tidak ada, buat id sementara dari index (tidak digunakan untuk hapus DB)
                 df.insert(0, 'id', pd.RangeIndex(start=1, stop=len(df)+1, step=1))
 
-            st.caption("Pilih satu atau lebih baris untuk dihapus.")
             select_all = st.checkbox("Pilih semua pada tabel ini", value=False, key="monitor_select_all")
 
             # Tambahkan kolom checkbox untuk memilih baris
