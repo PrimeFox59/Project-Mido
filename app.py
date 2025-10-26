@@ -3161,10 +3161,7 @@ def page_supervisor():
         else:
             df = pd.DataFrame(rows)
             # Optional small caption to indicate filtered vs total
-            try:
-                st.caption(f"Menampilkan {len(df):,} dari total {_total_rows_supervisor:,} baris.")
-            except Exception:
-                pass
+        
             # Pastikan kolom id ada untuk identifikasi & hapus
             if 'id' not in df.columns:
                 # Jika tidak ada, buat id sementara dari index (tidak digunakan untuk hapus DB)
