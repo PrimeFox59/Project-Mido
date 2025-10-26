@@ -113,10 +113,7 @@ def init_db():
     try:
         cols = [r['name'] for r in c.execute("PRAGMA table_info(assign_tracer)").fetchall()]
         if 'Assigned_To' not in cols:
-                try:
-                    c.execute("ALTER TABLE assign_tracer ADD COLUMN Assigned_To TEXT")
-                except Exception:
-                    pass
+                c.execute("ALTER TABLE assign_tracer ADD COLUMN Assigned_To TEXT")
     except Exception:
         # Safe to ignore if already exists or PRAGMA failed
         pass
@@ -276,7 +273,9 @@ def init_db():
         cols = [r['name'] for r in c.execute("PRAGMA table_info(supervisor_data)").fetchall()]
         for col in [
             'NIK_KTP', 'EMPLOYMENT_UPDATE', 'EMPLOYER',
-            'Debtor_Legal_Name', 'Employee_Name', 'Employee_ID_Number', 'Debtor_Relation_to_Employee'
+            'Debtor_Legal_Name', 'Employee_Name', 'Employee_ID_Number', 'Debtor_Relation_to_Employee',
+            # Agent-updated fields (optional on upload)
+            'STATUS', 'REGISTERED_PHONE', 'Additional_Contacts', 'Remarks_Suggested_NIK_Prospect', 'Payment', 'Paid_Off_Status'
         ]:
             if col not in cols:
                 c.execute(f"ALTER TABLE supervisor_data ADD COLUMN {col} TEXT")
@@ -2773,6 +2772,53 @@ def page_agent():
                 st.error(f"Gagal menyimpan: {e}")
 
     st.markdown("---")
+    st.subheader("Update Data untuk Supervisor (Agent fields)")
+    st.caption("Kolom-kolom ini berasal dari data upload supervisor dan diupdate oleh Agent.")
+    # Load existing values from supervisor_data using Agreement_No equivalence
+    sup_agent = fetchone(
+        "SELECT id, STATUS, REGISTERED_PHONE, Additional_Contacts, Remarks_Suggested_NIK_Prospect, Payment, Paid_Off_Status "
+        "FROM supervisor_data WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=? ORDER BY id DESC LIMIT 1",
+        (sel, sel, sel)
+    ) or {}
+    with st.form("agent_update_supervisor_fields"):
+        csa, csb = st.columns(2)
+        with csa:
+            v_status = st.text_input("STATUS", value=sup_agent.get('STATUS','') or "")
+            v_reg_phone = st.text_input("REGISTERED PHONE", value=sup_agent.get('REGISTERED_PHONE','') or "")
+            v_payment = st.text_input("Payment", value=str(sup_agent.get('Payment') or ""))
+        with csb:
+            v_paid_off = st.text_input("Paid Off Status", value=sup_agent.get('Paid_Off_Status','') or "")
+            v_add_contacts = st.text_area("Additional Contacts", value=sup_agent.get('Additional_Contacts','') or "", height=80)
+            v_remarks = st.text_area("Remarks Suggested NIK Prospect", value=sup_agent.get('Remarks_Suggested_NIK_Prospect','') or "", height=80)
+        submit_sup = st.form_submit_button("Simpan ke supervisor_data")
+        if submit_sup:
+            try:
+                if sup_agent.get('id') is not None:
+                    execute(
+                        "UPDATE supervisor_data SET STATUS=?, REGISTERED_PHONE=?, Additional_Contacts=?, Remarks_Suggested_NIK_Prospect=?, Payment=?, Paid_Off_Status=? WHERE id=?",
+                        (v_status.strip(), v_reg_phone.strip(), v_add_contacts.strip(), v_remarks.strip(), v_payment.strip(), v_paid_off.strip(), sup_agent.get('id'))
+                    )
+                else:
+                    # If not found, try a broader update by Case_ID/VA/Third_Uid (may affect multiple rows)
+                    execute(
+                        "UPDATE supervisor_data SET STATUS=?, REGISTERED_PHONE=?, Additional_Contacts=?, Remarks_Suggested_NIK_Prospect=?, Payment=?, Paid_Off_Status=? WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=?",
+                        (v_status.strip(), v_reg_phone.strip(), v_add_contacts.strip(), v_remarks.strip(), v_payment.strip(), v_paid_off.strip(), sel, sel, sel)
+                    )
+                # Audit log
+                try:
+                    u = current_user() or {}
+                    execute(
+                        "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                        (u.get('id') if u else None, "AGENT_UPDATE_SUP_FIELDS", f"{sel} -> STATUS='{v_status}' REG_PHONE='{v_reg_phone}'")
+                    )
+                except Exception:
+                    pass
+                st.success("Data supervisor berhasil diperbarui.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Gagal memperbarui data supervisor: {e}")
+
+    st.markdown("---")
     st.subheader("Email Templates")
     st.caption("Pilih template lalu salin konten untuk dikirim via email/WA.")
     tpl = st.selectbox("Kategori", ["COMPANY", "RELATIVES", "PERSONAL"], index=0)
@@ -3277,7 +3323,9 @@ def page_supervisor():
         field_names = [
             "DT", "Lending_Entity", "Date", "Case_ID", "Task_ID", "Customer_name", "email", "Gender", "Customer_Occupation", "DPD", "Principle_Outstanding", "Principal_Overdue_CURR", "Interest_Overdue_CURR", "Last_Late_Fee", "Return_Date", "Detail", "Loan_Type", "Third_Uid", "Product", "Home_Address", "Province", "City", "Street", "RoomNumber", "Postcode", "Assignment_Date", "Withdrawal_Date", "Phone_Number_1", "Phone_Number_2", "Contact_Type_1", "Contact_Name_1", "Contact_Phone_1", "Contact_Type_2", "Contact_Name_2", "Contact_Phone_2", "Contact_Type_3", "Contact_Name_3", "Contact_Phone_3", "Contact_Type_4", "Contact_Name_4", "Contact_Phone_4", "Contact_Type_5", "Contact_Name_5", "Contact_Phone_5", "Contact_Type_6", "Contact_Name_6", "Contact_Phone_6", "Contact_Type_7", "Contact_Name_7", "Contact_Phone_7", "Contact_Type_8", "Contact_Name_8", "Contact_Phone_8", "Total_debt_in_third_party", "Repayment_on_third_Party", "Remaining_Loan_on_third_Party", "Virtual_Account_Number",
             # Newly added meta fields required by user
-            "NIK_KTP", "EMPLOYMENT_UPDATE", "EMPLOYER", "Debtor_Legal_Name", "Employee_Name", "Employee_ID_Number", "Debtor_Relation_to_Employee"
+            "NIK_KTP", "EMPLOYMENT_UPDATE", "EMPLOYER", "Debtor_Legal_Name", "Employee_Name", "Employee_ID_Number", "Debtor_Relation_to_Employee",
+            # Agent-updated fields
+            "STATUS", "REGISTERED_PHONE", "Additional_Contacts", "Remarks_Suggested_NIK_Prospect", "Payment", "Paid_Off_Status"
         ]
         # Tampilkan pesan hasil upload sebelumnya (sekali tampil)
         _upload_result_msg = st.session_state.pop('sup_upload_result', None)
@@ -3315,7 +3363,9 @@ def page_supervisor():
                 # Columns that may be missing and should be treated as optional (auto-filled as empty strings)
                 optional_fill_cols = [
                     'NIK_KTP', 'EMPLOYMENT_UPDATE', 'EMPLOYER',
-                    'Debtor_Legal_Name', 'Employee_Name', 'Employee_ID_Number', 'Debtor_Relation_to_Employee'
+                    'Debtor_Legal_Name', 'Employee_Name', 'Employee_ID_Number', 'Debtor_Relation_to_Employee',
+                    # Agent-updated fields treated as optional on upload
+                    'STATUS', 'REGISTERED_PHONE', 'Additional_Contacts', 'Remarks_Suggested_NIK_Prospect', 'Payment', 'Paid_Off_Status'
                 ]
                 missing = [f for f in field_names if f not in df_preview.columns]
                 # Split missing columns into optional and required
@@ -3387,7 +3437,8 @@ def page_supervisor():
                             # Handle missing columns for full upload with the same optional logic
                             optional_fill_cols = [
                                 'NIK_KTP', 'EMPLOYMENT_UPDATE', 'EMPLOYER',
-                                'Debtor_Legal_Name', 'Employee_Name', 'Employee_ID_Number', 'Debtor_Relation_to_Employee'
+                                'Debtor_Legal_Name', 'Employee_Name', 'Employee_ID_Number', 'Debtor_Relation_to_Employee',
+                                'STATUS', 'REGISTERED_PHONE', 'Additional_Contacts', 'Remarks_Suggested_NIK_Prospect', 'Payment', 'Paid_Off_Status'
                             ]
                             miss2_all = [f for f in field_names if f not in df_full.columns]
                             miss2_optional = [c for c in miss2_all if c in optional_fill_cols]
