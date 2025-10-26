@@ -3078,16 +3078,16 @@ def page_supervisor():
 
     # --- Monitoring Tab ---
     with tabs[0]:
-        # Primary quick search fields
+        # Primary quick search fields (order: Case ID | Customer Name | Phone Number | Email)
         c1, c2, c3, c4 = st.columns(4)
         with c1:
-            q_phone = st.text_input("Phone Number", key="monitor_phone")
-        with c2:
             q_case_id = st.text_input("Case ID", key="monitor_case_id")
+        with c2:
+            q_customer = st.text_input("Customer Name", key="monitor_customer_name")
         with c3:
-            q_third_uid = st.text_input("Third Uid", key="monitor_third_uid")
+            q_phone = st.text_input("Phone Number", key="monitor_phone")
         with c4:
-            q_customer = st.text_input("Customer name", key="monitor_customer_name")
+            q_email = st.text_input("Email", key="monitor_email")
 
         # Quick KPI: total rows in system
         try:
@@ -3101,7 +3101,7 @@ def page_supervisor():
         # Advanced filters in expander
         # All additional fields except the four primary ones
         base_filter_fields = [
-            "Lending_Entity", "Date", "Task_ID", "email", "Gender", "Customer_Occupation", "DPD",
+            "Lending_Entity", "Date", "Task_ID", "Gender", "Customer_Occupation", "DPD",
             "Principle_Outstanding", "Principal_Overdue_CURR", "Interest_Overdue_CURR", "Last_Late_Fee",
             "Return_Date", "Detail", "Loan_Type", "Product", "Home_Address", "Province", "City",
             "Street", "RoomNumber", "Postcode", "Assignment_Date"
@@ -3130,18 +3130,18 @@ def page_supervisor():
         query = "SELECT * FROM supervisor_data WHERE 1=1"
         params = []
         # Primary
-        if q_phone:
-            query += " AND (Phone_Number_1 LIKE ? OR Phone_Number_2 LIKE ?)"
-            params.extend([f"%{q_phone}%", f"%{q_phone}%"])
         if q_case_id:
             query += " AND Case_ID LIKE ?"
             params.append(f"%{q_case_id}%")
-        if q_third_uid:
-            query += " AND Third_Uid LIKE ?"
-            params.append(f"%{q_third_uid}%")
         if q_customer:
             query += " AND Customer_name LIKE ?"
             params.append(f"%{q_customer}%")
+        if q_phone:
+            query += " AND (Phone_Number_1 LIKE ? OR Phone_Number_2 LIKE ?)"
+            params.extend([f"%{q_phone}%", f"%{q_phone}%"])
+        if q_email:
+            query += " AND email LIKE ?"
+            params.append(f"%{q_email}%")
         # Extras
         for f, v in extra_filters.items():
             if v:
