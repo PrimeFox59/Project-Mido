@@ -3467,14 +3467,14 @@ def page_supervisor():
         
 
     with tabs[2]:
-        q1, q2, q4, q5 = st.columns([1.2, 1.2, 1.2, 0.6])
+        q1, q2, q3, q4 = st.columns([1.2, 1.2, 1.2, 0.6])
         with q1:
             f_case = st.text_input("Filter Case_ID", key="ta_f_case")
         with q2:
             f_name = st.text_input("Filter Customer", key="ta_f_name")
-        with q4:
+        with q3:
             f_phone = st.text_input("Filter Phone", key="ta_f_phone")
-        with q5:
+        with q4:
             limit_rows = st.number_input("Limit Row", min_value=10, max_value=2000, value=200, step=10, key="ta_limit")
 
     # Build SQL with filters
@@ -3486,9 +3486,7 @@ def page_supervisor():
         if f_name:
             where.append("Customer_name LIKE ?")
             params.append(f"%{f_name.strip()}%")
-        if f_third:
-            where.append("Third_Uid LIKE ?")
-            params.append(f"%{f_third.strip()}%")
+        # Removed Third_Uid filter per request
         if f_phone:
             where.append("(Phone_Number_1 LIKE ? OR Phone_Number_2 LIKE ?)")
             params.extend([f"%{f_phone.strip()}%", f"%{f_phone.strip()}%"])
