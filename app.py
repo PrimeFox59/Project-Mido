@@ -3481,7 +3481,7 @@ def page_supervisor():
         with q4:
             f_phone = st.text_input("Filter Phone", key="ta_f_phone")
         with q5:
-            limit_rows = st.number_input("Limit", min_value=10, max_value=2000, value=200, step=10, key="ta_limit")
+            limit_rows = st.number_input("Jumlah baris ditampilkan", min_value=10, max_value=2000, value=200, step=10, key="ta_limit")
 
     # Build SQL with filters
         where = ["Case_ID IS NOT NULL", "TRIM(Case_ID)<>''"]
