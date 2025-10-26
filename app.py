@@ -3078,16 +3078,6 @@ def page_supervisor():
 
     # --- Monitoring Tab ---
     with tabs[0]:
-        # Primary quick search fields (order: Case ID | Customer Name | Phone Number | Email)
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            q_case_id = st.text_input("Case ID", key="monitor_case_id")
-        with c2:
-            q_customer = st.text_input("Customer Name", key="monitor_customer_name")
-        with c3:
-            q_phone = st.text_input("Phone Number", key="monitor_phone")
-        with c4:
-            q_email = st.text_input("Email", key="monitor_email")
 
         # Quick KPI: total rows in system
         try:
@@ -3126,7 +3116,18 @@ def page_supervisor():
                 help="Atur berapa banyak baris yang ditampilkan di tabel Monitoring (default 100)."
             )
 
-        # Build query
+        # Quick filters placed directly above the table: Case ID | Customer Name | Phone Number | Email
+        fc1, fc2, fc3, fc4 = st.columns(4)
+        with fc1:
+            q_case_id = st.text_input("Case ID", key="monitor_case_id")
+        with fc2:
+            q_customer = st.text_input("Customer Name", key="monitor_customer_name")
+        with fc3:
+            q_phone = st.text_input("Phone Number", key="monitor_phone")
+        with fc4:
+            q_email = st.text_input("Email", key="monitor_email")
+
+    # Build query
         query = "SELECT * FROM supervisor_data WHERE 1=1"
         params = []
         # Primary
