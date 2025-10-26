@@ -3467,13 +3467,11 @@ def page_supervisor():
         
 
     with tabs[2]:
-        q1, q2, q3, q4, q5 = st.columns([1.2, 1.2, 1.2, 1.2, 0.6])
+        q1, q2, q4, q5 = st.columns([1.2, 1.2, 1.2, 1.2, 0.6])
         with q1:
             f_case = st.text_input("Filter Case_ID", key="ta_f_case")
         with q2:
             f_name = st.text_input("Filter Customer", key="ta_f_name")
-        with q3:
-            f_third = st.text_input("Filter Third_Uid", key="ta_f_third")
         with q4:
             f_phone = st.text_input("Filter Phone", key="ta_f_phone")
         with q5:
