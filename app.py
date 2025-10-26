@@ -3467,10 +3467,6 @@ def page_supervisor():
         
 
     with tabs[2]:
-        st.subheader("Assign ke Tracer (berdasarkan Case_ID dari Supervisor)")
-        # --- New: Monitoring-style selectable table from supervisor_data ---
-        st.markdown("#### Daftar Case_ID dari Supervisor — pilih dan assign")
-        # Quick filters
         q1, q2, q3, q4, q5 = st.columns([1.2, 1.2, 1.2, 1.2, 0.6])
         with q1:
             f_case = st.text_input("Filter Case_ID", key="ta_f_case")
@@ -3481,7 +3477,7 @@ def page_supervisor():
         with q4:
             f_phone = st.text_input("Filter Phone", key="ta_f_phone")
         with q5:
-            limit_rows = st.number_input("Jumlah baris ditampilkan", min_value=10, max_value=2000, value=200, step=10, key="ta_limit")
+            limit_rows = st.number_input("Limit Row", min_value=10, max_value=2000, value=200, step=10, key="ta_limit")
 
     # Build SQL with filters
         where = ["Case_ID IS NOT NULL", "TRIM(Case_ID)<>''"]
