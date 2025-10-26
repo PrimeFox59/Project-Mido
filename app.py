@@ -2811,26 +2811,84 @@ def page_agent():
                 st.info("Pilih Case ID pada tabel di atas terlebih dahulu.")
             else:
                 st.subheader("Report Payment/PTP")
-                last = fetchone("SELECT * FROM agent_results WHERE Agreement_No=? AND agent=? ORDER BY id DESC LIMIT 1", (sel, agent_name)) or {}
-                with st.form("agent_result_form"):
-                    ag_status = st.selectbox("Status", ["", "PTP", "PAID", "NO ANSWER", "RTP", "FOLLOW UP", "OTHER"], index=0)
-                    colx, coly = st.columns(2)
-                    with colx:
-                        ptp_amount = st.number_input("PTP Amount", min_value=0.0, value=float(last.get('agent_ptp_amount') or 0.0), step=10000.0)
-                    with coly:
-                        ptp_date = st.date_input("PTP Date", value=date.today())
-                    notes = st.text_area("Catatan", value=last.get('agent_notes') or "")
-                    sub = st.form_submit_button("Simpan")
-                    if sub:
-                        try:
-                            execute(
-                                "INSERT INTO agent_results (Agreement_No, agent, agent_status, agent_ptp_amount, agent_ptp_date, agent_notes) VALUES (?,?,?,?,?,?)",
-                                (sel, agent_name, ag_status or None, float(ptp_amount or 0), (ptp_date.isoformat() if ptp_date else None), (notes.strip() if notes else None))
-                            )
-                            st.success("Tersimpan.")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Gagal menyimpan: {e}")
+                with st.form("agent_report_payment_ptp"):
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        paid_date = st.date_input("Tanggal Pembayaran", value=date.today())
+                    with c2:
+                        paid_amount = st.number_input("Nominal Pembayaran", min_value=0.0, step=10000.0)
+                    scheme = st.selectbox(
+                        "Skema Pelunasan",
+                        [
+                            "FULL OS",
+                            "CICIL OS",
+                            "LUNDIS",
+                            "CICIL LUNDIS",
+                            "LUNAS POKOK",
+                            "CICIL POKOK",
+                        ],
+                        index=0,
+                    )
+
+                    show_next = "CICIL" in (scheme or "").upper()
+                    next_date = None
+                    next_amount = 0.0
+                    if show_next:
+                        st.markdown("#### Rencana Pembayaran Berikutnya")
+                        n1, n2 = st.columns(2)
+                        with n1:
+                            next_date = st.date_input("Tanggal (berikutnya)", value=date.today())
+                        with n2:
+                            next_amount = st.number_input("Nominal (berikutnya)", min_value=0.0, step=10000.0)
+
+                    submit = st.form_submit_button("Simpan")
+                    if submit:
+                        if paid_amount is None or float(paid_amount) <= 0:
+                            st.warning("Nominal Pembayaran harus lebih dari 0.")
+                        elif not paid_date:
+                            st.warning("Tanggal Pembayaran wajib diisi.")
+                        elif show_next and (not next_date or float(next_amount or 0) <= 0):
+                            st.warning("Untuk skema CICIL, isi Tanggal dan Nominal rencana berikutnya.")
+                        else:
+                            try:
+                                # 1) Simpan pembayaran
+                                execute(
+                                    "INSERT INTO payments (Agreement_No, paid_amount, paid_date, status, source_file, uploaded_by) VALUES (?,?,?,?,?,?)",
+                                    (sel, float(paid_amount or 0), (paid_date.isoformat() if paid_date else None), scheme, None, agent_name)
+                                )
+                                # Audit log pembayaran
+                                try:
+                                    u = current_user() or {}
+                                    execute(
+                                        "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                                        (u.get('id') if u else None, "AGENT_REPORT_PAYMENT", f"{sel}|{paid_amount}|{paid_date}|{scheme}")
+                                    )
+                                except Exception:
+                                    pass
+
+                                # 2) Jika cicil, buat PTP berikutnya agar tampil di My PTP
+                                if show_next and next_date and float(next_amount or 0) > 0:
+                                    try:
+                                        execute(
+                                            "INSERT INTO agent_results (Agreement_No, agent, agent_status, agent_ptp_amount, agent_ptp_date, agent_notes) VALUES (?,?,?,?,?,?)",
+                                            (sel, agent_name, "PTP", float(next_amount or 0), (next_date.isoformat() if next_date else None), f"Auto PTP dari skema {scheme}")
+                                        )
+                                        # Audit log PTP
+                                        try:
+                                            u = current_user() or {}
+                                            execute(
+                                                "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                                                (u.get('id') if u else None, "AGENT_REPORT_PTP", f"{sel}|{next_amount}|{next_date}|{scheme}")
+                                            )
+                                        except Exception:
+                                            pass
+                                    except Exception as e:
+                                        st.error(f"Gagal menyimpan rencana PTP berikutnya: {e}")
+
+                                st.success("Laporan tersimpan.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Gagal menyimpan laporan: {e}")
 
         # --- Update Data sub-tab ---
         with sub_tabs[1]:
