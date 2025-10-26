@@ -3312,9 +3312,30 @@ def page_supervisor():
                     new_cols.append(expected_map.get(nc, c))
                 df_preview.columns = new_cols
 
+                # Columns that may be missing and should be treated as optional (auto-filled as empty strings)
+                optional_fill_cols = [
+                    'NIK_KTP', 'EMPLOYMENT_UPDATE', 'EMPLOYER',
+                    'Debtor_Legal_Name', 'Employee_Name', 'Employee_ID_Number', 'Debtor_Relation_to_Employee'
+                ]
                 missing = [f for f in field_names if f not in df_preview.columns]
-                if missing:
-                    st.error(f"Kolom berikut tidak ditemukan di file: {missing}")
+                # Split missing columns into optional and required
+                missing_optional = [c for c in missing if c in optional_fill_cols]
+                missing_required = [c for c in missing if c not in optional_fill_cols]
+                # If only optional are missing, add them with empty strings
+                if missing_optional:
+                    try:
+                        for col in missing_optional:
+                            df_preview[col] = ""
+                    except Exception:
+                        pass
+                    # Reorder columns so preview roughly matches field_names order for clarity
+                    try:
+                        df_preview = df_preview[[*(c for c in field_names if c in df_preview.columns), *[c for c in df_preview.columns if c not in field_names]]]
+                    except Exception:
+                        pass
+                    st.info(f"Kolom opsional tidak ditemukan dan akan diisi kosong: {missing_optional}")
+                if missing_required:
+                    st.error(f"Kolom berikut tidak ditemukan di file: {missing_required}")
                     st.caption("Tips: header akan dicocokkan tanpa spasi/kapital dan perbaikan typo umum (thrid->third). Pastikan nama kolom sesuai template.")
                     st.button("Clear file", on_click=lambda: (st.session_state.pop('sup_upload_file', None), st.rerun()))
                 else:
@@ -3363,9 +3384,26 @@ def page_supervisor():
                                 new_cols2.append(expected_map.get(nc, c))
                             df_full.columns = new_cols2
 
-                            miss2 = [f for f in field_names if f not in df_full.columns]
-                            if miss2:
-                                st.error(f"Kolom wajib hilang saat upload: {miss2}")
+                            # Handle missing columns for full upload with the same optional logic
+                            optional_fill_cols = [
+                                'NIK_KTP', 'EMPLOYMENT_UPDATE', 'EMPLOYER',
+                                'Debtor_Legal_Name', 'Employee_Name', 'Employee_ID_Number', 'Debtor_Relation_to_Employee'
+                            ]
+                            miss2_all = [f for f in field_names if f not in df_full.columns]
+                            miss2_optional = [c for c in miss2_all if c in optional_fill_cols]
+                            miss2_required = [c for c in miss2_all if c not in optional_fill_cols]
+                            if miss2_optional:
+                                try:
+                                    for col in miss2_optional:
+                                        df_full[col] = ""
+                                except Exception:
+                                    pass
+                                try:
+                                    df_full = df_full[[*(c for c in field_names if c in df_full.columns), *[c for c in df_full.columns if c not in field_names]]]
+                                except Exception:
+                                    pass
+                            if miss2_required:
+                                st.error(f"Kolom wajib hilang saat upload: {miss2_required}")
                             else:
                                 # Helper to coerce values
                                 def _to_sql_value(v):
