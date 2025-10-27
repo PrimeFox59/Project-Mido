@@ -2852,31 +2852,41 @@ def page_agent():
             with st.form("agent_update_supervisor_fields"):
                 csa, csb = st.columns(2)
                 with csa:
+                    # Agent status codes (requested)
+                    _status_options = [
+                        "PTP",  # O1001
+                        "DIS",  # O1002
+                        "CMP",  # O1003
+                        "PAD",  # O1004
+                        "HUP",  # O1005
+                        "WCN",  # O1006
+                        "TPM",  # O1007
+                        "TPC",  # O1008
+                        "RNA",  # O1009
+                        "PHO",  # O1010
+                        "NIS",  # O1011
+                        "INS",  # O1012
+                    ]
+                    _status_help = (
+                        "Code\tCategory\tAbbreviation\tHex Code\n"
+                        "O1001\tPromised to pay\tPTP\t#4CAF50\n"
+                        "O1002\tDisputes / Refuse / Unable to pay\tDIS\t#E53935\n"
+                        "O1003\tComplained case (Stop Collect)\tCMP\t#FB8C00\n"
+                        "O1004\tPaid / No Loan\tPAD\t#2196F3\n"
+                        "O1005\tHang up after Answering\tHUP\t#9C27B0\n"
+                        "O1006\tWrong Contact Number\tWCN\t#757575\n"
+                        "O1007\tThird Party (Pass Message)\tTPM\t#009688\n"
+                        "O1008\tThird Party (Refused to Cooperate)\tTPC\t#C62828\n"
+                        "O1009\tRing No Answer (RNA)\tRNA\t#FBC02D\n"
+                        "O1010\tPhone Off\tPHO\t#546E7A\n"
+                        "O1011\tNot in Service (Invalid/Voicemail)\tNIS\t#616161\n"
+                        "O1012\tIn Installment\tINS\t#8BC34A"
+                    )
                     v_status = st.selectbox(
                         "STATUS",
-                        [
-                            "LUNDIS",
-                            "CICIL LUNDiS",
-                            "CICIL OS",
-                            "LUNAS POKOK",
-                            "FULL OS",
-                            "CICIL POKOK",
-                        ],
-                        index=([
-                            "LUNDIS",
-                            "CICIL LUNDiS",
-                            "CICIL OS",
-                            "LUNAS POKOK",
-                            "FULL OS",
-                            "CICIL POKOK",
-                        ].index(sup_agent.get('STATUS','')) if sup_agent.get('STATUS','') in [
-                            "LUNDIS",
-                            "CICIL LUNDiS",
-                            "CICIL OS",
-                            "LUNAS POKOK",
-                            "FULL OS",
-                            "CICIL POKOK",
-                        ] else 0)
+                        _status_options,
+                        index=(_status_options.index(sup_agent.get('STATUS','')) if sup_agent.get('STATUS','') in _status_options else 0),
+                        help=_status_help,
                     )
                     v_reg_phone = st.text_input("REGISTERED PHONE", value=sup_agent.get('REGISTERED_PHONE','') or "")
                 with csb:
@@ -4910,90 +4920,162 @@ def page_tracer():
         st.info("Centang satu baris pada tabel di atas untuk mulai mengedit.")
         return
 
-    with st.form("tracer_update_form"):
-        col1, col2 = st.columns(2)
-        with col1:
-            st.text_input("TRC Code", value=sel_row.get('TRC_Code',''), disabled=True, key="tr_v_trc")
-            st.text_input("Case ID", value=sel_row.get('Agreement_No',''), disabled=True, key="tr_v_agmt")
-            st.text_input("Debtor Name", value=sel_row.get('Debtor_Name',''), disabled=True, key="tr_v_debtor")
-            nik_val = st.text_input("NIK KTP", value=sel_row.get('NIK_KTP','') or "", key="tr_v_nik")
-        with col2:
-            emp_update = st.text_input("EMPLOYMENT UPDATE", value=sel_row.get('EMPLOYMENT_UPDATE',''), key="tr_emp_update")
-            employer = st.text_input("EMPLOYER", value=sel_row.get('EMPLOYER',''), key="tr_employer")
-            debtor_legal = st.text_input("Debtor Legal Name", value=sel_row.get('Debtor_Legal_Name',''), key="tr_debtor_legal")
-            employee_name = st.text_input("Employee Name", value=sel_row.get('Employee_Name',''), key="tr_employee_name")
-            employee_id = st.text_input("Employee ID Number", value=sel_row.get('Employee_ID_Number',''), key="tr_employee_id")
-            relation = st.text_input("Debtor Relation to Employee", value=sel_row.get('Debtor_Relation_to_Employee',''), key="tr_relation")
+    # Two sub-tabs: update fields and internal memo
+    sub_tabs = st.tabs(["Update Detail Employment", "Internal Memo"]) 
 
-        st.markdown("---")
-        st.subheader("Masked Company")
-        dict_rows = fetchall("SELECT masked_name, canonical_name FROM masked_companies ORDER BY masked_name ASC")
-        options = [d['masked_name'] for d in dict_rows]
-        current_masked = sel_row.get('Masked_Company_Name') or ""
-        masked_sel = st.selectbox("Pilih Masked Company (opsional)", ["(ketik manual)"] + options, index=0, key="tr_mask_sel")
-        if masked_sel == "(ketik manual)":
-            masked_manual = st.text_input("Masked Company Name", value=current_masked, key="tr_mask_manual")
-            masked_value = masked_manual.strip()
-        else:
-            masked_value = masked_sel
-        if masked_value:
-            canon = next((d['canonical_name'] for d in dict_rows if d['masked_name'] == masked_value), None)
-            if canon:
-                st.caption(f"Canonical: {canon}")
+    # --- Update tab ---
+    with sub_tabs[0]:
+        with st.form("tracer_update_form"):
+            col1, col2 = st.columns(2)
+            with col1:
+                st.text_input("TRC Code", value=sel_row.get('TRC_Code',''), disabled=True, key="tr_v_trc")
+                st.text_input("Case ID", value=sel_row.get('Agreement_No',''), disabled=True, key="tr_v_agmt")
+                st.text_input("Debtor Name", value=sel_row.get('Debtor_Name',''), disabled=True, key="tr_v_debtor")
+                nik_val = st.text_input("NIK KTP", value=sel_row.get('NIK_KTP','') or "", key="tr_v_nik")
+            with col2:
+                emp_update = st.text_input("EMPLOYMENT UPDATE", value=sel_row.get('EMPLOYMENT_UPDATE',''), key="tr_emp_update")
+                employer = st.text_input("EMPLOYER", value=sel_row.get('EMPLOYER',''), key="tr_employer")
+                debtor_legal = st.text_input("Debtor Legal Name", value=sel_row.get('Debtor_Legal_Name',''), key="tr_debtor_legal")
+                employee_name = st.text_input("Employee Name", value=sel_row.get('Employee_Name',''), key="tr_employee_name")
+                employee_id = st.text_input("Employee ID Number", value=sel_row.get('Employee_ID_Number',''), key="tr_employee_id")
+                relation = st.text_input("Debtor Relation to Employee", value=sel_row.get('Debtor_Relation_to_Employee',''), key="tr_relation")
 
-        submitted = st.form_submit_button("Simpan Perubahan")
-        if submitted:
-            try:
-                # Normalize NIK (strip spaces); keep empty as NULL
-                nik_new = (nik_val or "").strip()
-                nik_new = nik_new if nik_new != "" else None
-                nik_old = (sel_row.get('NIK_KTP') or '').strip()
+            st.markdown("---")
+            st.subheader("Masked Company")
+            dict_rows = fetchall("SELECT masked_name, canonical_name FROM masked_companies ORDER BY masked_name ASC")
+            options = [d['masked_name'] for d in dict_rows]
+            current_masked = sel_row.get('Masked_Company_Name') or ""
+            masked_sel = st.selectbox("Pilih Masked Company (opsional)", ["(ketik manual)"] + options, index=0, key="tr_mask_sel")
+            if masked_sel == "(ketik manual)":
+                masked_manual = st.text_input("Masked Company Name", value=current_masked, key="tr_mask_manual")
+                masked_value = masked_manual.strip()
+            else:
+                masked_value = masked_sel
+            if masked_value:
+                canon = next((d['canonical_name'] for d in dict_rows if d['masked_name'] == masked_value), None)
+                if canon:
+                    st.caption(f"Canonical: {canon}")
 
-                execute(
-                    "UPDATE assign_tracer SET NIK_KTP=?, EMPLOYMENT_UPDATE=?, EMPLOYER=?, Debtor_Legal_Name=?, Employee_Name=?, Employee_ID_Number=?, Debtor_Relation_to_Employee=?, Masked_Company_Name=? WHERE id=? AND IFNULL(Assigned_To,'')=?",
-                    (
-                        nik_new,
-                        (emp_update.strip() if emp_update is not None else None),
-                        (employer.strip() if employer is not None else None),
-                        (debtor_legal.strip() if debtor_legal is not None else None),
-                        (employee_name.strip() if employee_name is not None else None),
-                        (employee_id.strip() if employee_id is not None else None),
-                        (relation.strip() if relation is not None else None),
-                        (masked_value if masked_value else None),
-                        sel_id, tracer_name
-                    )
-                )
-                # Optional: propagate updated NIK to supervisor_data for this agreement
+            submitted = st.form_submit_button("Simpan Perubahan")
+            if submitted:
                 try:
-                    ag_no = sel_row.get('Agreement_No')
-                    if ag_no and nik_new is not None:
-                        execute(
-                            "UPDATE supervisor_data SET NIK_KTP=? WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=?",
-                            (nik_new, ag_no, ag_no, ag_no)
+                    # Normalize NIK (strip spaces); keep empty as NULL
+                    nik_new = (nik_val or "").strip()
+                    nik_new = nik_new if nik_new != "" else None
+                    nik_old = (sel_row.get('NIK_KTP') or '').strip()
+
+                    execute(
+                        "UPDATE assign_tracer SET NIK_KTP=?, EMPLOYMENT_UPDATE=?, EMPLOYER=?, Debtor_Legal_Name=?, Employee_Name=?, Employee_ID_Number=?, Debtor_Relation_to_Employee=?, Masked_Company_Name=? WHERE id=? AND IFNULL(Assigned_To,'')=?",
+                        (
+                            nik_new,
+                            (emp_update.strip() if emp_update is not None else None),
+                            (employer.strip() if employer is not None else None),
+                            (debtor_legal.strip() if debtor_legal is not None else None),
+                            (employee_name.strip() if employee_name is not None else None),
+                            (employee_id.strip() if employee_id is not None else None),
+                            (relation.strip() if relation is not None else None),
+                            (masked_value if masked_value else None),
+                            sel_id, tracer_name
                         )
-                except Exception:
-                    pass
-                # Audit log tracer update
+                    )
+                    # Optional: propagate updated NIK to supervisor_data for this agreement
+                    try:
+                        ag_no = sel_row.get('Agreement_No')
+                        if ag_no and nik_new is not None:
+                            execute(
+                                "UPDATE supervisor_data SET NIK_KTP=? WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=?",
+                                (nik_new, ag_no, ag_no, ag_no)
+                            )
+                    except Exception:
+                        pass
+                    # Audit log tracer update
+                    try:
+                        execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (u.get('id') if u else None, "TRACER_UPDATE", f"Tracer '{tracer_name}' updated assignment ID {sel_id}"))
+                    except Exception:
+                        pass
+                    # If NIK changed, add a specific audit entry
+                    try:
+                        if (nik_new or '') != (nik_old or ''):
+                            execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (u.get('id') if u else None, "TRACER_UPDATE_NIK", f"ID {sel_id} NIK '{nik_old}' -> '{nik_new or ''}'"))
+                    except Exception:
+                        pass
+                    # Warn if new NIK is frozen
+                    try:
+                        if nik_new and is_frozen_by_nik(nik_new):
+                            st.warning("Perhatian: NIK ini berada dalam daftar freeze.")
+                    except Exception:
+                        pass
+                    st.success("Data berhasil diperbarui.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Gagal update: {e}")
+
+    # --- Internal Memo tab ---
+    with sub_tabs[1]:
+        st.subheader("Internal Memo (Tracer ↔ Supervisor)")
+        # Chat-like CSS (scoped)
+        st.markdown(
+            """
+            <style>
+            .chatbox { border:1px solid #E5E7EB; background:#FFFFFF; border-radius:12px; padding:8px; height:380px; overflow-y:auto; }
+            .msg { display:flex; margin:8px 0; }
+            .msg.left { justify-content:flex-start; }
+            .msg.right { justify-content:flex-end; }
+            .bubble { max-width:72%; padding:10px 12px; border-radius:14px; box-shadow: 0 1px 2px rgba(16,24,40,0.05); }
+            .left .bubble { background:#F2F4F7; color:#111827; border-top-left-radius:6px; }
+            .right .bubble { background:#FEF9C3; color:#111827; border-top-right-radius:6px; }
+            .meta { font-size:11px; color:#667085; margin-top:6px; }
+            .name { font-weight:600; font-size:12px; margin-bottom:4px; color:#344054; }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        ag_no = sel_row.get('Agreement_No')
+        recent = fetchall(
+            "SELECT author_role, author_name, target_role, message, created_at FROM memos WHERE Agreement_No=? ORDER BY id DESC LIMIT 100",
+            (ag_no,)
+        ) or []
+        recent = list(reversed(recent))
+
+        st.markdown('<div class="chatbox">', unsafe_allow_html=True)
+        for r in recent:
+            author_role = (r.get('author_role') or '').strip()
+            author_name = (r.get('author_name') or '').strip()
+            msg = (r.get('message') or '').strip()
+            ts = (r.get('created_at') or '').replace('T', ' ')
+            mine = (author_role == 'Tracer' and author_name == tracer_name)
+            side = 'right' if mine else 'left'
+            name = 'Saya' if mine else (author_name or author_role or 'Supervisor')
+            safe_msg = msg.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('\n','<br/>')
+            html = f"""
+                <div class='msg {side}'>
+                    <div class='bubble'>
+                        <div class='name'>{name}</div>
+                        <div class='text'>{safe_msg}</div>
+                        <div class='meta'>{ts}</div>
+                    </div>
+                </div>
+            """
+            st.markdown(html, unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        with st.form("tracer_internal_memo_chat"):
+            col_i1, col_i2 = st.columns([6,1])
+            with col_i1:
+                msg = st.text_input("Ketik pesan ke Supervisor", value="", placeholder="Tulis pesan…", label_visibility="collapsed")
+            with col_i2:
+                send = st.form_submit_button("Kirim")
+            if send and msg and msg.strip():
                 try:
-                    execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (u.get('id') if u else None, "TRACER_UPDATE", f"Tracer '{tracer_name}' updated assignment ID {sel_id}"))
-                except Exception:
-                    pass
-                # If NIK changed, add a specific audit entry
-                try:
-                    if (nik_new or '') != (nik_old or ''):
-                        execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (u.get('id') if u else None, "TRACER_UPDATE_NIK", f"ID {sel_id} NIK '{nik_old}' -> '{nik_new or ''}'"))
-                except Exception:
-                    pass
-                # Warn if new NIK is frozen
-                try:
-                    if nik_new and is_frozen_by_nik(nik_new):
-                        st.warning("Perhatian: NIK ini berada dalam daftar freeze.")
-                except Exception:
-                    pass
-                st.success("Data berhasil diperbarui.")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Gagal update: {e}")
+                    execute(
+                        "INSERT INTO memos (Agreement_No, author_role, author_name, target_role, message) VALUES (?,?,?,?,?)",
+                        (ag_no, "Tracer", tracer_name, "Supervisor", msg.strip())
+                    )
+                    st.success("Memo terkirim.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Gagal mengirim memo: {e}")
 
 def page_guide():
     """User Guide page with detailed application description and quick how-to."""
