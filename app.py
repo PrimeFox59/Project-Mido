@@ -3119,20 +3119,94 @@ def page_agent():
             if not sel:
                 st.info("Pilih Case ID pada tabel di atas terlebih dahulu.")
             else:
-                st.subheader("Internal Memo (chat)")
-                # Chat-like CSS (scoped)
+                st.subheader("Internal Memo (Agent ↔ Supervisor)")
+                
+                # Enhanced Chat-like CSS
                 st.markdown(
                     """
                     <style>
-                    .chatbox { border:1px solid #E5E7EB; background:#FFFFFF; border-radius:12px; padding:8px; height:380px; overflow-y:auto; }
-                    .msg { display:flex; margin:8px 0; }
-                    .msg.left { justify-content:flex-start; }
-                    .msg.right { justify-content:flex-end; }
-                    .bubble { max-width:72%; padding:10px 12px; border-radius:14px; box-shadow: 0 1px 2px rgba(16,24,40,0.05); }
-                    .left .bubble { background:#F2F4F7; color:#111827; border-top-left-radius:6px; }
-                    .right .bubble { background:#DCFCE7; color:#111827; border-top-right-radius:6px; }
-                    .meta { font-size:11px; color:#667085; margin-top:6px; }
-                    .name { font-weight:600; font-size:12px; margin-bottom:4px; color:#344054; }
+                    .memo-container {
+                        background: linear-gradient(to bottom, #f8fafc 0%, #ffffff 100%);
+                        border: 1px solid #e2e8f0;
+                        border-radius: 16px;
+                        padding: 16px;
+                        margin-bottom: 16px;
+                    }
+                    .chatbox { 
+                        background: #ffffff;
+                        border: 1px solid #e5e7eb;
+                        border-radius: 12px;
+                        padding: 16px;
+                        height: 450px;
+                        overflow-y: auto;
+                        box-shadow: inset 0 2px 4px rgba(0,0,0,0.03);
+                    }
+                    .chatbox::-webkit-scrollbar {
+                        width: 8px;
+                    }
+                    .chatbox::-webkit-scrollbar-track {
+                        background: #f1f5f9;
+                        border-radius: 4px;
+                    }
+                    .chatbox::-webkit-scrollbar-thumb {
+                        background: #cbd5e1;
+                        border-radius: 4px;
+                    }
+                    .chatbox::-webkit-scrollbar-thumb:hover {
+                        background: #94a3b8;
+                    }
+                    .msg { 
+                        display: flex;
+                        margin: 12px 0;
+                        animation: fadeIn 0.3s ease-in;
+                    }
+                    @keyframes fadeIn {
+                        from { opacity: 0; transform: translateY(10px); }
+                        to { opacity: 1; transform: translateY(0); }
+                    }
+                    .msg.left { justify-content: flex-start; }
+                    .msg.right { justify-content: flex-end; }
+                    .bubble { 
+                        max-width: 70%;
+                        padding: 12px 16px;
+                        border-radius: 16px;
+                        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+                        word-wrap: break-word;
+                    }
+                    .left .bubble { 
+                        background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
+                        color: #1e293b;
+                        border-bottom-left-radius: 4px;
+                        border: 1px solid #cbd5e1;
+                    }
+                    .right .bubble { 
+                        background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
+                        color: #1e293b;
+                        border-bottom-right-radius: 4px;
+                        border: 1px solid #10b981;
+                    }
+                    .meta { 
+                        font-size: 10px;
+                        color: #64748b;
+                        margin-top: 6px;
+                        font-style: italic;
+                    }
+                    .name { 
+                        font-weight: 700;
+                        font-size: 13px;
+                        margin-bottom: 6px;
+                        color: #0f172a;
+                        letter-spacing: 0.3px;
+                    }
+                    .empty-state {
+                        text-align: center;
+                        padding: 60px 20px;
+                        color: #94a3b8;
+                    }
+                    .empty-state-icon {
+                        font-size: 48px;
+                        margin-bottom: 16px;
+                    }
                     </style>
                     """,
                     unsafe_allow_html=True,
@@ -3146,46 +3220,60 @@ def page_agent():
                 recent = list(reversed(recent))  # oldest at top
 
                 # Render chat messages
-                st.markdown('<div class="chatbox">', unsafe_allow_html=True)
-                for r in recent:
-                    author_role = (r.get('author_role') or '').strip()
-                    author_name = (r.get('author_name') or '').strip()
-                    msg = (r.get('message') or '').strip()
-                    ts = (r.get('created_at') or '').replace('T', ' ')
-                    mine = (author_role == 'Agent' and author_name == agent_name)
-                    side = 'right' if mine else 'left'
-                    name = 'Saya' if mine else (author_name or author_role or 'Supervisor')
-                    # Escape HTML special chars in message
-                    safe_msg = msg.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('\n','<br/>')
-                    html = f"""
-                        <div class='msg {side}'>
-                            <div class='bubble'>
-                                <div class='name'>{name}</div>
-                                <div class='text'>{safe_msg}</div>
-                                <div class='meta'>{ts}</div>
+                st.markdown('<div class="memo-container"><div class="chatbox">', unsafe_allow_html=True)
+                
+                if not recent:
+                    st.markdown(
+                        '<div class="empty-state">'
+                        '<div class="empty-state-icon">💬</div>'
+                        '<div>Belum ada memo untuk case ini</div>'
+                        '</div>',
+                        unsafe_allow_html=True
+                    )
+                else:
+                    for r in recent:
+                        author_role = (r.get('author_role') or '').strip()
+                        author_name = (r.get('author_name') or '').strip()
+                        msg = (r.get('message') or '').strip()
+                        ts = (r.get('created_at') or '').replace('T', ' ')
+                        mine = (author_role == 'Agent' and author_name == agent_name)
+                        side = 'right' if mine else 'left'
+                        name = 'Saya' if mine else (author_name or author_role or 'Supervisor')
+                        # Escape HTML special chars in message
+                        safe_msg = msg.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('\n','<br/>')
+                        html = f"""
+                            <div class='msg {side}'>
+                                <div class='bubble'>
+                                    <div class='name'>{name}</div>
+                                    <div class='text'>{safe_msg}</div>
+                                    <div class='meta'>{ts}</div>
+                                </div>
                             </div>
-                        </div>
-                    """
-                    st.markdown(html, unsafe_allow_html=True)
-                st.markdown('</div>', unsafe_allow_html=True)
+                        """
+                        st.markdown(html, unsafe_allow_html=True)
+                
+                st.markdown('</div></div>', unsafe_allow_html=True)
 
-                # Input send box (single line)
+                # Input send box with better UX
                 with st.form("agent_internal_memo_chat"):
-                    col_i1, col_i2 = st.columns([6,1])
-                    with col_i1:
-                        msg = st.text_input("Ketik pesan ke Supervisor", value="", placeholder="Tulis pesan…", label_visibility="collapsed")
-                    with col_i2:
-                        send = st.form_submit_button("Kirim")
+                    msg = st.text_area(
+                        "Tulis memo untuk Supervisor",
+                        value="",
+                        placeholder="Ketik pesan Anda di sini...",
+                        height=100,
+                        help="Tekan Ctrl+Enter atau klik tombol Kirim"
+                    )
+                    send = st.form_submit_button("📤 Kirim", use_container_width=True)
                     if send and msg and msg.strip():
                         try:
                             execute(
                                 "INSERT INTO memos (Agreement_No, author_role, author_name, target_role, message) VALUES (?,?,?,?,?)",
                                 (sel, "Agent", agent_name, "Supervisor", msg.strip())
                             )
-                            st.success("Memo terkirim.")
+                            st.success("✅ Memo berhasil dikirim!")
                             st.rerun()
                         except Exception as e:
-                            st.error(f"Gagal mengirim memo: {e}")
+                            st.error(f"❌ Gagal mengirim memo: {e}")
 
 
     # --- My PTP tab ---
@@ -5043,69 +5131,161 @@ def page_tracer():
     # --- Internal Memo tab ---
     with sub_tabs[1]:
         st.subheader("Internal Memo (Tracer ↔ Supervisor)")
-        # Chat-like CSS (scoped)
-        st.markdown(
-            """
-            <style>
-            .chatbox { border:1px solid #E5E7EB; background:#FFFFFF; border-radius:12px; padding:8px; height:380px; overflow-y:auto; }
-            .msg { display:flex; margin:8px 0; }
-            .msg.left { justify-content:flex-start; }
-            .msg.right { justify-content:flex-end; }
-            .bubble { max-width:72%; padding:10px 12px; border-radius:14px; box-shadow: 0 1px 2px rgba(16,24,40,0.05); }
-            .left .bubble { background:#F2F4F7; color:#111827; border-top-left-radius:6px; }
-            .right .bubble { background:#FEF9C3; color:#111827; border-top-right-radius:6px; }
-            .meta { font-size:11px; color:#667085; margin-top:6px; }
-            .name { font-weight:600; font-size:12px; margin-bottom:4px; color:#344054; }
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
-
         ag_no = sel_row.get('Agreement_No')
-        recent = fetchall(
-            "SELECT author_role, author_name, target_role, message, created_at FROM memos WHERE Agreement_No=? ORDER BY id DESC LIMIT 100",
-            (ag_no,)
-        ) or []
-        recent = list(reversed(recent))
+        
+        if not ag_no:
+            st.info("Pilih case untuk melihat memo internal.")
+        else:
+            # Enhanced Chat-like CSS
+            st.markdown(
+                """
+                <style>
+                .memo-container {
+                    background: linear-gradient(to bottom, #f8fafc 0%, #ffffff 100%);
+                    border: 1px solid #e2e8f0;
+                    border-radius: 16px;
+                    padding: 16px;
+                    margin-bottom: 16px;
+                }
+                .chatbox { 
+                    background: #ffffff;
+                    border: 1px solid #e5e7eb;
+                    border-radius: 12px;
+                    padding: 16px;
+                    height: 450px;
+                    overflow-y: auto;
+                    box-shadow: inset 0 2px 4px rgba(0,0,0,0.03);
+                }
+                .chatbox::-webkit-scrollbar {
+                    width: 8px;
+                }
+                .chatbox::-webkit-scrollbar-track {
+                    background: #f1f5f9;
+                    border-radius: 4px;
+                }
+                .chatbox::-webkit-scrollbar-thumb {
+                    background: #cbd5e1;
+                    border-radius: 4px;
+                }
+                .chatbox::-webkit-scrollbar-thumb:hover {
+                    background: #94a3b8;
+                }
+                .msg { 
+                    display: flex;
+                    margin: 12px 0;
+                    animation: fadeIn 0.3s ease-in;
+                }
+                @keyframes fadeIn {
+                    from { opacity: 0; transform: translateY(10px); }
+                    to { opacity: 1; transform: translateY(0); }
+                }
+                .msg.left { justify-content: flex-start; }
+                .msg.right { justify-content: flex-end; }
+                .bubble { 
+                    max-width: 70%;
+                    padding: 12px 16px;
+                    border-radius: 16px;
+                    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+                    word-wrap: break-word;
+                }
+                .left .bubble { 
+                    background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
+                    color: #1e293b;
+                    border-bottom-left-radius: 4px;
+                    border: 1px solid #cbd5e1;
+                }
+                .right .bubble { 
+                    background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+                    color: #1e293b;
+                    border-bottom-right-radius: 4px;
+                    border: 1px solid #fbbf24;
+                }
+                .meta { 
+                    font-size: 10px;
+                    color: #64748b;
+                    margin-top: 6px;
+                    font-style: italic;
+                }
+                .name { 
+                    font-weight: 700;
+                    font-size: 13px;
+                    margin-bottom: 6px;
+                    color: #0f172a;
+                    letter-spacing: 0.3px;
+                }
+                .empty-state {
+                    text-align: center;
+                    padding: 60px 20px;
+                    color: #94a3b8;
+                }
+                .empty-state-icon {
+                    font-size: 48px;
+                    margin-bottom: 16px;
+                }
+                </style>
+                """,
+                unsafe_allow_html=True,
+            )
 
-        st.markdown('<div class="chatbox">', unsafe_allow_html=True)
-        for r in recent:
-            author_role = (r.get('author_role') or '').strip()
-            author_name = (r.get('author_name') or '').strip()
-            msg = (r.get('message') or '').strip()
-            ts = (r.get('created_at') or '').replace('T', ' ')
-            mine = (author_role == 'Tracer' and author_name == tracer_name)
-            side = 'right' if mine else 'left'
-            name = 'Saya' if mine else (author_name or author_role or 'Supervisor')
-            safe_msg = msg.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('\n','<br/>')
-            html = f"""
-                <div class='msg {side}'>
-                    <div class='bubble'>
-                        <div class='name'>{name}</div>
-                        <div class='text'>{safe_msg}</div>
-                        <div class='meta'>{ts}</div>
-                    </div>
-                </div>
-            """
-            st.markdown(html, unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+            recent = fetchall(
+                "SELECT author_role, author_name, target_role, message, created_at FROM memos WHERE Agreement_No=? ORDER BY id DESC LIMIT 100",
+                (ag_no,)
+            ) or []
+            recent = list(reversed(recent))
 
-        with st.form("tracer_internal_memo_chat"):
-            col_i1, col_i2 = st.columns([6,1])
-            with col_i1:
-                msg = st.text_input("Ketik pesan ke Supervisor", value="", placeholder="Tulis pesan…", label_visibility="collapsed")
-            with col_i2:
-                send = st.form_submit_button("Kirim")
-            if send and msg and msg.strip():
-                try:
-                    execute(
-                        "INSERT INTO memos (Agreement_No, author_role, author_name, target_role, message) VALUES (?,?,?,?,?)",
-                        (ag_no, "Tracer", tracer_name, "Supervisor", msg.strip())
-                    )
-                    st.success("Memo terkirim.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Gagal mengirim memo: {e}")
+            st.markdown('<div class="memo-container"><div class="chatbox">', unsafe_allow_html=True)
+            
+            if not recent:
+                st.markdown(
+                    '<div class="empty-state">'
+                    '<div class="empty-state-icon">💬</div>'
+                    '<div>Belum ada memo untuk case ini</div>'
+                    '</div>',
+                    unsafe_allow_html=True
+                )
+            else:
+                for r in recent:
+                    author_role = (r.get('author_role') or '').strip()
+                    author_name = (r.get('author_name') or '').strip()
+                    msg = (r.get('message') or '').strip()
+                    ts = (r.get('created_at') or '').replace('T', ' ')
+                    mine = (author_role == 'Tracer' and author_name == tracer_name)
+                    side = 'right' if mine else 'left'
+                    name = 'Saya' if mine else (author_name or author_role or 'Supervisor')
+                    safe_msg = msg.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('\n','<br/>')
+                    html = f"""
+                        <div class='msg {side}'>
+                            <div class='bubble'>
+                                <div class='name'>{name}</div>
+                                <div class='text'>{safe_msg}</div>
+                                <div class='meta'>{ts}</div>
+                            </div>
+                        </div>
+                    """
+                    st.markdown(html, unsafe_allow_html=True)
+            
+            st.markdown('</div></div>', unsafe_allow_html=True)
+
+            # Send message form
+            with st.form("tracer_internal_memo_chat"):
+                msg = st.text_area(
+                    "Tulis memo untuk Supervisor",
+                    value="",
+                    placeholder="Ketik pesan Anda di sini...",
+                    height=100,
+                    help="Tekan Ctrl+Enter atau klik tombol Kirim"
+                )
+                send = st.form_submit_button("📤 Kirim", use_container_width=True)
+                if send and msg and msg.strip():
+                    try:
+                        execute(
+                            "INSERT INTO memos (Agreement_No, author_role, author_name, target_role, message) VALUES (?,?,?,?,?)",
+                            (ag_no, "Tracer", tracer_name, "Supervisor", msg.strip())
+                        )
+                        st.success("✅ Memo berhasil dikirim!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Gagal mengirim memo: {e}")
 
 def page_guide():
     """User Guide page with detailed application description and quick how-to."""
