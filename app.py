@@ -2847,7 +2847,7 @@ def page_agent():
                     st.markdown("#### Kontak Debitur (opsional untuk diperbarui)")
                     # Prefill from supervisor_data
                     sup_contact = fetchone(
-                        "SELECT email, REGISTERED_PHONE, Phone_Number_1 FROM supervisor_data WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=? LIMIT 1",
+                        "SELECT email, REGISTERED_PHONE, Phone_Number_1, Additional_Contacts FROM supervisor_data WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=? LIMIT 1",
                         (sel, sel, sel),
                     ) or {}
                     col_e1, col_e2 = st.columns(2)
@@ -2863,6 +2863,13 @@ def page_agent():
                             value=(sup_contact.get("REGISTERED_PHONE") or sup_contact.get("Phone_Number_1") or ""),
                             placeholder="contoh: 08xxxxxxxxxx / +628xxxxxxxxxx",
                         )
+                    # New WA field (does not replace registered phone)
+                    new_wa_number = st.text_input(
+                        "Nomor WhatsApp baru (opsional)",
+                        value="",
+                        placeholder="Nomor WA lain yang dipakai debitur saat ini",
+                        help="Tidak menggantikan nomor terdaftar. Akan ditambahkan ke Additional Contacts."
+                    )
 
                     show_next = "CICIL" in (scheme or "").upper()
                     next_date = None
@@ -2900,7 +2907,7 @@ def page_agent():
                                 except Exception:
                                     pass
 
-                                # 1b) Optional: update contact info if provided
+                                # 1b) Optional: update contact info if provided (registered email/WA)
                                 try:
                                     em = (updated_email or "").strip()
                                     wa = (wa_number or "").strip()
@@ -2926,6 +2933,30 @@ def page_agent():
                                             pass
                                 except Exception:
                                     # Non-blocking if contact update fails
+                                    pass
+
+                                # 1c) If agent provided a new alternate WA number, append to Additional_Contacts
+                                try:
+                                    new_wa = (new_wa_number or "").strip()
+                                    if new_wa:
+                                        existing_add = (sup_contact.get("Additional_Contacts") or "").strip()
+                                        stamp = now_wib().strftime("%Y-%m-%d")
+                                        line = f"WA baru {stamp} oleh {agent_name}: {new_wa}"
+                                        new_add = (existing_add + ("\n" if existing_add else "") + line)
+                                        execute(
+                                            "UPDATE supervisor_data SET Additional_Contacts=? WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=?",
+                                            (new_add, sel, sel, sel),
+                                        )
+                                        # Audit log for new WA
+                                        try:
+                                            execute(
+                                                "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                                                (u.get('id') if u else None, "AGENT_ADD_NEW_WA", f"{sel}|{new_wa}")
+                                            )
+                                        except Exception:
+                                            pass
+                                except Exception:
+                                    # Non-blocking if Additional_Contacts update fails
                                     pass
 
                                 # 2) Jika cicil, buat PTP berikutnya agar tampil di My PTP
