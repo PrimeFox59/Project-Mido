@@ -275,7 +275,7 @@ def init_db():
             'NIK_KTP', 'EMPLOYMENT_UPDATE', 'EMPLOYER',
             'Debtor_Legal_Name', 'Employee_Name', 'Employee_ID_Number', 'Debtor_Relation_to_Employee',
             # Agent-updated fields (optional on upload)
-            'STATUS', 'REGISTERED_PHONE', 'Additional_Contacts', 'Remarks_Suggested_NIK_Prospect', 'Payment', 'Paid_Off_Status'
+            'STATUS', 'REGISTERED_PHONE', 'Additional_Contacts', 'Remarks_Suggested_NIK_Prospect', 'Payment', 'Paid_Off_Status', 'Paid_Off'
         ]:
             if col not in cols:
                 c.execute(f"ALTER TABLE supervisor_data ADD COLUMN {col} TEXT")
@@ -2612,7 +2612,7 @@ def page_agent():
             st.subheader("Update Data untuk Supervisor (Agent fields)")
             st.caption("Kolom-kolom ini berasal dari data upload supervisor dan diupdate oleh Agent.")
             sup_agent = fetchone(
-                "SELECT id, STATUS, REGISTERED_PHONE, Additional_Contacts, Remarks_Suggested_NIK_Prospect, Payment, Paid_Off_Status "
+                "SELECT id, STATUS, REGISTERED_PHONE, Additional_Contacts, Remarks_Suggested_NIK_Prospect, Payment, Paid_Off_Status, Paid_Off "
                 "FROM supervisor_data WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=? ORDER BY id DESC LIMIT 1",
                 (sel, sel, sel)
             ) or {}
@@ -2634,27 +2634,22 @@ def page_agent():
                         "NIS",  # O1011
                         "INS",  # O1012
                     ]
-                    _status_help = (
-                        "Code\tCategory\tAbbreviation\tHex Code\n"
-                        "O1001\tPromised to pay\tPTP\t#4CAF50\n"
-                        "O1002\tDisputes / Refuse / Unable to pay\tDIS\t#E53935\n"
-                        "O1003\tComplained case (Stop Collect)\tCMP\t#FB8C00\n"
-                        "O1004\tPaid / No Loan\tPAD\t#2196F3\n"
-                        "O1005\tHang up after Answering\tHUP\t#9C27B0\n"
-                        "O1006\tWrong Contact Number\tWCN\t#757575\n"
-                        "O1007\tThird Party (Pass Message)\tTPM\t#009688\n"
-                        "O1008\tThird Party (Refused to Cooperate)\tTPC\t#C62828\n"
-                        "O1009\tRing No Answer (RNA)\tRNA\t#FBC02D\n"
-                        "O1010\tPhone Off\tPHO\t#546E7A\n"
-                        "O1011\tNot in Service (Invalid/Voicemail)\tNIS\t#616161\n"
-                        "O1012\tIn Installment\tINS\t#8BC34A"
-                    )
                     v_status = st.selectbox(
                         "STATUS",
                         _status_options,
                         index=(_status_options.index(sup_agent.get('STATUS','')) if sup_agent.get('STATUS','') in _status_options else 0),
-                        help=_status_help,
+                        help="Status terkini dari case ini"
                     )
+                    
+                    # Paid Off dropdown
+                    current_paid_off = sup_agent.get('Paid_Off', 'No') or 'No'
+                    v_paid_off = st.selectbox(
+                        "Paid Off",
+                        options=["No", "Yes"],
+                        index=0 if current_paid_off.upper() != 'YES' else 1,
+                        help="Apakah pinjaman sudah lunas?"
+                    )
+                    
                     v_reg_phone = st.text_input("REGISTERED PHONE", value=sup_agent.get('REGISTERED_PHONE','') or "")
                 with csb:
                     v_add_contacts = st.text_area("Remarks", value=sup_agent.get('Additional_Contacts','') or "", height=80)
@@ -2664,19 +2659,19 @@ def page_agent():
                     try:
                         if sup_agent.get('id') is not None:
                             execute(
-                                "UPDATE supervisor_data SET STATUS=?, REGISTERED_PHONE=?, Additional_Contacts=?, Remarks_Suggested_NIK_Prospect=? WHERE id=?",
-                                (v_status.strip(), v_reg_phone.strip(), v_add_contacts.strip(), v_remarks.strip(), sup_agent.get('id'))
+                                "UPDATE supervisor_data SET STATUS=?, Paid_Off=?, REGISTERED_PHONE=?, Additional_Contacts=?, Remarks_Suggested_NIK_Prospect=? WHERE id=?",
+                                (v_status.strip(), v_paid_off, v_reg_phone.strip(), v_add_contacts.strip(), v_remarks.strip(), sup_agent.get('id'))
                             )
                         else:
                             execute(
-                                "UPDATE supervisor_data SET STATUS=?, REGISTERED_PHONE=?, Additional_Contacts=?, Remarks_Suggested_NIK_Prospect=? WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=?",
-                                (v_status.strip(), v_reg_phone.strip(), v_add_contacts.strip(), v_remarks.strip(), sel, sel, sel)
+                                "UPDATE supervisor_data SET STATUS=?, Paid_Off=?, REGISTERED_PHONE=?, Additional_Contacts=?, Remarks_Suggested_NIK_Prospect=? WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=?",
+                                (v_status.strip(), v_paid_off, v_reg_phone.strip(), v_add_contacts.strip(), v_remarks.strip(), sel, sel, sel)
                             )
                         try:
                             u = current_user() or {}
                             execute(
                                 "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
-                                (u.get('id') if u else None, "AGENT_UPDATE_SUP_FIELDS", f"{sel} -> STATUS='{v_status}' REG_PHONE='{v_reg_phone}'")
+                                (u.get('id') if u else None, "AGENT_UPDATE_SUP_FIELDS", f"{sel} -> STATUS='{v_status}' PAID_OFF='{v_paid_off}' REG_PHONE='{v_reg_phone}'")
                             )
                         except Exception:
                             pass
