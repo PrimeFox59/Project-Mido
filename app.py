@@ -654,6 +654,32 @@ def perform_backup(service, folder_id=FOLDER_ID_DEFAULT):
     """
     if not os.path.exists(DB_PATH):
         return False, f"Database '{DB_PATH}' tidak ditemukan." 
+    
+    # PENTING: Jangan backup jika DB masih fresh (hanya seed users, belum ada data real)
+    # Ini mencegah overwrite backup lama dengan DB kosong saat autosleep
+    try:
+        if _is_probably_fresh_seed_db():
+            # Cek apakah baru saja di-restore (dalam 10 menit terakhir)
+            last_restore_time = get_setting('auto_restore_last_time')
+            is_post_restore = False
+            if last_restore_time:
+                try:
+                    from dateutil import parser
+                    restore_dt = parser.isoparse(last_restore_time)
+                    now_dt = datetime.utcnow()
+                    minutes_since = (now_dt - restore_dt).total_seconds() / 60
+                    if minutes_since < 10:
+                        is_post_restore = True
+                except Exception:
+                    pass
+            
+            # Jika fresh dan BUKAN post-restore, skip backup
+            if not is_post_restore:
+                return False, "Backup dilewati: DB masih fresh (hanya seed data). Backup hanya dilakukan setelah ada data real."
+    except Exception:
+        # Jika error saat cek, lanjutkan backup (safe fallback)
+        pass
+    
     # Nama file backup auto (overwrite, bukan timestamp) agar tidak menumpuk
     base_name = get_setting('auto_backup_filename', 'auto_backup.sqlite') or 'auto_backup.sqlite'
     # Cek kapasitas: jika file belum ada, menambah ukuran; jika sudah ada, overwrite diperbolehkan
@@ -867,6 +893,9 @@ def _is_probably_fresh_seed_db():
         return False
 
 def _pick_latest_drive_backup_file(service, folder_id):
+    """Pilih backup terbaru dari Google Drive, tapi hindari backup yang terlalu baru 
+    (< 2 menit) karena mungkin backup fresh DB yang dibuat saat autosleep.
+    """
     try:
         files = list_files_in_folder(service, folder_id)
     except Exception:
@@ -880,7 +909,41 @@ def _pick_latest_drive_backup_file(service, folder_id):
         candidates.sort(key=lambda x: x.get('modifiedTime',''), reverse=True)
     except Exception:
         pass
-    return candidates[0]
+    
+    # Filter: hindari backup yang terlalu baru (< 2 menit), ambil yang lebih lama
+    # Ini mencegah restore dari backup fresh yang baru dibuat saat autosleep
+    try:
+        now_utc = datetime.utcnow()
+        safe_candidates = []
+        for f in candidates:
+            mod_time_str = f.get('modifiedTime')
+            if mod_time_str:
+                try:
+                    from dateutil import parser
+                    mod_dt = parser.isoparse(mod_time_str.replace('Z', '+00:00'))
+                    # Hilangkan timezone info untuk comparison
+                    mod_dt_naive = mod_dt.replace(tzinfo=None)
+                    minutes_old = (now_utc - mod_dt_naive).total_seconds() / 60
+                    
+                    # Ambil backup yang umurnya >= 2 menit
+                    if minutes_old >= 2:
+                        safe_candidates.append(f)
+                except Exception:
+                    # Jika gagal parse, anggap aman
+                    safe_candidates.append(f)
+            else:
+                safe_candidates.append(f)
+        
+        # Jika ada safe candidates, gunakan yang paling baru dari safe list
+        if safe_candidates:
+            return safe_candidates[0]
+        
+        # Fallback: jika semua terlalu baru, gunakan yang paling baru (better than nothing)
+        # Tapi ini jarang terjadi kecuali user baru pertama kali backup
+        return candidates[0] if candidates else None
+    except Exception:
+        # Fallback to first candidate if filtering fails
+        return candidates[0] if candidates else None
 
 def attempt_auto_restore_if_seed(service, folder_id=FOLDER_ID_DEFAULT):
     """Jika diaktifkan & terdeteksi DB fresh, restore otomatis dari backup Drive terbaru sekali per sesi."""
@@ -1222,20 +1285,49 @@ def page_auth():
                     except Exception:
                         pass
                     # Backup on successful login (best-effort)
+                    # PENTING: Skip backup jika DB masih fresh/baru di-restore untuk mencegah overwrite backup lama
                     try:
                         if "service_account" in st.secrets:
-                            service_b, _ = build_drive_service()
-                            ok_b, msg_b = perform_backup(service_b, FOLDER_ID_DEFAULT)
-                            st.session_state['last_login_backup'] = {
-                                'ok': ok_b,
-                                'msg': msg_b,
-                                'time': datetime.utcnow().isoformat()
-                            }
-                            # Tampilkan info singkat tanpa menghalangi redirect
-                            if ok_b:
-                                st.toast("Backup otomatis saat login berhasil.")
+                            # Cek apakah DB baru saja di-restore (dalam 5 menit terakhir)
+                            just_restored = False
+                            try:
+                                last_restore_time = get_setting('auto_restore_last_time')
+                                if last_restore_time:
+                                    from dateutil import parser
+                                    restore_dt = parser.isoparse(last_restore_time)
+                                    now_dt = datetime.utcnow()
+                                    minutes_since_restore = (now_dt - restore_dt).total_seconds() / 60
+                                    if minutes_since_restore < 5:  # Dalam 5 menit terakhir
+                                        just_restored = True
+                            except Exception:
+                                pass
+                            
+                            # Cek apakah DB masih fresh (belum ada data real)
+                            is_fresh = _is_probably_fresh_seed_db()
+                            
+                            # Hanya backup jika DB tidak fresh DAN tidak baru di-restore
+                            if not is_fresh and not just_restored:
+                                service_b, _ = build_drive_service()
+                                ok_b, msg_b = perform_backup(service_b, FOLDER_ID_DEFAULT)
+                                st.session_state['last_login_backup'] = {
+                                    'ok': ok_b,
+                                    'msg': msg_b,
+                                    'time': datetime.utcnow().isoformat()
+                                }
+                                # Tampilkan info singkat tanpa menghalangi redirect
+                                if ok_b:
+                                    st.toast("Backup otomatis saat login berhasil.")
+                                else:
+                                    st.toast("Backup saat login gagal atau dibatalkan.")
                             else:
-                                st.toast("Backup saat login gagal atau dibatalkan.")
+                                # Skip backup untuk DB fresh atau baru di-restore
+                                skip_reason = "baru di-restore" if just_restored else "DB masih fresh"
+                                st.session_state['last_login_backup'] = {
+                                    'ok': False,
+                                    'msg': f'Backup dilewati: {skip_reason}',
+                                    'time': datetime.utcnow().isoformat()
+                                }
+                                st.toast(f"⏭️ Backup dilewati ({skip_reason})")
                     except Exception as e:
                         st.session_state['last_login_backup'] = {
                             'ok': False,
@@ -2042,12 +2134,16 @@ def main():
         st.title('⏳ Memeriksa / Memulihkan Database')
         res = st.session_state.get('prelogin_auto_restore_result', {})
         if res.get('success'):
-            st.success(f"Berhasil restore otomatis: {res.get('message','')} ")
+            st.success(f"✅ Berhasil restore otomatis: {res.get('message','')} ")
+            st.info("💡 Database telah dipulihkan dari backup Google Drive. Silakan login untuk melanjutkan.")
+            
+            # Tambahkan informasi tentang backup pertama setelah login
+            st.caption("📌 Setelah login pertama kali, sistem akan membuat backup baru untuk checkpoint.")
         else:
             st.info(res.get('message','Tidak ada informasi restore.'))
-        st.caption(f"Waktu: {res.get('time','-')}")
+        st.caption(f"⏰ Waktu: {res.get('time','-')}")
         st.markdown('---')
-        if st.button('Lanjut ke Login »', type='primary'):
+        if st.button('🔐 Lanjut ke Login »', type='primary', use_container_width=True):
             st.session_state.page = 'Authentication'
             st.rerun()
         return
@@ -2908,6 +3004,29 @@ def page_dashboard():
     - Recent Activity table and Upcoming PTP deadlines
     """
     require_roles(ALL_ROLES)
+    
+    # Post-restore checkpoint backup (sekali per sesi, 15 menit setelah restore)
+    if "post_restore_backup_done" not in st.session_state:
+        try:
+            last_restore_time = get_setting('auto_restore_last_time')
+            if last_restore_time and "service_account" in st.secrets:
+                from dateutil import parser
+                restore_dt = parser.isoparse(last_restore_time)
+                now_dt = datetime.utcnow()
+                minutes_since = (now_dt - restore_dt).total_seconds() / 60
+                
+                # Jika sudah 15-60 menit setelah restore, buat backup checkpoint
+                if 15 <= minutes_since <= 60:
+                    service_cp, _ = build_drive_service()
+                    ok_cp, msg_cp = perform_backup(service_cp, FOLDER_ID_DEFAULT)
+                    if ok_cp:
+                        st.toast("✅ Backup checkpoint post-restore berhasil.")
+                    st.session_state['post_restore_backup_done'] = True
+                elif minutes_since > 60:
+                    # Sudah terlalu lama, skip
+                    st.session_state['post_restore_backup_done'] = True
+        except Exception:
+            pass
 
     # Header - personalized greeting (remove logo and static title)
     user_obj = current_user() or {}
