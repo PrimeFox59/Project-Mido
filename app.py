@@ -348,7 +348,9 @@ def init_db():
             status TEXT,
             source_file TEXT,
             uploaded_by TEXT,
-            uploaded_at TEXT DEFAULT CURRENT_TIMESTAMP
+            uploaded_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            proof_image_drive_id TEXT,
+            proof_image_filename TEXT
         );
         """
     )
@@ -358,6 +360,9 @@ def init_db():
         # Create regular indexes (non-unique)
         c.execute("CREATE INDEX IF NOT EXISTS idx_payments_agreement ON payments(Agreement_No)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_payments_date ON payments(paid_date)")
+        # Add new columns for proof images if not exists
+        c.execute("ALTER TABLE payments ADD COLUMN proof_image_drive_id TEXT")
+        c.execute("ALTER TABLE payments ADD COLUMN proof_image_filename TEXT")
     except Exception:
         pass
     # 5) Agent results (handling outcome fields)
@@ -2754,6 +2759,16 @@ def page_agent():
                         paid_date = st.date_input("Tanggal Pembayaran", value=today_wib())
                     with c2:
                         paid_amount = st.number_input("Nominal Pembayaran", min_value=0.0, step=10000.0)
+                    
+                    # Upload bukti gambar (percakapan/pembayaran)
+                    st.markdown("---")
+                    st.markdown("#### Bukti Pembayaran / Percakapan (Opsional)")
+                    uploaded_proof = st.file_uploader(
+                        "Upload gambar bukti (WhatsApp chat, transfer, dll)",
+                        type=["png", "jpg", "jpeg", "pdf"],
+                        help="Gambar akan disimpan di Google Drive untuk review Supervisor",
+                        key="payment_proof_upload"
+                    )
         
                     st.markdown("---")
                     st.markdown("#### Kontak Debitur (opsional untuk diperbarui)")
@@ -2793,11 +2808,31 @@ def page_agent():
                         st.warning("Untuk skema CICIL, isi jumlah dan semua tanggal rencana cicilan.")
                     else:
                         try:
-                            # 1) Simpan pembayaran - gunakan INSERT OR REPLACE untuk menghindari UNIQUE constraint error
-                            # Jika sudah ada payment di tanggal yang sama, akan di-replace
+                            # Upload bukti gambar ke Google Drive jika ada
+                            proof_drive_id = None
+                            proof_filename = None
+                            if uploaded_proof is not None:
+                                try:
+                                    service = build_drive_service()
+                                    # Generate filename dengan timestamp dan case_id
+                                    timestamp = now_wib().strftime("%Y%m%d_%H%M%S")
+                                    original_filename = uploaded_proof.name
+                                    ext = original_filename.split('.')[-1] if '.' in original_filename else 'jpg'
+                                    proof_filename = f"payment_proof_{sel}_{timestamp}.{ext}"
+                                    
+                                    # Upload ke folder yang sama dengan backup
+                                    proof_bytes = uploaded_proof.read()
+                                    mimetype = uploaded_proof.type or "image/jpeg"
+                                    proof_drive_id = upload_bytes(service, FOLDER_ID_DEFAULT, proof_filename, proof_bytes, mimetype)
+                                    
+                                    st.success(f"✅ Bukti gambar berhasil diupload: {proof_filename}")
+                                except Exception as e:
+                                    st.warning(f"⚠️ Gagal upload gambar ke Drive: {e}. Payment tetap disimpan tanpa bukti gambar.")
+                            
+                            # 1) Simpan pembayaran dengan info bukti gambar
                             execute(
-                                "INSERT OR REPLACE INTO payments (Agreement_No, paid_amount, paid_date, status, source_file, uploaded_by) VALUES (?,?,?,?,?,?)",
-                                (sel, float(paid_amount or 0), (paid_date.isoformat() if paid_date else None), scheme, None, agent_name)
+                                "INSERT OR REPLACE INTO payments (Agreement_No, paid_amount, paid_date, status, source_file, uploaded_by, proof_image_drive_id, proof_image_filename) VALUES (?,?,?,?,?,?,?,?)",
+                                (sel, float(paid_amount or 0), (paid_date.isoformat() if paid_date else None), scheme, None, agent_name, proof_drive_id, proof_filename)
                             )
                             # Audit log pembayaran
                             try:
@@ -3715,6 +3750,98 @@ def page_supervisor():
                             st.rerun()
                         except Exception as e:
                             st.error(f"Gagal menghapus semua data: {e}")
+        
+        # --- Payment Reports dengan Bukti Gambar ---
+        st.markdown("---")
+        st.markdown("### 💰 Payment Reports dengan Bukti")
+        st.caption("Review laporan pembayaran dari Agent beserta bukti gambar yang dilampirkan")
+        
+        # Filter payment reports
+        pcol1, pcol2, pcol3 = st.columns(3)
+        with pcol1:
+            p_case_filter = st.text_input("Filter Case ID", key="payment_case_filter")
+        with pcol2:
+            p_agent_filter = st.text_input("Filter Agent", key="payment_agent_filter")
+        with pcol3:
+            p_with_proof = st.selectbox("Bukti Gambar", ["All", "With Proof", "No Proof"], key="payment_proof_filter")
+        
+        # Query payments dengan bukti gambar
+        p_query = """
+            SELECT p.id, p.Agreement_No AS Case_ID, p.paid_amount, p.paid_date, 
+                   p.status, p.uploaded_by, p.uploaded_at,
+                   p.proof_image_drive_id, p.proof_image_filename,
+                   sd.Customer_name
+            FROM payments p
+            LEFT JOIN supervisor_data sd ON sd.Case_ID = p.Agreement_No 
+                OR sd.Virtual_Account_Number = p.Agreement_No
+                OR sd.Third_Uid = p.Agreement_No
+            WHERE 1=1
+        """
+        p_params = []
+        
+        if p_case_filter:
+            p_query += " AND p.Agreement_No LIKE ?"
+            p_params.append(f"%{p_case_filter}%")
+        if p_agent_filter:
+            p_query += " AND p.uploaded_by LIKE ?"
+            p_params.append(f"%{p_agent_filter}%")
+        if p_with_proof == "With Proof":
+            p_query += " AND p.proof_image_drive_id IS NOT NULL"
+        elif p_with_proof == "No Proof":
+            p_query += " AND p.proof_image_drive_id IS NULL"
+        
+        p_query += " ORDER BY p.paid_date DESC, p.uploaded_at DESC LIMIT 100"
+        
+        payment_rows = fetchall(p_query, tuple(p_params))
+        
+        if not payment_rows:
+            st.info("Tidak ada payment report ditemukan sesuai filter.")
+        else:
+            st.caption(f"Menampilkan {len(payment_rows)} payment reports")
+            
+            for p_row in payment_rows:
+                with st.expander(
+                    f"{'📎' if p_row.get('proof_image_drive_id') else '📄'} "
+                    f"{p_row['Case_ID']} - {p_row.get('Customer_name', 'N/A')} - "
+                    f"Rp {p_row['paid_amount']:,.0f} ({p_row['paid_date']})"
+                ):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.write(f"**Case ID:** {p_row['Case_ID']}")
+                        st.write(f"**Customer:** {p_row.get('Customer_name', 'N/A')}")
+                        st.write(f"**Jumlah:** Rp {p_row['paid_amount']:,.0f}")
+                        st.write(f"**Tanggal:** {p_row['paid_date']}")
+                    with col2:
+                        st.write(f"**Status:** {p_row['status']}")
+                        st.write(f"**Uploaded by:** {p_row['uploaded_by']}")
+                        st.write(f"**Uploaded at:** {p_row['uploaded_at']}")
+                    
+                    # Tampilkan bukti gambar jika ada
+                    if p_row.get('proof_image_drive_id'):
+                        st.markdown("#### 📎 Bukti Pembayaran / Percakapan")
+                        st.caption(f"Filename: {p_row.get('proof_image_filename', 'N/A')}")
+                        
+                        try:
+                            service = build_drive_service()
+                            # Download gambar dari Drive
+                            img_bytes = download_file_bytes(service, p_row['proof_image_drive_id'])
+                            
+                            # Tampilkan gambar jika format image
+                            if p_row.get('proof_image_filename', '').lower().endswith(('.png', '.jpg', '.jpeg')):
+                                st.image(img_bytes, caption=p_row.get('proof_image_filename'), use_container_width=True)
+                            else:
+                                # Untuk PDF atau format lain, tampilkan download button
+                                st.download_button(
+                                    label=f"📥 Download {p_row.get('proof_image_filename')}",
+                                    data=img_bytes,
+                                    file_name=p_row.get('proof_image_filename', 'proof.pdf'),
+                                    mime="application/octet-stream"
+                                )
+                        except Exception as e:
+                            st.error(f"❌ Gagal load bukti gambar dari Drive: {e}")
+                            st.caption(f"Drive ID: {p_row['proof_image_drive_id']}")
+                    else:
+                        st.info("Tidak ada bukti gambar dilampirkan untuk payment ini.")
 
         # Enriched Monitoring & Lookup NIK dipindahkan ke tab khusus "Enriched & Lookup"
 
