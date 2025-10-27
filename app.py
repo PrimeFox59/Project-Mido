@@ -58,7 +58,18 @@ def init_db():
             password_hash TEXT,
             role TEXT,
             approved INTEGER DEFAULT 0,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            division TEXT,
+            nik TEXT,
+            dob TEXT,
+            phone_number TEXT,
+            alamat TEXT,
+            work_email TEXT,
+            join_date TEXT,
+            nomor_rekening_bca TEXT,
+            nama_rekening_bca TEXT,
+            sertifikasi_drive_id TEXT,
+            sertifikasi_filename TEXT
         );
         """
     )
@@ -67,6 +78,28 @@ def init_db():
         c.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_users_approved ON users(approved)")
+    except Exception:
+        pass
+    
+    # Add new columns to existing users table if not exists
+    try:
+        cols = [r['name'] for r in c.execute("PRAGMA table_info(users)").fetchall()]
+        new_cols = {
+            'division': 'TEXT',
+            'nik': 'TEXT',
+            'dob': 'TEXT',
+            'phone_number': 'TEXT',
+            'alamat': 'TEXT',
+            'work_email': 'TEXT',
+            'join_date': 'TEXT',
+            'nomor_rekening_bca': 'TEXT',
+            'nama_rekening_bca': 'TEXT',
+            'sertifikasi_drive_id': 'TEXT',
+            'sertifikasi_filename': 'TEXT'
+        }
+        for col, dtype in new_cols.items():
+            if col not in cols:
+                c.execute(f"ALTER TABLE users ADD COLUMN {col} {dtype}")
     except Exception:
         pass
     # Seed default users if database is fresh
@@ -124,19 +157,6 @@ def init_db():
         # Will fail if duplicates already exist; app-level guards will still apply
         pass
 
-    # 6) AI Knowledge base (for Chat AI)
-    try:
-        c.execute(
-            """
-            CREATE TABLE IF NOT EXISTS ai_knowledge (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                fact TEXT NOT NULL,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-            );
-            """
-        )
-    except Exception:
-        pass
     try:
         c.execute("CREATE INDEX IF NOT EXISTS idx_assign_tracer_assigned_to ON assign_tracer(Assigned_To)")
     except Exception:
@@ -625,318 +645,6 @@ def is_frozen_by_agreement(agreement_no: str) -> bool:
         return False
 
 # -------------------------
-# Chat AI helpers (Gemini + Memory)
-# -------------------------
-def get_gemini_api_key():
-    """Fetch Gemini API key from Streamlit secrets or environment.
-    Priority: st.secrets['gemini']['api_key'] -> st.secrets['GEMINI_API_KEY'] -> env GEMINI_API_KEY
-    (No in-app manual entry; configured via Streamlit secrets only.)
-    """
-    try:
-        # Nested object style
-        k = st.secrets.get('gemini', {}).get('api_key')
-        if k:
-            return str(k)
-    except Exception:
-        pass
-    try:
-        # Flat style
-        if 'GEMINI_API_KEY' in st.secrets:
-            return str(st.secrets['GEMINI_API_KEY'])
-    except Exception:
-        pass
-    try:
-        if os.environ.get('GEMINI_API_KEY'):
-            return os.environ.get('GEMINI_API_KEY')
-    except Exception:
-        pass
-    return None
-
-def ai_add_knowledge(fact: str) -> bool:
-    """Insert a new fact into ai_knowledge table in the main app DB."""
-    if not fact or not fact.strip():
-        return False
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cur = conn.cursor()
-        cur.execute("INSERT INTO ai_knowledge (fact) VALUES (?)", (fact.strip(),))
-        conn.commit()
-        conn.close()
-        return True
-    except Exception:
-        return False
-
-def ai_get_all_knowledge() -> str:
-    """Return all facts ordered by timestamp ASC, formatted for context."""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cur = conn.cursor()
-        cur.execute("SELECT fact, timestamp FROM ai_knowledge ORDER BY datetime(timestamp) ASC, id ASC")
-        rows = cur.fetchall()
-        conn.close()
-        if not rows:
-            return ""
-        out = []
-        for fact, ts in rows:
-            try:
-                # SQLite CURRENT_TIMESTAMP => 'YYYY-MM-DD HH:MM:SS'
-                dt = datetime.strptime(str(ts), '%Y-%m-%d %H:%M:%S')
-                tag = dt.strftime('%d %b %Y %H:%M')
-            except Exception:
-                tag = str(ts)
-            out.append(f"- (Dicatat pada {tag}) {fact}")
-        return "\n".join(out)
-    except Exception:
-        return ""
-
-def ai_build_system_context() -> str:
-    """Small live snapshot of the app to help AI answer about the system."""
-    try:
-        total_users = (fetchone("SELECT COUNT(*) c FROM users WHERE approved=1") or {}).get('c', 0)
-    except Exception:
-        total_users = 0
-    try:
-        pending_approvals = (fetchone("SELECT COUNT(*) c FROM users WHERE approved=0") or {}).get('c', 0)
-    except Exception:
-        pending_approvals = 0
-    try:
-        completed_total = (fetchone("SELECT COUNT(DISTINCT Agreement_No) c FROM payments WHERE COALESCE(paid_amount,0) > 0") or {}).get('c', 0)
-    except Exception:
-        completed_total = 0
-    try:
-        assigned_total = (fetchone("SELECT COUNT(DISTINCT Agreement_No) c FROM agent_assignments WHERE IFNULL(active,1)=1") or {}).get('c', 0)
-    except Exception:
-        assigned_total = 0
-    pending_total = max(assigned_total - completed_total, 0)
-    try:
-        last_backup = fetchone("SELECT file_name, status, backup_time FROM backup_log ORDER BY id DESC LIMIT 1") or {}
-    except Exception:
-        last_backup = {}
-    # Short recent activity (5 entries)
-    try:
-        recent_logs = fetchall("SELECT timestamp, action, details FROM audit_logs ORDER BY id DESC LIMIT 5")
-    except Exception:
-        recent_logs = []
-    logs_lines = []
-    for r in (recent_logs or []):
-        logs_lines.append(f"{r.get('timestamp','')}: {r.get('action','')} — {r.get('details','')}")
-    snapshot = [
-        f"Total user aktif (approved): {total_users}",
-        f"Pending approval: {pending_approvals}",
-        f"Total assignment aktif: {assigned_total}",
-        f"Dokumen selesai (punya pembayaran): {completed_total}",
-        f"Dokumen pending: {pending_total}",
-        f"Backup terakhir: {last_backup.get('file_name','-')} | {last_backup.get('status','-')} @ {last_backup.get('backup_time','-')}",
-    ]
-    if logs_lines:
-        snapshot.append("Aktivitas terakhir:")
-        snapshot.extend(["  - "+x for x in logs_lines])
-    return "\n".join(snapshot)
-
-# ------- Optional: Summarize DB tables for AI context attachment -------
-SAFE_TABLES = {
-    # Operational tables (exclude sensitive user auth fields)
-    "assign_tracer",
-    "supervisor_data",
-    "payments",
-    "agent_assignments",
-    "trace_results",
-    "masked_companies",
-    "agent_results",
-    "backup_log",
-    "audit_logs",
-    "record_notes",
-}
-
-SECRET_COLUMN_BLACKLIST = {"password_hash", "service_account", "email_token"}
-
-def _get_table_columns(table: str) -> list:
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cur = conn.cursor()
-        cur.execute(f"PRAGMA table_info({table})")
-        cols = [r[1] for r in cur.fetchall()]
-        conn.close()
-        return cols
-    except Exception:
-        return []
-
-def ai_summarize_table(table: str, filter_column: str | None = None, keyword: str | None = None, limit: int = 50) -> str:
-    """Return a compact, human-readable summary of a table with optional simple filter.
-    Safety: table and column are validated against whitelist and actual schema; values are parameterized.
-    """
-    table = str(table or "").strip()
-    if table not in SAFE_TABLES:
-        return "Tabel tidak diizinkan untuk dilampirkan."
-    try:
-        limit = max(1, min(int(limit or 50), 200))
-    except Exception:
-        limit = 50
-
-    cols = _get_table_columns(table)
-    cols = [c for c in cols if c and c not in SECRET_COLUMN_BLACKLIST]
-    if not cols:
-        return "Gagal membaca kolom tabel."
-
-    where = ""
-    params: list = []
-    if filter_column:
-        if filter_column not in cols:
-            return "Kolom filter tidak valid untuk tabel ini."
-        where = f" WHERE COALESCE({filter_column}, '') LIKE ?"
-        params.append(f"%{keyword or ''}%")
-
-    # Count rows (with filter)
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
-        cur.execute(f"SELECT COUNT(*) AS c FROM {table}{where}", tuple(params))
-        total = (cur.fetchone() or {}).get("c", 0)
-        # Sample rows
-        cur.execute(
-            f"SELECT {', '.join(cols)} FROM {table}{where} ORDER BY 1 DESC LIMIT {limit}",
-            tuple(params),
-        )
-        rows = [dict(r) for r in cur.fetchall()]
-        conn.close()
-    except Exception as e:
-        return f"Gagal mengambil data: {e}"
-
-    # Compose text summary
-    def _trunc(v):
-        s = str(v) if v is not None else ""
-        return (s[:120] + "…") if len(s) > 120 else s
-
-    lines = [
-        f"=== Lampiran: {table} ===",
-        f"Total baris (sesuai filter): {total}",
-        f"Kolom: {', '.join(cols)}",
-        f"Sampel {min(len(rows), limit)} baris:",
-    ]
-    for r in rows:
-        pair_str = ", ".join([f"{k}={_trunc(r.get(k))}" for k in cols[:8]])
-        lines.append(f"- {pair_str}")
-    if not rows:
-        lines.append("(Tidak ada baris contoh untuk filter ini)")
-    return "\n".join(lines)
-
-def ai_build_context_pack(tables: list[str], row_cap_per_table: int = 2000, char_budget: int = 300_000) -> str:
-    """Build a large but bounded context pack containing many rows from selected tables.
-    Safeguards:
-      - Only whitelisted tables
-      - Blacklist sensitive columns
-      - Row cap per table and total char budget to respect model context limits
-    Returns a concatenated text block noting any truncation.
-    """
-    if not tables:
-        return "Tidak ada tabel dipilih."
-    # Sanitize inputs
-    try:
-        row_cap_per_table = max(1, min(int(row_cap_per_table or 2000), 50_000))
-    except Exception:
-        row_cap_per_table = 2000
-    try:
-        char_budget = max(10_000, min(int(char_budget or 300_000), 2_000_000))
-    except Exception:
-        char_budget = 300_000
-
-    parts: list[str] = []
-    total_chars = 0
-    truncated = False
-
-    def add(text: str):
-        nonlocal total_chars, truncated
-        if truncated:
-            return
-        remain = char_budget - total_chars
-        if remain <= 0:
-            truncated = True
-            return
-        chunk = text[:remain]
-        parts.append(chunk)
-        total_chars += len(chunk)
-        if len(text) > remain:
-            truncated = True
-
-    for tbl in tables:
-        if tbl not in SAFE_TABLES:
-            continue
-        cols = _get_table_columns(tbl)
-        cols = [c for c in cols if c and c not in SECRET_COLUMN_BLACKLIST]
-        if not cols:
-            add(f"\n=== {tbl} (kolom tidak tersedia) ===\n")
-            continue
-        add(f"\n=== {tbl} (max {row_cap_per_table} baris) ===\n")
-        add("|".join(cols) + "\n")
-        try:
-            conn = sqlite3.connect(DB_PATH)
-            conn.row_factory = sqlite3.Row
-            cur = conn.cursor()
-            cur.execute(f"SELECT {', '.join(cols)} FROM {tbl} ORDER BY 1 DESC LIMIT {row_cap_per_table}")
-            for r in cur.fetchall():
-                if truncated:
-                    break
-                vals = []
-                for c in cols:
-                    v = r.get(c)
-                    s = "" if v is None else str(v)
-                    # Keep line compact
-                    if len(s) > 300:
-                        s = s[:300] + "…"
-                    # Avoid newlines breaking rows
-                    s = s.replace("\n", "\\n")
-                    vals.append(s)
-                add("|".join(vals) + "\n")
-            conn.close()
-        except Exception as e:
-            add(f"(Gagal membaca {tbl}: {e})\n")
-        if truncated:
-            break
-
-    if truncated:
-        parts.append("\n[Catatan] Lampiran dipotong karena melewati anggaran konteks. Kurangi jumlah tabel/row cap atau tingkatkan anggaran.\n")
-    return "".join(parts)
-
-def ai_generate_response(prompt: str, chat_history_for_gemini: list, context_data: str = "") -> str:
-    """Call Gemini REST API to generate a response with system + memory context."""
-    api_key = get_gemini_api_key()
-    if not api_key:
-        return "API key Gemini belum dikonfigurasi di Streamlit secrets. Tambahkan [gemini].api_key atau GEMINI_API_KEY di Secrets."
-    try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
-        headers = {'Content-Type': 'application/json'}
-        system_instruction = f"""
-Anda adalah Prime AI, sebuah persona digital dari Galih Primananda yang membantu pengguna memahami aplikasi ini.
-Fokuskan jawaban pada memori dan snapshot sistem di bawah. Bila ada informasi bertentangan, anggap yang PALING BARU (paling bawah) adalah yang benar.
-
---- MEMORI & PENGETAHUAN (Kronologis) ---
-{context_data if context_data else "Belum ada memori yang tersimpan."}
-----------------------------------------
-
-Anda boleh menyimpulkan dan memberi langkah konkret. Jika tidak ada informasi yang relevan di memori, jujur katakan: "Berdasarkan memoriku, aku belum punya informasi tentang itu."
-    Tanggal hari ini: {now_wib().strftime("%A, %d %B %Y")} · Waktu: {now_wib().strftime("%H:%M WIB")}.
-"""
-        payload_contents = chat_history_for_gemini + [{"role": "user", "parts": [{"text": prompt}]}]
-        payload = {
-            "contents": payload_contents,
-            "systemInstruction": {"parts": [{"text": system_instruction}]},
-            "generationConfig": {"temperature": 0.7, "topP": 0.95},
-        }
-        resp = requests.post(url, headers=headers, data=json.dumps(payload), timeout=60)
-        resp.raise_for_status()
-        data = resp.json()
-        return data['candidates'][0]['content']['parts'][0]['text']
-    except requests.exceptions.RequestException as e:
-        return f"Maaf, terjadi masalah koneksi ke server AI: {e}"
-    except Exception:
-        try:
-            txt = resp.text  # type: ignore[name-defined]
-        except Exception:
-            txt = ""
-        return "Maaf, saya menerima respons yang tidak terduga dari server AI." + (f" Raw: {txt}" if txt else "")
-
-# -------------------------
 # Backup helpers
 # -------------------------
 def perform_backup(service, folder_id=FOLDER_ID_DEFAULT):
@@ -1409,7 +1117,6 @@ ALL_ROLES = ("Superuser", "Supervisor", "Tracer", "Agent")
 # Central menu/page configuration and allowed roles
 MENU_ITEMS = [
     {"label": "Dashboard",  "page": "Dashboard", "roles": ALL_ROLES, "primary": True},
-    {"label": "Chat AI",    "page": "Chat AI", "roles": ALL_ROLES, "primary": True},
     {"label": "Supervisor", "page": "Supervisor", "roles": ("Superuser", "Supervisor"), "primary": False},
     {"label": "Tracer",     "page": "Tracer", "roles": ("Superuser", "Supervisor", "Tracer"), "primary": False},
     {"label": "Agent",      "page": "Agent", "roles": ("Superuser", "Supervisor","Agent"), "primary": False},
@@ -2103,183 +1810,6 @@ def page_gdrive():
             "[Primetroyxs@gmail.com](mailto:Primetroyxs@gmail.com) atau WhatsApp: "
             "[+6289524257778](https://wa.me/6289524257778)"
         )
-    
-def page_chat_ai():
-    """AI Chat page with memory and system-aware context."""
-    require_roles(ALL_ROLES)
-    st.title("🤖 Chat AI")
-    st.caption("Tanya apa pun terkait sistem ini atau gunakan memori khusus.")
-
-    # Scoped CSS for Chat AI aesthetics (lightweight, page-local intent)
-    st.markdown(
-        """
-        <style>
-        /* Chat message bubble styling */
-        div[data-testid="stChatMessage"] {
-            background: #F8FAFF;
-            border: 1px solid #EEF2FF;
-            border-radius: 12px;
-            padding: 8px 12px;
-            margin: 8px 0;
-        }
-        /* Slightly different background for assistant to improve contrast */
-        div[data-testid="stChatMessage"]:has(svg[data-testid="stChatMessageAvatarIcon"]) {
-            background: #FDFDFE;
-        }
-        /* Chat input spacing (default behavior, simple spacing only) */
-        div[data-testid="stChatInput"] { margin-top: 8px; }
-
-        /* Pills */
-        .pill { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px; font-size:12px; font-weight:600; }
-        .pill-success { background:#ECFDF3; color:#027A48; border:1px solid #A6F4C5; }
-        .pill-warning { background:#FFF7ED; color:#C2410C; border:1px solid #FED7AA; }
-        .muted { color:#667085; font-size:12px; }
-
-        /* Right column subtle section spacing */
-        .section { margin-bottom: 14px; }
-        .section h3, .section h4 { margin-bottom: 6px; }
-
-        /* Scrollable chat area: only the inner chat container (without the typing box) */
-        /* Avoid styling any ancestor that also contains the input */
-        div[data-testid=\"stVerticalBlock\"]:has(.chat-scroll-marker):not(:has(div[data-testid='stChatInput'])) {
-            max-height: 1000px; /* adjust as needed */
-            overflow-y: auto;
-            padding: 6px 8px;
-            border: 1px solid #EEF2FF;
-            border-radius: 12px;
-            background: #FFFFFF;
-            scroll-behavior: smooth;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-    # (Input follows Streamlit default positioning; no JS injection needed)
-
-    # Layout: chat on left, memory and settings on right
-    left, right = st.columns([2, 1])
-
-    # Right: Memory center + AI status (no manual key input)
-    with right:
-        st.subheader("🧠 Memori")
-        with st.form("ai_mem_add_form", clear_on_submit=True):
-            new_fact = st.text_area("Tambahkan atau perbarui pengetahuan:", height=120)
-            sub = st.form_submit_button("Simpan ke Memori")
-            if sub and new_fact.strip():
-                if ai_add_knowledge(new_fact.strip()):
-                    st.success("Memori baru ditambahkan.")
-                    st.rerun()
-                else:
-                    st.error("Gagal menambahkan memori.")
-        st.markdown("")
-        st.subheader("🔐 Status Koneksi AI")
-        has_key = bool(get_gemini_api_key())
-        if has_key:
-            st.markdown("<span class='pill pill-success'>Connected</span>", unsafe_allow_html=True)
-        else:
-            st.markdown("<span class='pill pill-warning'>Not Configured</span>", unsafe_allow_html=True)
-        with st.expander("📎 Lampirkan Data dari Database (opsional)", expanded=False):
-            sel_table = st.selectbox("Pilih tabel", sorted(list(SAFE_TABLES)), key="ai_tbl_sel")
-            cols = _get_table_columns(sel_table) if sel_table else []
-            cols = [c for c in cols if c and c not in SECRET_COLUMN_BLACKLIST]
-            col1, col2 = st.columns(2)
-            with col1:
-                sel_col = st.selectbox("Filter kolom (opsional)", options=["(tanpa filter)"] + cols, index=0, key="ai_tbl_col")
-            with col2:
-                kw = st.text_input("Kata kunci contains", key="ai_tbl_kw", placeholder="misal: VA nomor / nama / status")
-            limit_n = st.number_input("Batas sampel baris", min_value=5, max_value=200, value=30, step=5, key="ai_tbl_lim")
-            col_btn1, col_btn2 = st.columns([1,1])
-            with col_btn1:
-                if st.button("Lampirkan ke konteks", key="ai_attach_btn"):
-                    summary = ai_summarize_table(
-                        sel_table,
-                        None if sel_col == "(tanpa filter)" else sel_col,
-                        kw if sel_col != "(tanpa filter)" else None,
-                        int(limit_n),
-                    )
-                    st.session_state["ai_attached_context"] = summary
-                    st.success("Lampiran siap dipakai dalam jawaban berikutnya.")
-            with col_btn2:
-                if st.button("Hapus lampiran", key="ai_clear_attach"):
-                    st.session_state.pop("ai_attached_context", None)
-                    st.info("Lampiran dihapus.")
-            preview = st.session_state.get("ai_attached_context")
-            if preview:
-                st.text_area("Preview Lampiran", value=preview, height=180, disabled=True)
-
-        # Superuser: big context pack builder (bounded by budget)
-        u = current_user() or {}
-        if u.get('role') == 'Superuser':
-            with st.expander("🛡️ Superuser: Lampirkan seluruh data (dibatasi anggaran)", expanded=False):
-                pick_tbls = st.multiselect("Pilih tabel untuk dilampirkan", sorted(list(SAFE_TABLES)), default=sorted(list(SAFE_TABLES))[:5], key="ai_pack_tbls")
-                row_cap = st.number_input("Row cap per tabel", min_value=100, max_value=50000, value=2000, step=100, key="ai_pack_rows")
-                budget = st.number_input("Anggaran karakter total", min_value=10000, max_value=2000000, value=300000, step=10000, key="ai_pack_budget")
-                if st.button("Bangun & Lampirkan Pack", use_container_width=True, key="btn_build_pack"):
-                    pack = ai_build_context_pack(pick_tbls, int(row_cap), int(budget))
-                    st.session_state["ai_attached_context"] = pack
-                    st.success("Context pack dilampirkan.")
-                preview_pack = st.session_state.get("ai_attached_context")
-                if preview_pack:
-                    st.caption(f"Ukuran lampiran: {len(preview_pack):,} karakter")
-                    st.text_area("Preview Pack", value=preview_pack[:5000] + ("\n…(dipotong)" if len(preview_pack) > 5000 else ""), height=200, disabled=True)
-
-        st.subheader("📚 Basis Pengetahuan")
-        mem = ai_get_all_knowledge()
-        st.text_area("Memori Tersimpan (kronologis):", value=(mem if mem else "Memori masih kosong."), height=260, disabled=True)
-
-    # Left: Chat UI
-    with left:
-        if "ai_messages" not in st.session_state:
-            st.session_state.ai_messages = [
-                {"role": "assistant", "content": "Halo! Saya Prime AI. Apa yang bisa saya bantu?"}
-            ]
-
-        # Wrap chat messages inside a scrollable container (bounded area)
-        chat_box = st.container()
-        with chat_box:
-            # Marker element for CSS :has() selector to apply scroll box styling
-            st.markdown("<div class='chat-scroll-marker'></div>", unsafe_allow_html=True)
-            for msg in st.session_state.ai_messages:
-                with st.chat_message(msg["role"]):
-                    st.markdown(msg["content"])
-
-        user_input = st.chat_input("Tulis pesan Anda…")
-        if user_input:
-            st.session_state.ai_messages.append({"role": "user", "content": user_input})
-            with st.chat_message("user"):
-                st.markdown(user_input)
-
-            with st.spinner("Prime AI sedang memproses…"):
-                # Build combined context: memory + system snapshot
-                try:
-                    knowledge_context = ai_get_all_knowledge()
-                except Exception:
-                    knowledge_context = ""
-                try:
-                    sys_context = ai_build_system_context()
-                except Exception:
-                    sys_context = ""
-                # Combine memory, optional attached DB summary, and live system snapshot
-                attached = st.session_state.get("ai_attached_context")
-                context_combined = (
-                    (knowledge_context or "")
-                    + ("\n\n--- Lampiran Data ---\n" + attached if attached else "")
-                    + ("\n\n--- Sistem Snapshot ---\n" + sys_context if sys_context else "")
-                )
-
-                # Map session messages to Gemini format
-                chat_history_for_api = [
-                    {"role": m["role"], "parts": [{"text": m["content"]}]} for m in st.session_state.ai_messages
-                ]
-                reply = ai_generate_response(user_input, chat_history_for_api, context_combined)
-                with st.chat_message("assistant"):
-                    st.markdown(reply)
-                st.session_state.ai_messages.append({"role": "assistant", "content": reply})
-                # Rerun to reflow layout so the typing box sits below the latest bubbles
-                try:
-                    st.rerun()
-                except Exception:
-                    pass
 
 def main():
     init_db()
@@ -2421,9 +1951,6 @@ def main():
         return
     if st.session_state.page == "Dashboard":
         page_dashboard()
-        return
-    if st.session_state.page == "Chat AI":
-        page_chat_ai()
         return
     if st.session_state.page == "Tracer":
         page_tracer()
@@ -3500,54 +3027,257 @@ def page_user_setting():
     if not user_row:
         st.error("User not found.")
         return
-    with st.form("user_setting_form"):
-        full_name = st.text_input("Full Name", value=user_row.get('full_name') or "")
-        email = st.text_input("Email", value=user_row.get('email') or "")
-        pw1 = st.text_input("New Password", type="password", key="user_pw1", placeholder="Leave blank to keep current password")
-        pw2 = st.text_input("Confirm New Password", type="password", key="user_pw2", placeholder="Leave blank to keep current password")
-        submitted = st.form_submit_button("Update Profile")
-        if submitted:
-            updates = []
-            params = []
-            changed = False
-            if full_name.strip() != (user_row.get('full_name') or ""):
-                updates.append("full_name=?")
-                params.append(full_name.strip())
-                changed = True
-            if email.strip() != (user_row.get('email') or ""):
-                updates.append("email=?")
-                params.append(email.strip())
-                changed = True
-            if pw1 or pw2:
-                if pw1 != pw2:
-                    st.error("Password and confirmation do not match.")
-                    return
-                if pw1.strip():
-                    updates.append("password_hash=?")
-                    params.append(hash_password(pw1.strip()))
+    
+    # Tabs untuk memisahkan kategori informasi
+    tabs = st.tabs(["Basic Info", "Personal Details", "Banking Info", "Certification"])
+    
+    # --- Basic Info Tab ---
+    with tabs[0]:
+        st.subheader("Basic Information")
+        with st.form("basic_info_form"):
+            full_name = st.text_input("Full Name", value=user_row.get('full_name') or "")
+            email = st.text_input("Email", value=user_row.get('email') or "")
+            work_email = st.text_input("Work Email", value=user_row.get('work_email') or "")
+            division = st.text_input("Division", value=user_row.get('division') or "", help="e.g., Collection, Recovery, Legal")
+            
+            st.markdown("**Change Password (Optional)**")
+            pw1 = st.text_input("New Password", type="password", key="user_pw1", placeholder="Leave blank to keep current")
+            pw2 = st.text_input("Confirm New Password", type="password", key="user_pw2", placeholder="Leave blank to keep current")
+            
+            submitted_basic = st.form_submit_button("Update Basic Info")
+            if submitted_basic:
+                updates = []
+                params = []
+                changed = False
+                
+                if full_name.strip() != (user_row.get('full_name') or ""):
+                    updates.append("full_name=?")
+                    params.append(full_name.strip())
                     changed = True
-            if not changed:
-                st.info("No changes to update.")
-                return
-            params.append(u.get('id'))
-            try:
-                execute(f"UPDATE users SET {', '.join(updates)} WHERE id=?", tuple(params))
-                updated_user = fetchone("SELECT * FROM users WHERE id=?", (u.get('id'),))
-                login_user(updated_user)
+                if email.strip() != (user_row.get('email') or ""):
+                    updates.append("email=?")
+                    params.append(email.strip())
+                    changed = True
+                if work_email.strip() != (user_row.get('work_email') or ""):
+                    updates.append("work_email=?")
+                    params.append(work_email.strip())
+                    changed = True
+                if division.strip() != (user_row.get('division') or ""):
+                    updates.append("division=?")
+                    params.append(division.strip())
+                    changed = True
+                
+                if pw1 or pw2:
+                    if pw1 != pw2:
+                        st.error("Password and confirmation do not match.")
+                    elif pw1.strip():
+                        updates.append("password_hash=?")
+                        params.append(hash_password(pw1.strip()))
+                        changed = True
+                
+                if not changed:
+                    st.info("No changes to update.")
+                else:
+                    params.append(u.get('id'))
+                    try:
+                        execute(f"UPDATE users SET {', '.join(updates)} WHERE id=?", tuple(params))
+                        updated_user = fetchone("SELECT * FROM users WHERE id=?", (u.get('id'),))
+                        login_user(updated_user)
+                        try:
+                            detail = f"Updated: {', '.join([s.split('=')[0] for s in updates])}"
+                            execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", 
+                                    (u.get('id'), "USER_UPDATE", detail))
+                        except Exception:
+                            pass
+                        st.success("✅ Basic information updated successfully.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to update: {e}")
+    
+    # --- Personal Details Tab ---
+    with tabs[1]:
+        st.subheader("Personal Details")
+        with st.form("personal_details_form"):
+            nik = st.text_input("NIK (Nomor Induk Kependudukan)", value=user_row.get('nik') or "", 
+                                max_chars=16, help="16 digit NIK sesuai KTP")
+            dob = st.date_input("Date of Birth", 
+                                value=datetime.strptime(user_row.get('dob'), "%Y-%m-%d").date() if user_row.get('dob') else None,
+                                min_value=date(1950, 1, 1), max_value=date.today())
+            phone_number = st.text_input("Phone Number", value=user_row.get('phone_number') or "", 
+                                         placeholder="e.g., 08123456789")
+            alamat = st.text_area("Alamat Lengkap", value=user_row.get('alamat') or "", 
+                                  height=100, help="Alamat sesuai KTP atau domisili")
+            join_date = st.date_input("Join Date", 
+                                      value=datetime.strptime(user_row.get('join_date'), "%Y-%m-%d").date() if user_row.get('join_date') else date.today(),
+                                      max_value=date.today())
+            
+            submitted_personal = st.form_submit_button("Update Personal Details")
+            if submitted_personal:
+                updates = []
+                params = []
+                
+                if nik.strip() != (user_row.get('nik') or ""):
+                    updates.append("nik=?")
+                    params.append(nik.strip())
+                if dob:
+                    dob_str = dob.isoformat()
+                    if dob_str != user_row.get('dob'):
+                        updates.append("dob=?")
+                        params.append(dob_str)
+                if phone_number.strip() != (user_row.get('phone_number') or ""):
+                    updates.append("phone_number=?")
+                    params.append(phone_number.strip())
+                if alamat.strip() != (user_row.get('alamat') or ""):
+                    updates.append("alamat=?")
+                    params.append(alamat.strip())
+                if join_date:
+                    join_str = join_date.isoformat()
+                    if join_str != user_row.get('join_date'):
+                        updates.append("join_date=?")
+                        params.append(join_str)
+                
+                if not updates:
+                    st.info("No changes to update.")
+                else:
+                    params.append(u.get('id'))
+                    try:
+                        execute(f"UPDATE users SET {', '.join(updates)} WHERE id=?", tuple(params))
+                        updated_user = fetchone("SELECT * FROM users WHERE id=?", (u.get('id'),))
+                        login_user(updated_user)
+                        try:
+                            detail = f"Updated personal details: {', '.join([s.split('=')[0] for s in updates])}"
+                            execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", 
+                                    (u.get('id'), "USER_UPDATE", detail))
+                        except Exception:
+                            pass
+                        st.success("✅ Personal details updated successfully.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to update: {e}")
+    
+    # --- Banking Info Tab ---
+    with tabs[2]:
+        st.subheader("Banking Information")
+        st.caption("Untuk keperluan payroll dan reimbursement")
+        with st.form("banking_info_form"):
+            nomor_rekening_bca = st.text_input("Nomor Rekening BCA", 
+                                               value=user_row.get('nomor_rekening_bca') or "",
+                                               help="Nomor rekening BCA untuk transfer gaji")
+            nama_rekening_bca = st.text_input("Nama Pemilik Rekening BCA", 
+                                              value=user_row.get('nama_rekening_bca') or "",
+                                              help="Nama sesuai buku rekening BCA")
+            
+            submitted_banking = st.form_submit_button("Update Banking Info")
+            if submitted_banking:
+                updates = []
+                params = []
+                
+                if nomor_rekening_bca.strip() != (user_row.get('nomor_rekening_bca') or ""):
+                    updates.append("nomor_rekening_bca=?")
+                    params.append(nomor_rekening_bca.strip())
+                if nama_rekening_bca.strip() != (user_row.get('nama_rekening_bca') or ""):
+                    updates.append("nama_rekening_bca=?")
+                    params.append(nama_rekening_bca.strip())
+                
+                if not updates:
+                    st.info("No changes to update.")
+                else:
+                    params.append(u.get('id'))
+                    try:
+                        execute(f"UPDATE users SET {', '.join(updates)} WHERE id=?", tuple(params))
+                        updated_user = fetchone("SELECT * FROM users WHERE id=?", (u.get('id'),))
+                        login_user(updated_user)
+                        try:
+                            detail = "Updated banking information"
+                            execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", 
+                                    (u.get('id'), "USER_UPDATE", detail))
+                        except Exception:
+                            pass
+                        st.success("✅ Banking information updated successfully.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to update: {e}")
+    
+    # --- Certification Tab ---
+    with tabs[3]:
+        st.subheader("Sertifikasi Penagihan")
+        st.caption("Upload sertifikasi SPPI/AFPI (opsional) - PDF atau JPG")
+        
+        # Display current certificate if exists
+        if user_row.get('sertifikasi_drive_id'):
+            st.success(f"✅ Certificate uploaded: **{user_row.get('sertifikasi_filename')}**")
+            col1, col2 = st.columns(2)
+            with col1:
+                # Download button
                 try:
-                    detail = []
-                    if 'full_name=?' in updates:
-                        detail.append(f"Name changed to '{full_name.strip()}'")
-                    if 'email=?' in updates:
-                        detail.append(f"Email changed to '{email.strip()}'")
-                    if 'password_hash=?' in updates:
-                        detail.append("Password changed")
-                    execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (u.get('id'), "USER_UPDATE", "; ".join(detail)))
-                except Exception:
-                    pass
-                st.success("Profile updated successfully.")
-            except Exception as e:
-                st.error(f"Failed to update profile: {e}")
+                    service = build_drive_service()
+                    cert_bytes = download_file_bytes(service, user_row.get('sertifikasi_drive_id'))
+                    st.download_button(
+                        label="📥 Download Certificate",
+                        data=cert_bytes,
+                        file_name=user_row.get('sertifikasi_filename'),
+                        mime="application/octet-stream"
+                    )
+                except Exception as e:
+                    st.error(f"Failed to load certificate: {e}")
+            with col2:
+                if st.button("🗑️ Remove Certificate"):
+                    try:
+                        execute("UPDATE users SET sertifikasi_drive_id=NULL, sertifikasi_filename=NULL WHERE id=?", 
+                                (u.get('id'),))
+                        updated_user = fetchone("SELECT * FROM users WHERE id=?", (u.get('id'),))
+                        login_user(updated_user)
+                        st.success("Certificate removed.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to remove: {e}")
+        else:
+            st.info("No certificate uploaded yet.")
+        
+        st.markdown("---")
+        st.markdown("**Upload New Certificate**")
+        uploaded_cert = st.file_uploader(
+            "Choose certificate file (PDF/JPG/PNG)",
+            type=["pdf", "jpg", "jpeg", "png"],
+            key="cert_uploader"
+        )
+        
+        if uploaded_cert is not None:
+            if st.button("Upload Certificate to Google Drive"):
+                try:
+                    service = build_drive_service()
+                    timestamp = now_wib().strftime("%Y%m%d_%H%M%S")
+                    original_filename = uploaded_cert.name
+                    ext = original_filename.split('.')[-1] if '.' in original_filename else 'pdf'
+                    cert_filename = f"cert_{user_row.get('login_id')}_{timestamp}.{ext}"
+                    cert_bytes = uploaded_cert.read()
+                    mimetype = uploaded_cert.type or "application/pdf"
+                    
+                    # Upload to Google Drive
+                    cert_drive_id = upload_bytes(service, FOLDER_ID_DEFAULT, cert_filename, cert_bytes, mimetype)
+                    
+                    if cert_drive_id:
+                        # Save to database
+                        execute(
+                            "UPDATE users SET sertifikasi_drive_id=?, sertifikasi_filename=? WHERE id=?",
+                            (cert_drive_id, cert_filename, u.get('id'))
+                        )
+                        updated_user = fetchone("SELECT * FROM users WHERE id=?", (u.get('id'),))
+                        login_user(updated_user)
+                        
+                        # Audit log
+                        try:
+                            execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", 
+                                    (u.get('id'), "CERT_UPLOAD", f"Uploaded: {cert_filename}"))
+                        except Exception:
+                            pass
+                        
+                        st.success(f"✅ Certificate uploaded successfully: {cert_filename}")
+                        st.rerun()
+                    else:
+                        st.error("Failed to upload certificate to Google Drive.")
+                except Exception as e:
+                    st.error(f"Upload failed: {e}")
 
 # -------------------------
 # Supervisor Page
