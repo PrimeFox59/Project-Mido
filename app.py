@@ -2843,6 +2843,27 @@ def page_agent():
                         index=0,
                     )
 
+                    st.markdown("---")
+                    st.markdown("#### Kontak Debitur (opsional untuk diperbarui)")
+                    # Prefill from supervisor_data
+                    sup_contact = fetchone(
+                        "SELECT email, REGISTERED_PHONE, Phone_Number_1 FROM supervisor_data WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=? LIMIT 1",
+                        (sel, sel, sel),
+                    ) or {}
+                    col_e1, col_e2 = st.columns(2)
+                    with col_e1:
+                        updated_email = st.text_input(
+                            "Email terupdate",
+                            value=(sup_contact.get("email") or ""),
+                            placeholder="contoh: user@mail.com",
+                        )
+                    with col_e2:
+                        wa_number = st.text_input(
+                            "Nomor WhatsApp",
+                            value=(sup_contact.get("REGISTERED_PHONE") or sup_contact.get("Phone_Number_1") or ""),
+                            placeholder="contoh: 08xxxxxxxxxx / +628xxxxxxxxxx",
+                        )
+
                     show_next = "CICIL" in (scheme or "").upper()
                     next_date = None
                     next_amount = 0.0
@@ -2877,6 +2898,34 @@ def page_agent():
                                         (u.get('id') if u else None, "AGENT_REPORT_PAYMENT", f"{sel}|{paid_amount}|{paid_date}|{scheme}")
                                     )
                                 except Exception:
+                                    pass
+
+                                # 1b) Optional: update contact info if provided
+                                try:
+                                    em = (updated_email or "").strip()
+                                    wa = (wa_number or "").strip()
+                                    if em or wa:
+                                        execute(
+                                            """
+                                            UPDATE supervisor_data
+                                            SET 
+                                                email = COALESCE(NULLIF(?, ''), email),
+                                                REGISTERED_PHONE = COALESCE(NULLIF(?, ''), REGISTERED_PHONE),
+                                                Phone_Number_1 = COALESCE(NULLIF(?, ''), Phone_Number_1)
+                                            WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=?
+                                            """,
+                                            (em, wa, wa, sel, sel, sel),
+                                        )
+                                        # Audit log contact update
+                                        try:
+                                            execute(
+                                                "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                                                (u.get('id') if u else None, "AGENT_UPDATE_CONTACT", f"{sel}|email:{em}|wa:{wa}")
+                                            )
+                                        except Exception:
+                                            pass
+                                except Exception:
+                                    # Non-blocking if contact update fails
                                     pass
 
                                 # 2) Jika cicil, buat PTP berikutnya agar tampil di My PTP
