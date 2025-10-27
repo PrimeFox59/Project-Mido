@@ -3870,8 +3870,31 @@ def page_supervisor():
                                 placeholders = ','.join(['?' for _ in field_names])
                                 saved = 0
                                 skipped = 0
+                                replaced = 0
                                 for _, row in df_full.iterrows():
                                     try:
+                                        # Replace-by-Case_ID: if Case_ID already exists, delete then insert
+                                        case_id_raw = row.get('Case_ID') if isinstance(row, dict) else None
+                                        try:
+                                            # fallback for Series
+                                            if case_id_raw is None:
+                                                case_id_raw = row['Case_ID']
+                                        except Exception:
+                                            pass
+                                        case_id = str(case_id_raw).strip() if case_id_raw is not None and str(case_id_raw).strip() != '' else None
+
+                                        if case_id:
+                                            try:
+                                                exists = (fetchone("SELECT COUNT(*) c FROM supervisor_data WHERE Case_ID=?", (case_id,)) or {}).get('c', 0)
+                                            except Exception:
+                                                exists = 0
+                                            if exists and exists > 0:
+                                                try:
+                                                    execute("DELETE FROM supervisor_data WHERE Case_ID=?", (case_id,))
+                                                except Exception:
+                                                    pass
+                                                replaced += 1
+
                                         vals = [_to_sql_value(row.get(f)) for f in field_names]
                                         execute(
                                             f"INSERT INTO supervisor_data ({','.join(field_names)}) VALUES ({placeholders})",
@@ -3881,19 +3904,19 @@ def page_supervisor():
                                     except Exception as e:
                                         skipped += 1
                                 # Simpan pesan hasil agar tampil sekali setelah rerun
-                                st.session_state['sup_upload_result'] = f"Upload selesai. Disimpan: {saved:,}. Dilewati: {skipped:,}."
+                                st.session_state['sup_upload_result'] = f"Upload selesai. Disimpan baru: {saved:,}. Replace: {replaced:,}. Dilewati: {skipped:,}."
                                 # Audit log
                                 u = current_user() or {}
                                 try:
                                     execute(
                                         "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
-                                        (u.get('id') if u else None, "UPLOAD_SUPERVISOR", f"Uploaded supervisor data: {saved} rows from '{uploaded.name}' (skipped: {skipped})")
+                                        (u.get('id') if u else None, "UPLOAD_SUPERVISOR", f"Uploaded supervisor data: new {saved}, replaced {replaced}, skipped {skipped} from '{uploaded.name}'")
                                     )
                                 except Exception:
                                     pass
                                 # Immediate user feedback before rerun
                                 try:
-                                    st.toast(f"Upload berhasil: disimpan {saved:,}, dilewati {skipped:,}.", icon="✅")
+                                    st.toast(f"Upload berhasil: baru {saved:,}, replace {replaced:,}, dilewati {skipped:,}.", icon="✅")
                                 except Exception:
                                     pass
                                 # Clear uploader to prevent re-upload on rerun
