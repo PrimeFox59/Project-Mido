@@ -516,7 +516,7 @@ def init_db():
                             with col1:
                                 amount = st.number_input("Paid Amount", min_value=0.0, step=10000.0)
                             with col2:
-                                paid_date = st.date_input("Paid Date", value=date.today())
+                                paid_date = st.date_input("Paid Date", value=today_wib())
                             status = st.text_input("Status (opsional)", value="PAID")
                             ref = st.text_input("Referensi (opsional)", placeholder="mis. link WA, catatan singkat")
                             submit_p = st.form_submit_button("Simpan Payment")
@@ -543,7 +543,7 @@ def init_db():
                             with col1:
                                 ptp_amount = st.number_input("PTP Amount", min_value=0.0, step=10000.0)
                             with col2:
-                                ptp_date = st.date_input("PTP Date", value=date.today())
+                                ptp_date = st.date_input("PTP Date", value=today_wib())
                             notes = st.text_area("Catatan (opsional)")
                             submit_t = st.form_submit_button("Simpan PTP")
                             if submit_t:
@@ -826,6 +826,19 @@ def get_project_capacity_bytes(default_bytes: int = 2 * 1024 * 1024 * 1024) -> i
         return int(val)
     except Exception:
         return int(default_bytes)
+
+# Timezone helpers (WIB = GMT+07:00)
+def now_wib() -> datetime:
+    """Return current time in GMT+7 (WIB) as a naive datetime for app display/logic."""
+    try:
+        return datetime.utcnow() + timedelta(hours=7)
+    except Exception:
+        # Fallback to server local time if UTC unavailable
+        return datetime.now()
+
+def today_wib() -> date:
+    """Return today's date in WIB timezone."""
+    return now_wib().date()
 
 # -------------------------
 # Freeze helpers
@@ -1149,7 +1162,7 @@ Fokuskan jawaban pada memori dan snapshot sistem di bawah. Bila ada informasi be
 ----------------------------------------
 
 Anda boleh menyimpulkan dan memberi langkah konkret. Jika tidak ada informasi yang relevan di memori, jujur katakan: "Berdasarkan memoriku, aku belum punya informasi tentang itu."
-Tanggal hari ini: {datetime.now().strftime("%A, %d %B %Y")} · Waktu: {datetime.now().strftime("%H:%M WIB")}.
+    Tanggal hari ini: {now_wib().strftime("%A, %d %B %Y")} · Waktu: {now_wib().strftime("%H:%M WIB")}.
 """
         payload_contents = chat_history_for_gemini + [{"role": "user", "parts": [{"text": prompt}]}]
         payload = {
@@ -1227,7 +1240,7 @@ def auto_daily_backup(service, folder_id=FOLDER_ID_DEFAULT):
     """Run once per session start (post-login). If last SUCCESS backup is not today -> perform one."""
     # Cek backup sukses terakhir
     row = fetchone("SELECT backup_time FROM backup_log WHERE status='SUCCESS' ORDER BY id DESC LIMIT 1")
-    today_str = date.today().isoformat()
+    today_str = today_wib().isoformat()
     if row:
         try:
             last_date = row['backup_time'][:10]
@@ -1313,12 +1326,12 @@ def check_scheduled_backup(service, folder_id=FOLDER_ID_DEFAULT):
         return False, 'Scheduled backup disabled'
     base_name = get_setting('scheduled_backup_filename', 'scheduled_backup.sqlite') or 'scheduled_backup.sqlite'
     # Determine local time (assume server already GMT+7 or adjust here if needed)
-    now_local = datetime.now()  # If server timezone != GMT+7 -> adjust with timedelta(hours=offset)
+    now_local = now_wib()  # Use WIB regardless of server timezone
     slot = determine_slot(now_local)
     if slot == 'slot_unknown':
         return False, 'Outside defined slots'
     last_slot_done = get_setting('scheduled_backup_last_slot')
-    today_tag = date.today().isoformat()
+    today_tag = today_wib().isoformat()
     last_slot_date = get_setting('scheduled_backup_last_date')
     composite_last = f"{last_slot_date}:{last_slot_done}" if last_slot_done and last_slot_date else None
     composite_now = f"{today_tag}:{slot}"
@@ -2706,7 +2719,7 @@ def page_agent():
     agent_name = (u.get('full_name') or u.get('login_id') or '-') if u else '-'
     st.title("Agent Menu")
     # Simple PTP notif today
-    today_str = date.today().isoformat()
+    today_str = today_wib().isoformat()
     ptp_today = fetchone("SELECT COUNT(*) c FROM agent_results WHERE agent=? AND DATE(agent_ptp_date)=?", (agent_name, today_str))
     count_ptp = ptp_today.get('c') if ptp_today else 0
     if count_ptp and count_ptp > 0:
@@ -2814,7 +2827,7 @@ def page_agent():
                 with st.form("agent_report_payment_ptp"):
                     c1, c2 = st.columns(2)
                     with c1:
-                        paid_date = st.date_input("Tanggal Pembayaran", value=date.today())
+                        paid_date = st.date_input("Tanggal Pembayaran", value=today_wib())
                     with c2:
                         paid_amount = st.number_input("Nominal Pembayaran", min_value=0.0, step=10000.0)
                     scheme = st.selectbox(
@@ -2837,7 +2850,7 @@ def page_agent():
                         st.markdown("#### Rencana Pembayaran Berikutnya")
                         n1, n2 = st.columns(2)
                         with n1:
-                            next_date = st.date_input("Tanggal (berikutnya)", value=date.today())
+                            next_date = st.date_input("Tanggal (berikutnya)", value=today_wib())
                         with n2:
                             next_amount = st.number_input("Nominal (berikutnya)", min_value=0.0, step=10000.0)
 
@@ -3021,7 +3034,7 @@ def page_agent():
     # --- Monthly Payment Recap tab ---
     with tabs[2]:
         st.subheader("Monthly Payment Recap")
-        start_of_month = date.today().replace(day=1)
+        start_of_month = today_wib().replace(day=1)
         rec = fetchall(
             """
             SELECT p.Agreement_No as Case_ID, p.paid_amount, p.paid_date, p.status
@@ -3091,7 +3104,7 @@ def page_dashboard():
         or user_obj.get("email")
         or "Pengguna"
     )
-    hour = datetime.now().hour
+    hour = now_wib().hour
     if 4 <= hour < 10:
         greet = "Selamat pagi"
     elif 10 <= hour < 15:
@@ -3103,7 +3116,7 @@ def page_dashboard():
     st.markdown(f"<h2 style='margin-bottom:0'>Halo, {greet} {name}</h2>", unsafe_allow_html=True)
 
     # -------- KPI calculations --------
-    today = date.today()
+    today = today_wib()
     start_of_week = today - timedelta(days=today.weekday())
     start_of_month = today.replace(day=1)
     last_month_end = start_of_month - timedelta(days=1)
@@ -3871,7 +3884,7 @@ def page_supervisor():
                 prefix = (name or '').split(' ')[0][:3].upper() or 'TRC'
             except Exception:
                 prefix = 'TRC'
-            return f"TRC-{datetime.now().strftime('%y%m%d')}-{prefix}"
+            return f"TRC-{now_wib().strftime('%y%m%d')}-{prefix}"
 
         # Process single assign
         if btn_assign_single:
@@ -4065,7 +4078,7 @@ def page_supervisor():
                                     suffix = first[:3].upper()
                                 except Exception:
                                     suffix = "XXX"
-                                ymd = datetime.now().strftime('%y%m%d')
+                                ymd = now_wib().strftime('%y%m%d')
                                 return f"TRC-{ymd}-{suffix}"
                             updates_trc = [(_gen_trc_code(assignee), rec_id) for assignee, rec_id in updates]
                             cur.executemany(
