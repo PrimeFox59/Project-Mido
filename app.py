@@ -2815,19 +2815,19 @@ def page_agent():
         else:
             st.info("Centang satu baris untuk melihat detail kasus.")
 
-        # Inline sub-tabs for the selected case actions
-        sub_tabs = st.tabs(["Report Payment/PTP", "Update Data", "Internal Memo"]) 
+    # Inline sub-tabs for the selected case actions
+    sub_tabs = st.tabs(["Update Data", "Report Payment/PTP", "Internal Memo"]) 
 
-        # --- Report Payment/PTP sub-tab ---
-        with sub_tabs[0]:
-            if not sel:
-                st.info("Pilih Case ID pada tabel di atas terlebih dahulu.")
-            else:
-                st.subheader("Report Payment/PTP")
-                with st.form("agent_report_payment_ptp"):
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        paid_date = st.date_input("Tanggal Pembayaran", value=today_wib())
+    # --- Report Payment/PTP sub-tab ---
+    with sub_tabs[0]:
+        if not sel:
+            st.info("Pilih Case ID pada tabel di atas terlebih dahulu.")
+        else:
+            st.subheader("Report Payment/PTP")
+            with st.form("agent_report_payment_ptp"):
+                c1, c2 = st.columns(2)
+                with c1:
+                    paid_date = st.date_input("Tanggal Pembayaran", value=today_wib())
                     with c2:
                         paid_amount = st.number_input("Nominal Pembayaran", min_value=0.0, step=10000.0)
                     scheme = st.selectbox(
@@ -2842,7 +2842,7 @@ def page_agent():
                         ],
                         index=0,
                     )
-
+    
                     st.markdown("---")
                     st.markdown("#### Kontak Debitur (opsional untuk diperbarui)")
                     # Prefill from supervisor_data
