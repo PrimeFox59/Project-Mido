@@ -2596,92 +2596,92 @@ def page_agent():
                 st.markdown(f"[Click to call]({'tel:'+str(phone)})  |  [SIP]({'sip:'+str(phone)})")
         else:
             st.info("Centang satu baris untuk melihat detail kasus.")
-
-    # Inline sub-tabs for the selected case actions
-    # Conditional tabs: tambahkan "Cicilan Approval" jika Supervisor
-    if user_role in ("Superuser", "Supervisor"):
-        sub_tabs = st.tabs(["Update Data", "Report Payment/PTP", "Internal Memo", "Cicilan Approval"])
-    else:
-        sub_tabs = st.tabs(["Update Data", "Report Payment/PTP", "Internal Memo"]) 
-
-    # --- Report Payment/PTP sub-tab ---
-    with sub_tabs[0]:
-        if not sel:
-            st.info("Pilih Case ID pada tabel di atas terlebih dahulu.")
-        else:
-            st.subheader("Update Data untuk Supervisor (Agent fields)")
-            st.caption("Kolom-kolom ini berasal dari data upload supervisor dan diupdate oleh Agent.")
-            sup_agent = fetchone(
-                "SELECT id, STATUS, REGISTERED_PHONE, Additional_Contacts, Remarks_Suggested_NIK_Prospect, Payment, Paid_Off_Status, Paid_Off "
-                "FROM supervisor_data WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=? ORDER BY id DESC LIMIT 1",
-                (sel, sel, sel)
-            ) or {}
-            with st.form("agent_update_supervisor_fields"):
-                csa, csb = st.columns(2)
-                with csa:
-                    # Agent status codes (requested)
-                    _status_options = [
-                        "PTP",  # O1001
-                        "DIS",  # O1002
-                        "CMP",  # O1003
-                        "PAD",  # O1004
-                        "HUP",  # O1005
-                        "WCN",  # O1006
-                        "TPM",  # O1007
-                        "TPC",  # O1008
-                        "RNA",  # O1009
-                        "PHO",  # O1010
-                        "NIS",  # O1011
-                        "INS",  # O1012
-                    ]
-                    v_status = st.selectbox(
-                        "STATUS",
-                        _status_options,
-                        index=(_status_options.index(sup_agent.get('STATUS','')) if sup_agent.get('STATUS','') in _status_options else 0),
-                        help="Status terkini dari case ini"
-                    )
-                    
-                    # Paid Off dropdown
-                    current_paid_off = sup_agent.get('Paid_Off', 'No') or 'No'
-                    v_paid_off = st.selectbox(
-                        "Paid Off",
-                        options=["No", "Yes"],
-                        index=0 if current_paid_off.upper() != 'YES' else 1,
-                        help="Apakah pinjaman sudah lunas?"
-                    )
-                    
-                    v_reg_phone = st.text_input("REGISTERED PHONE", value=sup_agent.get('REGISTERED_PHONE','') or "")
-                with csb:
-                    v_add_contacts = st.text_area("Remarks", value=sup_agent.get('Additional_Contacts','') or "", height=80)
-                    v_remarks = st.text_area("Suggested NIK", value=sup_agent.get('Remarks_Suggested_NIK_Prospect','') or "", height=80)
-                submit_sup = st.form_submit_button("Simpan ke supervisor_data")
-                if submit_sup:
-                    try:
-                        if sup_agent.get('id') is not None:
-                            execute(
-                                "UPDATE supervisor_data SET STATUS=?, Paid_Off=?, REGISTERED_PHONE=?, Additional_Contacts=?, Remarks_Suggested_NIK_Prospect=? WHERE id=?",
-                                (v_status.strip(), v_paid_off, v_reg_phone.strip(), v_add_contacts.strip(), v_remarks.strip(), sup_agent.get('id'))
-                            )
-                        else:
-                            execute(
-                                "UPDATE supervisor_data SET STATUS=?, Paid_Off=?, REGISTERED_PHONE=?, Additional_Contacts=?, Remarks_Suggested_NIK_Prospect=? WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=?",
-                                (v_status.strip(), v_paid_off, v_reg_phone.strip(), v_add_contacts.strip(), v_remarks.strip(), sel, sel, sel)
-                            )
-                        try:
-                            u = current_user() or {}
-                            execute(
-                                "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
-                                (u.get('id') if u else None, "AGENT_UPDATE_SUP_FIELDS", f"{sel} -> STATUS='{v_status}' PAID_OFF='{v_paid_off}' REG_PHONE='{v_reg_phone}'")
-                            )
-                        except Exception:
-                            pass
-                        st.success("Data supervisor berhasil diperbarui.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Gagal memperbarui data supervisor: {e}")
         
+        # Inline sub-tabs for the selected case actions (di dalam tab Cases)
+        st.markdown("---")
+        # Conditional tabs: tambahkan "Cicilan Approval" jika Supervisor
+        if user_role in ("Superuser", "Supervisor"):
+            sub_tabs = st.tabs(["Update Data", "Report Payment/PTP", "Internal Memo", "Cicilan Approval"])
+        else:
+            sub_tabs = st.tabs(["Update Data", "Report Payment/PTP", "Internal Memo"]) 
 
         # --- Update Data sub-tab ---
+        with sub_tabs[0]:
+            if not sel:
+                st.info("Pilih Case ID pada tabel di atas terlebih dahulu.")
+            else:
+                st.subheader("Update Data untuk Supervisor (Agent fields)")
+                st.caption("Kolom-kolom ini berasal dari data upload supervisor dan diupdate oleh Agent.")
+                sup_agent = fetchone(
+                    "SELECT id, STATUS, REGISTERED_PHONE, Additional_Contacts, Remarks_Suggested_NIK_Prospect, Payment, Paid_Off_Status, Paid_Off "
+                    "FROM supervisor_data WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=? ORDER BY id DESC LIMIT 1",
+                    (sel, sel, sel)
+                ) or {}
+                with st.form("agent_update_supervisor_fields"):
+                    csa, csb = st.columns(2)
+                    with csa:
+                        # Agent status codes (requested)
+                        _status_options = [
+                            "PTP",  # O1001
+                            "DIS",  # O1002
+                            "CMP",  # O1003
+                            "PAD",  # O1004
+                            "HUP",  # O1005
+                            "WCN",  # O1006
+                            "TPM",  # O1007
+                            "TPC",  # O1008
+                            "RNA",  # O1009
+                            "PHO",  # O1010
+                            "NIS",  # O1011
+                            "INS",  # O1012
+                        ]
+                        v_status = st.selectbox(
+                            "STATUS",
+                            _status_options,
+                            index=(_status_options.index(sup_agent.get('STATUS','')) if sup_agent.get('STATUS','') in _status_options else 0),
+                            help="Status terkini dari case ini"
+                        )
+                        
+                        # Paid Off dropdown
+                        current_paid_off = sup_agent.get('Paid_Off', 'No') or 'No'
+                        v_paid_off = st.selectbox(
+                            "Paid Off",
+                            options=["No", "Yes"],
+                            index=0 if current_paid_off.upper() != 'YES' else 1,
+                            help="Apakah pinjaman sudah lunas?"
+                        )
+                        
+                        v_reg_phone = st.text_input("REGISTERED PHONE", value=sup_agent.get('REGISTERED_PHONE','') or "")
+                    with csb:
+                        v_add_contacts = st.text_area("Remarks", value=sup_agent.get('Additional_Contacts','') or "", height=80)
+                        v_remarks = st.text_area("Suggested NIK", value=sup_agent.get('Remarks_Suggested_NIK_Prospect','') or "", height=80)
+                    submit_sup = st.form_submit_button("Simpan ke supervisor_data")
+                    if submit_sup:
+                        try:
+                            if sup_agent.get('id') is not None:
+                                execute(
+                                    "UPDATE supervisor_data SET STATUS=?, Paid_Off=?, REGISTERED_PHONE=?, Additional_Contacts=?, Remarks_Suggested_NIK_Prospect=? WHERE id=?",
+                                    (v_status.strip(), v_paid_off, v_reg_phone.strip(), v_add_contacts.strip(), v_remarks.strip(), sup_agent.get('id'))
+                                )
+                            else:
+                                execute(
+                                    "UPDATE supervisor_data SET STATUS=?, Paid_Off=?, REGISTERED_PHONE=?, Additional_Contacts=?, Remarks_Suggested_NIK_Prospect=? WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=?",
+                                    (v_status.strip(), v_paid_off, v_reg_phone.strip(), v_add_contacts.strip(), v_remarks.strip(), sel, sel, sel)
+                                )
+                            try:
+                                u = current_user() or {}
+                                execute(
+                                    "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                                    (u.get('id') if u else None, "AGENT_UPDATE_SUP_FIELDS", f"{sel} -> STATUS='{v_status}' PAID_OFF='{v_paid_off}' REG_PHONE='{v_reg_phone}'")
+                                )
+                            except Exception:
+                                pass
+                            st.success("Data supervisor berhasil diperbarui.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Gagal memperbarui data supervisor: {e}")
+
+        # --- Report Payment/PTP sub-tab ---
         with sub_tabs[1]:
             if not sel:
                 st.info("Pilih Case ID pada tabel di atas terlebih dahulu.")
@@ -3204,7 +3204,6 @@ def page_agent():
                                 
                                 with col3:
                                     st.caption("Klik APPROVE untuk menyetujui atau REJECT untuk menolak pengajuan cicilan")
-
 
     # --- My PTP tab ---
     with tabs[1]:
