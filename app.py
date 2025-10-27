@@ -2862,6 +2862,17 @@ def page_agent():
                             try:
                                 outstanding = float(row['Principle_Outstanding'] or 0)
                                 st.write(f"**Outstanding:** Rp {outstanding:,.0f}")
+                                
+                                # Hitung sisa outstanding jika cicilan di-approve
+                                if row.get('Jumlah_Cicilan') and row['Approval_Status'] == 'pending':
+                                    try:
+                                        cicilan = float(row['Jumlah_Cicilan'])
+                                        sisa_outstanding = max(0, outstanding - cicilan)
+                                        st.caption(f"💡 Sisa setelah approve: Rp {sisa_outstanding:,.0f}")
+                                    except:
+                                        pass
+                                elif row['Approval_Status'] == 'approved':
+                                    st.caption(f"✅ Outstanding telah dikurangi")
                             except:
                                 st.write(f"**Outstanding:** {row['Principle_Outstanding']}")
                             
@@ -2883,6 +2894,7 @@ def page_agent():
                             with col1:
                                 if st.button("✅ APPROVE", key=f"approve_{row['Case_ID']}", type="primary", use_container_width=True):
                                     try:
+                                        # Update approval status
                                         execute("""
                                             UPDATE agent_results 
                                             SET approval_status = 'approved',
@@ -2891,13 +2903,42 @@ def page_agent():
                                             WHERE Agreement_No = ?
                                         """, (agent_name, row['Case_ID']))
                                         
-                                        # Log audit
+                                        # PENTING: Kurangi Principle_Outstanding di supervisor_data
+                                        # Ambil jumlah pembayaran yang di-approve
+                                        ptp_amount = row.get('Jumlah_Cicilan', 0) or 0
+                                        try:
+                                            ptp_amount = float(ptp_amount)
+                                        except (ValueError, TypeError):
+                                            ptp_amount = 0
+                                        
+                                        if ptp_amount > 0:
+                                            # Kurangi Principle_Outstanding
+                                            execute("""
+                                                UPDATE supervisor_data
+                                                SET Principle_Outstanding = CAST(
+                                                    CASE 
+                                                        WHEN CAST(IFNULL(Principle_Outstanding, '0') AS REAL) - ? < 0 
+                                                        THEN 0 
+                                                        ELSE CAST(IFNULL(Principle_Outstanding, '0') AS REAL) - ?
+                                                    END AS TEXT
+                                                )
+                                                WHERE Case_ID = ?
+                                            """, (ptp_amount, ptp_amount, row['Case_ID']))
+                                            
+                                            # Log perubahan Principle_Outstanding
+                                            execute("""
+                                                INSERT INTO audit_logs (user_id, action, details)
+                                                VALUES (?, 'REDUCE_OUTSTANDING', ?)
+                                            """, (u.get('id'), 
+                                                  f"Reduced Principle_Outstanding for {row['Case_ID']} by {ptp_amount:,.0f}"))
+                                        
+                                        # Log audit approval
                                         execute("""
                                             INSERT INTO audit_logs (user_id, action, details)
                                             VALUES (?, 'APPROVE_CICILAN', ?)
-                                        """, (u.get('id'), f"Approved {row['Case_ID']} - {row['Status_Cicilan']}"))
+                                        """, (u.get('id'), f"Approved {row['Case_ID']} - {row['Status_Cicilan']} - Amount: {ptp_amount:,.0f}"))
                                         
-                                        st.success("✅ Cicilan berhasil di-approve!")
+                                        st.success(f"✅ Cicilan berhasil di-approve! Principle_Outstanding dikurangi: {ptp_amount:,.0f}")
                                         st.rerun()
                                     except Exception as e:
                                         st.error(f"❌ Gagal approve: {e}")
@@ -5550,7 +5591,29 @@ def page_guide():
     - Setelah tracer mengonfirmasi debitur, supervisor dapat menugaskan Case_ID ke agent (tabel `agent_assignments`).
     - Agent login melihat penugasan di menu **Agent**.
     - Agent melaporkan hasil ke `agent_results` dengan field: `Case_ID`, `agent_status` (PTP/Paid/Refused), `agent_ptp_amount`, `agent_ptp_date`, `agent_notes`.
-    - Jika pembayaran terjadi, supervisor bisa menambahkan bukti ke tabel `payments` (`Case_ID`, `paid_amount`, `paid_date`, `status`, `source_file`, `uploaded_by`).
+    - **Status Cicilan:** Agent dapat melaporkan pembayaran cicilan dengan status:
+      - `CICIL OS` - Cicilan Outstanding
+      - `CICIL LUNDIS` - Cicilan Lunas Dicicil
+      - `CICIL POKOK` - Cicilan Pokok
+    - **Approval Workflow:** Semua pengajuan cicilan harus di-approve oleh Supervisor sebelum mengurangi outstanding.
+    - **Auto-reduce Outstanding:** Saat Supervisor approve pembayaran, sistem otomatis mengurangi `Principle_Outstanding` di `supervisor_data`.
+    - Formula: `New Outstanding = MAX(0, Current Outstanding - Payment Amount)`
+    """, unsafe_allow_html=True)
+    
+    st.header("3.1) Cicilan Approval Process (Supervisor)")
+    st.markdown("""
+    - Menu: **Agent → Cicilan Approval Tab** (khusus Supervisor/Superuser)
+    - Supervisor melihat semua pengajuan cicilan dengan status: Pending / Approved / Rejected
+    - Detail yang ditampilkan:
+      - Case ID, Customer Name, Agent
+      - Status Cicilan (CICIL OS/LUNDIS/POKOK)
+      - Outstanding saat ini
+      - Jumlah Cicilan yang diajukan
+      - **Preview:** Sisa Outstanding setelah approve
+    - **Action:**
+      - ✅ APPROVE: Update status + Kurangi Principle_Outstanding + Audit log
+      - ❌ REJECT: Update status saja (Outstanding tidak berubah)
+    - **Audit Trail:** Semua approval/reject dicatat di `audit_logs` dengan detail amount dan Case ID
     """, unsafe_allow_html=True)
 
     st.header("4) Monitoring & Analytics")
