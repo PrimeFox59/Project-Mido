@@ -3128,7 +3128,7 @@ def page_agent():
                         border: 1px solid #e2e8f0;
                         border-radius: 16px;
                         padding: 12px;
-                        margin: 0;
+                        margin: 0 0 16px 0;
                     }
                     .chatbox { 
                         background: #ffffff;
@@ -3218,17 +3218,16 @@ def page_agent():
                 ) or []
                 recent = list(reversed(recent))  # oldest at top
 
-                # Render chat messages
-                st.markdown('<div class="memo-container"><div class="chatbox">', unsafe_allow_html=True)
+                # Build complete HTML in one block
+                chat_html = '<div class="memo-container"><div class="chatbox">'
                 
                 if not recent:
-                    st.markdown(
-                        '<div class="empty-state">'
-                        '<div class="empty-state-icon">💬</div>'
-                        '<div style="font-size:14px;">Belum ada memo untuk case ini</div>'
-                        '</div>',
-                        unsafe_allow_html=True
-                    )
+                    chat_html += '''
+                        <div class="empty-state">
+                            <div class="empty-state-icon">💬</div>
+                            <div style="font-size:14px;">Belum ada memo untuk case ini</div>
+                        </div>
+                    '''
                 else:
                     for r in recent:
                         author_role = (r.get('author_role') or '').strip()
@@ -3238,9 +3237,8 @@ def page_agent():
                         mine = (author_role == 'Agent' and author_name == agent_name)
                         side = 'right' if mine else 'left'
                         name = 'Saya' if mine else (author_name or author_role or 'Supervisor')
-                        # Escape HTML special chars in message
                         safe_msg = msg.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('\n','<br/>')
-                        html = f"""
+                        chat_html += f"""
                             <div class='msg {side}'>
                                 <div class='bubble'>
                                     <div class='name'>{name}</div>
@@ -3249,9 +3247,9 @@ def page_agent():
                                 </div>
                             </div>
                         """
-                        st.markdown(html, unsafe_allow_html=True)
                 
-                st.markdown('</div></div>', unsafe_allow_html=True)
+                chat_html += '</div></div>'
+                st.markdown(chat_html, unsafe_allow_html=True)
 
                 # Input send box with better UX
                 with st.form("agent_internal_memo_chat"):
@@ -5143,7 +5141,7 @@ def page_tracer():
                     border: 1px solid #e2e8f0;
                     border-radius: 16px;
                     padding: 12px;
-                    margin: 0;
+                    margin: 0 0 16px 0;
                 }
                 .chatbox { 
                     background: #ffffff;
@@ -5232,16 +5230,16 @@ def page_tracer():
             ) or []
             recent = list(reversed(recent))
 
-            st.markdown('<div class="memo-container"><div class="chatbox">', unsafe_allow_html=True)
+            # Build complete HTML in one block
+            chat_html = '<div class="memo-container"><div class="chatbox">'
             
             if not recent:
-                st.markdown(
-                    '<div class="empty-state">'
-                    '<div class="empty-state-icon">💬</div>'
-                    '<div style="font-size:14px;">Belum ada memo untuk case ini</div>'
-                    '</div>',
-                    unsafe_allow_html=True
-                )
+                chat_html += '''
+                    <div class="empty-state">
+                        <div class="empty-state-icon">💬</div>
+                        <div style="font-size:14px;">Belum ada memo untuk case ini</div>
+                    </div>
+                '''
             else:
                 for r in recent:
                     author_role = (r.get('author_role') or '').strip()
@@ -5252,7 +5250,7 @@ def page_tracer():
                     side = 'right' if mine else 'left'
                     name = 'Saya' if mine else (author_name or author_role or 'Supervisor')
                     safe_msg = msg.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('\n','<br/>')
-                    html = f"""
+                    chat_html += f"""
                         <div class='msg {side}'>
                             <div class='bubble'>
                                 <div class='name'>{name}</div>
@@ -5261,9 +5259,9 @@ def page_tracer():
                             </div>
                         </div>
                     """
-                    st.markdown(html, unsafe_allow_html=True)
             
-            st.markdown('</div></div>', unsafe_allow_html=True)
+            chat_html += '</div></div>'
+            st.markdown(chat_html, unsafe_allow_html=True)
 
             # Send message form
             with st.form("tracer_internal_memo_chat"):
