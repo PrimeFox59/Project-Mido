@@ -3119,41 +3119,10 @@ def page_agent():
             if not sel:
                 st.info("Pilih Case ID pada tabel di atas terlebih dahulu.")
             else:
-                # Enhanced Chat-like CSS with unique identifiers
+                # Enhanced Chat-like CSS (no container, direct render)
                 st.markdown(
                     """
                     <style>
-                    .agent-memo-container {
-                        background: linear-gradient(to bottom, #f8fafc 0%, #ffffff 100%);
-                        border: 1px solid #e2e8f0;
-                        border-radius: 16px;
-                        padding: 12px;
-                        margin: 0 0 16px 0;
-                    }
-                    .agent-chatbox { 
-                        background: #ffffff;
-                        border: 1px solid #e5e7eb;
-                        border-radius: 12px;
-                        padding: 12px;
-                        height: 400px;
-                        overflow-y: auto;
-                        box-shadow: inset 0 2px 4px rgba(0,0,0,0.03);
-                        margin: 0;
-                    }
-                    .agent-chatbox::-webkit-scrollbar {
-                        width: 8px;
-                    }
-                    .agent-chatbox::-webkit-scrollbar-track {
-                        background: #f1f5f9;
-                        border-radius: 4px;
-                    }
-                    .agent-chatbox::-webkit-scrollbar-thumb {
-                        background: #cbd5e1;
-                        border-radius: 4px;
-                    }
-                    .agent-chatbox::-webkit-scrollbar-thumb:hover {
-                        background: #94a3b8;
-                    }
                     .agent-msg { 
                         display: flex;
                         margin: 10px 0;
@@ -3197,15 +3166,6 @@ def page_agent():
                         color: #0f172a;
                         letter-spacing: 0.3px;
                     }
-                    .agent-empty-state {
-                        text-align: center;
-                        padding: 40px 20px;
-                        color: #94a3b8;
-                    }
-                    .agent-empty-icon {
-                        font-size: 36px;
-                        margin-bottom: 12px;
-                    }
                     </style>
                     """,
                     unsafe_allow_html=True,
@@ -3218,16 +3178,10 @@ def page_agent():
                 ) or []
                 recent = list(reversed(recent))  # oldest at top
 
-                # Build complete HTML document
+                # Render messages directly without container
                 if not recent:
-                    chat_content = '''
-                        <div class="agent-empty-state">
-                            <div class="agent-empty-icon">💬</div>
-                            <div style="font-size:14px;">Belum ada memo untuk case ini</div>
-                        </div>
-                    '''
+                    st.info("💬 Belum ada memo untuk case ini")
                 else:
-                    messages = []
                     for r in recent:
                         author_role = (r.get('author_role') or '').strip()
                         author_name = (r.get('author_name') or '').strip()
@@ -3237,7 +3191,8 @@ def page_agent():
                         side = 'right' if mine else 'left'
                         name = 'Saya' if mine else (author_name or author_role or 'Supervisor')
                         safe_msg = msg.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('\n','<br/>')
-                        messages.append(f"""
+                        
+                        st.markdown(f"""
                             <div class='agent-msg {side}'>
                                 <div class='agent-bubble'>
                                     <div class='agent-name'>{name}</div>
@@ -3245,11 +3200,7 @@ def page_agent():
                                     <div class='agent-meta'>{ts}</div>
                                 </div>
                             </div>
-                        """)
-                    chat_content = ''.join(messages)
-                
-                chat_html = f'<div class="agent-memo-container"><div class="agent-chatbox">{chat_content}</div></div>'
-                st.markdown(chat_html, unsafe_allow_html=True)
+                        """, unsafe_allow_html=True)
 
                 # Input send box with better UX
                 with st.form("agent_internal_memo_chat"):
@@ -5132,41 +5083,10 @@ def page_tracer():
         if not ag_no:
             st.info("Pilih case untuk melihat memo internal.")
         else:
-            # Enhanced Chat-like CSS with unique identifiers
+            # Enhanced Chat-like CSS (no container, direct render)
             st.markdown(
                 """
                 <style>
-                .tracer-memo-container {
-                    background: linear-gradient(to bottom, #f8fafc 0%, #ffffff 100%);
-                    border: 1px solid #e2e8f0;
-                    border-radius: 16px;
-                    padding: 12px;
-                    margin: 0 0 16px 0;
-                }
-                .tracer-chatbox { 
-                    background: #ffffff;
-                    border: 1px solid #e5e7eb;
-                    border-radius: 12px;
-                    padding: 12px;
-                    height: 400px;
-                    overflow-y: auto;
-                    box-shadow: inset 0 2px 4px rgba(0,0,0,0.03);
-                    margin: 0;
-                }
-                .tracer-chatbox::-webkit-scrollbar {
-                    width: 8px;
-                }
-                .tracer-chatbox::-webkit-scrollbar-track {
-                    background: #f1f5f9;
-                    border-radius: 4px;
-                }
-                .tracer-chatbox::-webkit-scrollbar-thumb {
-                    background: #cbd5e1;
-                    border-radius: 4px;
-                }
-                .tracer-chatbox::-webkit-scrollbar-thumb:hover {
-                    background: #94a3b8;
-                }
                 .tracer-msg { 
                     display: flex;
                     margin: 10px 0;
@@ -5210,15 +5130,6 @@ def page_tracer():
                     color: #0f172a;
                     letter-spacing: 0.3px;
                 }
-                .tracer-empty-state {
-                    text-align: center;
-                    padding: 40px 20px;
-                    color: #94a3b8;
-                }
-                .tracer-empty-icon {
-                    font-size: 36px;
-                    margin-bottom: 12px;
-                }
                 </style>
                 """,
                 unsafe_allow_html=True,
@@ -5230,16 +5141,10 @@ def page_tracer():
             ) or []
             recent = list(reversed(recent))
 
-            # Build complete HTML document
+            # Render messages directly without container
             if not recent:
-                chat_content = '''
-                    <div class="tracer-empty-state">
-                        <div class="tracer-empty-icon">💬</div>
-                        <div style="font-size:14px;">Belum ada memo untuk case ini</div>
-                    </div>
-                '''
+                st.info("💬 Belum ada memo untuk case ini")
             else:
-                messages = []
                 for r in recent:
                     author_role = (r.get('author_role') or '').strip()
                     author_name = (r.get('author_name') or '').strip()
@@ -5249,7 +5154,8 @@ def page_tracer():
                     side = 'right' if mine else 'left'
                     name = 'Saya' if mine else (author_name or author_role or 'Supervisor')
                     safe_msg = msg.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('\n','<br/>')
-                    messages.append(f"""
+                    
+                    st.markdown(f"""
                         <div class='tracer-msg {side}'>
                             <div class='tracer-bubble'>
                                 <div class='tracer-name'>{name}</div>
@@ -5257,11 +5163,7 @@ def page_tracer():
                                 <div class='tracer-meta'>{ts}</div>
                             </div>
                         </div>
-                    """)
-                chat_content = ''.join(messages)
-            
-            chat_html = f'<div class="tracer-memo-container"><div class="tracer-chatbox">{chat_content}</div></div>'
-            st.markdown(chat_html, unsafe_allow_html=True)
+                    """, unsafe_allow_html=True)
 
             # Send message form
             with st.form("tracer_internal_memo_chat"):
