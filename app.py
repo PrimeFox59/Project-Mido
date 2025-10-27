@@ -3016,7 +3016,7 @@ def page_agent():
                 cicilan_cases = fetchall("""
                     SELECT 
                         ar.Agreement_No,
-                        ar.Agent_Assigned_To as Agent,
+                        ar.agent as Agent,
                         ar.agent_status as Status_Cicilan,
                         ar.updated_at as Tanggal_Pengajuan,
                         IFNULL(ar.approval_status, 'pending') as Approval_Status,
@@ -3095,8 +3095,8 @@ def page_agent():
                             case_detail = fetchone("""
                                 SELECT 
                                     ar.*,
-                                    sd.Cust_Name,
-                                    sd.Outstanding,
+                                    sd.Customer_name,
+                                    sd.Principle_Outstanding,
                                     sd.DPD
                                 FROM agent_results ar
                                 LEFT JOIN supervisor_data sd ON sd.Agreement_No = ar.Agreement_No
@@ -3108,11 +3108,16 @@ def page_agent():
                                 col1, col2 = st.columns(2)
                                 with col1:
                                     st.write(f"**Agreement No:** {case_detail.get('Agreement_No', '-')}")
-                                    st.write(f"**Customer:** {case_detail.get('Cust_Name', '-')}")
-                                    st.write(f"**Agent:** {case_detail.get('Agent_Assigned_To', '-')}")
+                                    st.write(f"**Customer:** {case_detail.get('Customer_name', '-')}")
+                                    st.write(f"**Agent:** {case_detail.get('agent', '-')}")
                                     st.write(f"**Status Cicilan:** {case_detail.get('agent_status', '-')}")
                                 with col2:
-                                    st.write(f"**Outstanding:** {case_detail.get('Outstanding', 0):,.0f}")
+                                    # Convert Principle_Outstanding to number if possible
+                                    try:
+                                        outstanding = float(case_detail.get('Principle_Outstanding', 0) or 0)
+                                        st.write(f"**Outstanding:** Rp {outstanding:,.0f}")
+                                    except:
+                                        st.write(f"**Outstanding:** {case_detail.get('Principle_Outstanding', '-')}")
                                     st.write(f"**DPD:** {case_detail.get('DPD', '-')}")
                                     st.write(f"**Tanggal Pengajuan:** {case_detail.get('updated_at', '-')}")
                                 
