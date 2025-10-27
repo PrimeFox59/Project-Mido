@@ -1696,16 +1696,23 @@ def require_roles(allowed_roles):
 
 # ... (page_auth, page_dashboard, page_resume, page_reporting, page_admin_panel, page_user_guide and main function remain the same) ...
 def page_auth():
-    # Set layout non-wide khusus halaman login
-    try:
-        st.set_page_config(layout="centered")
-    except Exception:
-        pass  # Sudah pernah dipanggil di awal, abaikan error
-    # Always use non-wide mode on login/register page
-    # Sembunyikan sidebar dengan CSS hack
+    # Sembunyikan sidebar dan batasi lebar konten untuk halaman login
     st.markdown("""
         <style>
+        /* Hide sidebar on login page */
         [data-testid="stSidebar"] {display: none !important;}
+        
+        /* Limit content width to centered layout on login page */
+        .main .block-container {
+            max-width: 730px !important;
+            padding-left: 5rem !important;
+            padding-right: 5rem !important;
+        }
+        
+        /* Center the container */
+        section[data-testid="stMain"] > div {
+            max-width: 100%;
+        }
         </style>
     """, unsafe_allow_html=True)
     # Tampilkan logo sebagai header
