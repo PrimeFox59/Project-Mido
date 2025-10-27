@@ -2892,7 +2892,7 @@ def page_agent():
 
         # --- Update Data sub-tab ---
         with sub_tabs[1]:
-                if not sel:
+            if not sel:
                 st.info("Pilih Case ID pada tabel di atas terlebih dahulu.")
             else:
                 st.subheader("Report Payment/PTP")
