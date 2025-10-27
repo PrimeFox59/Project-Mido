@@ -3082,16 +3082,25 @@ def page_dashboard():
     """
     require_roles(ALL_ROLES)
 
-    # Header
-    top_col1, top_col2 = st.columns([1, 6])
-    with top_col1:
-        try:
-            st.image("logo.png", width=96)
-        except Exception:
-            st.empty()
-    with top_col2:
-        st.markdown("<h2 style='margin-bottom:0'>Application Dashboard</h2>", unsafe_allow_html=True)
-        st.caption("Ringkasan aktivitas aplikasi dan tenggat terdekat.")
+    # Header - personalized greeting (remove logo and static title)
+    user_obj = current_user() or {}
+    name = (
+        user_obj.get("full_name")
+        or user_obj.get("name")
+        or user_obj.get("login_id")
+        or user_obj.get("email")
+        or "Pengguna"
+    )
+    hour = datetime.now().hour
+    if 4 <= hour < 10:
+        greet = "Selamat pagi"
+    elif 10 <= hour < 15:
+        greet = "Selamat siang"
+    elif 15 <= hour < 18:
+        greet = "Selamat sore"
+    else:
+        greet = "Selamat malam"
+    st.markdown(f"<h2 style='margin-bottom:0'>Halo, {greet} {name}</h2>", unsafe_allow_html=True)
 
     # -------- KPI calculations --------
     today = date.today()
