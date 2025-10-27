@@ -3119,18 +3119,18 @@ def page_agent():
             if not sel:
                 st.info("Pilih Case ID pada tabel di atas terlebih dahulu.")
             else:
-                # Enhanced Chat-like CSS
+                # Enhanced Chat-like CSS with unique identifiers
                 st.markdown(
                     """
                     <style>
-                    .memo-container {
+                    .agent-memo-container {
                         background: linear-gradient(to bottom, #f8fafc 0%, #ffffff 100%);
                         border: 1px solid #e2e8f0;
                         border-radius: 16px;
                         padding: 12px;
                         margin: 0 0 16px 0;
                     }
-                    .chatbox { 
+                    .agent-chatbox { 
                         background: #ffffff;
                         border: 1px solid #e5e7eb;
                         border-radius: 12px;
@@ -3140,21 +3140,21 @@ def page_agent():
                         box-shadow: inset 0 2px 4px rgba(0,0,0,0.03);
                         margin: 0;
                     }
-                    .chatbox::-webkit-scrollbar {
+                    .agent-chatbox::-webkit-scrollbar {
                         width: 8px;
                     }
-                    .chatbox::-webkit-scrollbar-track {
+                    .agent-chatbox::-webkit-scrollbar-track {
                         background: #f1f5f9;
                         border-radius: 4px;
                     }
-                    .chatbox::-webkit-scrollbar-thumb {
+                    .agent-chatbox::-webkit-scrollbar-thumb {
                         background: #cbd5e1;
                         border-radius: 4px;
                     }
-                    .chatbox::-webkit-scrollbar-thumb:hover {
+                    .agent-chatbox::-webkit-scrollbar-thumb:hover {
                         background: #94a3b8;
                     }
-                    .msg { 
+                    .agent-msg { 
                         display: flex;
                         margin: 10px 0;
                         animation: fadeIn 0.3s ease-in;
@@ -3163,46 +3163,46 @@ def page_agent():
                         from { opacity: 0; transform: translateY(10px); }
                         to { opacity: 1; transform: translateY(0); }
                     }
-                    .msg.left { justify-content: flex-start; }
-                    .msg.right { justify-content: flex-end; }
-                    .bubble { 
+                    .agent-msg.left { justify-content: flex-start; }
+                    .agent-msg.right { justify-content: flex-end; }
+                    .agent-bubble { 
                         max-width: 70%;
                         padding: 10px 14px;
                         border-radius: 16px;
                         box-shadow: 0 2px 8px rgba(0,0,0,0.08);
                         word-wrap: break-word;
                     }
-                    .left .bubble { 
+                    .agent-msg.left .agent-bubble { 
                         background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
                         color: #1e293b;
                         border-bottom-left-radius: 4px;
                         border: 1px solid #cbd5e1;
                     }
-                    .right .bubble { 
+                    .agent-msg.right .agent-bubble { 
                         background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
                         color: #1e293b;
                         border-bottom-right-radius: 4px;
                         border: 1px solid #10b981;
                     }
-                    .meta { 
+                    .agent-meta { 
                         font-size: 10px;
                         color: #64748b;
                         margin-top: 4px;
                         font-style: italic;
                     }
-                    .name { 
+                    .agent-name { 
                         font-weight: 700;
                         font-size: 12px;
                         margin-bottom: 4px;
                         color: #0f172a;
                         letter-spacing: 0.3px;
                     }
-                    .empty-state {
+                    .agent-empty-state {
                         text-align: center;
                         padding: 40px 20px;
                         color: #94a3b8;
                     }
-                    .empty-state-icon {
+                    .agent-empty-icon {
                         font-size: 36px;
                         margin-bottom: 12px;
                     }
@@ -3218,17 +3218,16 @@ def page_agent():
                 ) or []
                 recent = list(reversed(recent))  # oldest at top
 
-                # Build complete HTML in one block
-                chat_html = '<div class="memo-container"><div class="chatbox">'
-                
+                # Build complete HTML document
                 if not recent:
-                    chat_html += '''
-                        <div class="empty-state">
-                            <div class="empty-state-icon">💬</div>
+                    chat_content = '''
+                        <div class="agent-empty-state">
+                            <div class="agent-empty-icon">💬</div>
                             <div style="font-size:14px;">Belum ada memo untuk case ini</div>
                         </div>
                     '''
                 else:
+                    messages = []
                     for r in recent:
                         author_role = (r.get('author_role') or '').strip()
                         author_name = (r.get('author_name') or '').strip()
@@ -3238,17 +3237,18 @@ def page_agent():
                         side = 'right' if mine else 'left'
                         name = 'Saya' if mine else (author_name or author_role or 'Supervisor')
                         safe_msg = msg.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('\n','<br/>')
-                        chat_html += f"""
-                            <div class='msg {side}'>
-                                <div class='bubble'>
-                                    <div class='name'>{name}</div>
+                        messages.append(f"""
+                            <div class='agent-msg {side}'>
+                                <div class='agent-bubble'>
+                                    <div class='agent-name'>{name}</div>
                                     <div class='text'>{safe_msg}</div>
-                                    <div class='meta'>{ts}</div>
+                                    <div class='agent-meta'>{ts}</div>
                                 </div>
                             </div>
-                        """
+                        """)
+                    chat_content = ''.join(messages)
                 
-                chat_html += '</div></div>'
+                chat_html = f'<div class="agent-memo-container"><div class="agent-chatbox">{chat_content}</div></div>'
                 st.markdown(chat_html, unsafe_allow_html=True)
 
                 # Input send box with better UX
@@ -5132,18 +5132,18 @@ def page_tracer():
         if not ag_no:
             st.info("Pilih case untuk melihat memo internal.")
         else:
-            # Enhanced Chat-like CSS
+            # Enhanced Chat-like CSS with unique identifiers
             st.markdown(
                 """
                 <style>
-                .memo-container {
+                .tracer-memo-container {
                     background: linear-gradient(to bottom, #f8fafc 0%, #ffffff 100%);
                     border: 1px solid #e2e8f0;
                     border-radius: 16px;
                     padding: 12px;
                     margin: 0 0 16px 0;
                 }
-                .chatbox { 
+                .tracer-chatbox { 
                     background: #ffffff;
                     border: 1px solid #e5e7eb;
                     border-radius: 12px;
@@ -5153,21 +5153,21 @@ def page_tracer():
                     box-shadow: inset 0 2px 4px rgba(0,0,0,0.03);
                     margin: 0;
                 }
-                .chatbox::-webkit-scrollbar {
+                .tracer-chatbox::-webkit-scrollbar {
                     width: 8px;
                 }
-                .chatbox::-webkit-scrollbar-track {
+                .tracer-chatbox::-webkit-scrollbar-track {
                     background: #f1f5f9;
                     border-radius: 4px;
                 }
-                .chatbox::-webkit-scrollbar-thumb {
+                .tracer-chatbox::-webkit-scrollbar-thumb {
                     background: #cbd5e1;
                     border-radius: 4px;
                 }
-                .chatbox::-webkit-scrollbar-thumb:hover {
+                .tracer-chatbox::-webkit-scrollbar-thumb:hover {
                     background: #94a3b8;
                 }
-                .msg { 
+                .tracer-msg { 
                     display: flex;
                     margin: 10px 0;
                     animation: fadeIn 0.3s ease-in;
@@ -5176,46 +5176,46 @@ def page_tracer():
                     from { opacity: 0; transform: translateY(10px); }
                     to { opacity: 1; transform: translateY(0); }
                 }
-                .msg.left { justify-content: flex-start; }
-                .msg.right { justify-content: flex-end; }
-                .bubble { 
+                .tracer-msg.left { justify-content: flex-start; }
+                .tracer-msg.right { justify-content: flex-end; }
+                .tracer-bubble { 
                     max-width: 70%;
                     padding: 10px 14px;
                     border-radius: 16px;
                     box-shadow: 0 2px 8px rgba(0,0,0,0.08);
                     word-wrap: break-word;
                 }
-                .left .bubble { 
+                .tracer-msg.left .tracer-bubble { 
                     background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
                     color: #1e293b;
                     border-bottom-left-radius: 4px;
                     border: 1px solid #cbd5e1;
                 }
-                .right .bubble { 
+                .tracer-msg.right .tracer-bubble { 
                     background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
                     color: #1e293b;
                     border-bottom-right-radius: 4px;
                     border: 1px solid #fbbf24;
                 }
-                .meta { 
+                .tracer-meta { 
                     font-size: 10px;
                     color: #64748b;
                     margin-top: 4px;
                     font-style: italic;
                 }
-                .name { 
+                .tracer-name { 
                     font-weight: 700;
                     font-size: 12px;
                     margin-bottom: 4px;
                     color: #0f172a;
                     letter-spacing: 0.3px;
                 }
-                .empty-state {
+                .tracer-empty-state {
                     text-align: center;
                     padding: 40px 20px;
                     color: #94a3b8;
                 }
-                .empty-state-icon {
+                .tracer-empty-icon {
                     font-size: 36px;
                     margin-bottom: 12px;
                 }
@@ -5230,17 +5230,16 @@ def page_tracer():
             ) or []
             recent = list(reversed(recent))
 
-            # Build complete HTML in one block
-            chat_html = '<div class="memo-container"><div class="chatbox">'
-            
+            # Build complete HTML document
             if not recent:
-                chat_html += '''
-                    <div class="empty-state">
-                        <div class="empty-state-icon">💬</div>
+                chat_content = '''
+                    <div class="tracer-empty-state">
+                        <div class="tracer-empty-icon">💬</div>
                         <div style="font-size:14px;">Belum ada memo untuk case ini</div>
                     </div>
                 '''
             else:
+                messages = []
                 for r in recent:
                     author_role = (r.get('author_role') or '').strip()
                     author_name = (r.get('author_name') or '').strip()
@@ -5250,17 +5249,18 @@ def page_tracer():
                     side = 'right' if mine else 'left'
                     name = 'Saya' if mine else (author_name or author_role or 'Supervisor')
                     safe_msg = msg.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('\n','<br/>')
-                    chat_html += f"""
-                        <div class='msg {side}'>
-                            <div class='bubble'>
-                                <div class='name'>{name}</div>
+                    messages.append(f"""
+                        <div class='tracer-msg {side}'>
+                            <div class='tracer-bubble'>
+                                <div class='tracer-name'>{name}</div>
                                 <div class='text'>{safe_msg}</div>
-                                <div class='meta'>{ts}</div>
+                                <div class='tracer-meta'>{ts}</div>
                             </div>
                         </div>
-                    """
+                    """)
+                chat_content = ''.join(messages)
             
-            chat_html += '</div></div>'
+            chat_html = f'<div class="tracer-memo-container"><div class="tracer-chatbox">{chat_content}</div></div>'
             st.markdown(chat_html, unsafe_allow_html=True)
 
             # Send message form
