@@ -4902,7 +4902,7 @@ def page_tracer():
             st.text_input("TRC Code", value=sel_row.get('TRC_Code',''), disabled=True, key="tr_v_trc")
             st.text_input("Case ID", value=sel_row.get('Agreement_No',''), disabled=True, key="tr_v_agmt")
             st.text_input("Debtor Name", value=sel_row.get('Debtor_Name',''), disabled=True, key="tr_v_debtor")
-            st.text_input("NIK KTP", value=sel_row.get('NIK_KTP',''), disabled=True, key="tr_v_nik")
+            nik_val = st.text_input("NIK KTP", value=sel_row.get('NIK_KTP','') or "", key="tr_v_nik")
         with col2:
             emp_update = st.text_input("EMPLOYMENT UPDATE", value=sel_row.get('EMPLOYMENT_UPDATE',''), key="tr_emp_update")
             employer = st.text_input("EMPLOYER", value=sel_row.get('EMPLOYER',''), key="tr_employer")
@@ -4930,9 +4930,15 @@ def page_tracer():
         submitted = st.form_submit_button("Simpan Perubahan")
         if submitted:
             try:
+                # Normalize NIK (strip spaces); keep empty as NULL
+                nik_new = (nik_val or "").strip()
+                nik_new = nik_new if nik_new != "" else None
+                nik_old = (sel_row.get('NIK_KTP') or '').strip()
+
                 execute(
-                    "UPDATE assign_tracer SET EMPLOYMENT_UPDATE=?, EMPLOYER=?, Debtor_Legal_Name=?, Employee_Name=?, Employee_ID_Number=?, Debtor_Relation_to_Employee=?, Masked_Company_Name=? WHERE id=? AND IFNULL(Assigned_To,'')=?",
+                    "UPDATE assign_tracer SET NIK_KTP=?, EMPLOYMENT_UPDATE=?, EMPLOYER=?, Debtor_Legal_Name=?, Employee_Name=?, Employee_ID_Number=?, Debtor_Relation_to_Employee=?, Masked_Company_Name=? WHERE id=? AND IFNULL(Assigned_To,'')=?",
                     (
+                        nik_new,
                         (emp_update.strip() if emp_update is not None else None),
                         (employer.strip() if employer is not None else None),
                         (debtor_legal.strip() if debtor_legal is not None else None),
@@ -4943,9 +4949,31 @@ def page_tracer():
                         sel_id, tracer_name
                     )
                 )
+                # Optional: propagate updated NIK to supervisor_data for this agreement
+                try:
+                    ag_no = sel_row.get('Agreement_No')
+                    if ag_no and nik_new is not None:
+                        execute(
+                            "UPDATE supervisor_data SET NIK_KTP=? WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=?",
+                            (nik_new, ag_no, ag_no, ag_no)
+                        )
+                except Exception:
+                    pass
                 # Audit log tracer update
                 try:
                     execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (u.get('id') if u else None, "TRACER_UPDATE", f"Tracer '{tracer_name}' updated assignment ID {sel_id}"))
+                except Exception:
+                    pass
+                # If NIK changed, add a specific audit entry
+                try:
+                    if (nik_new or '') != (nik_old or ''):
+                        execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (u.get('id') if u else None, "TRACER_UPDATE_NIK", f"ID {sel_id} NIK '{nik_old}' -> '{nik_new or ''}'"))
+                except Exception:
+                    pass
+                # Warn if new NIK is frozen
+                try:
+                    if nik_new and is_frozen_by_nik(nik_new):
+                        st.warning("Perhatian: NIK ini berada dalam daftar freeze.")
                 except Exception:
                     pass
                 st.success("Data berhasil diperbarui.")
