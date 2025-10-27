@@ -3119,8 +3119,6 @@ def page_agent():
             if not sel:
                 st.info("Pilih Case ID pada tabel di atas terlebih dahulu.")
             else:
-                st.subheader("Internal Memo (Agent ↔ Supervisor)")
-                
                 # Enhanced Chat-like CSS
                 st.markdown(
                     """
@@ -3129,17 +3127,18 @@ def page_agent():
                         background: linear-gradient(to bottom, #f8fafc 0%, #ffffff 100%);
                         border: 1px solid #e2e8f0;
                         border-radius: 16px;
-                        padding: 16px;
-                        margin-bottom: 16px;
+                        padding: 12px;
+                        margin: 0;
                     }
                     .chatbox { 
                         background: #ffffff;
                         border: 1px solid #e5e7eb;
                         border-radius: 12px;
-                        padding: 16px;
-                        height: 450px;
+                        padding: 12px;
+                        height: 400px;
                         overflow-y: auto;
                         box-shadow: inset 0 2px 4px rgba(0,0,0,0.03);
+                        margin: 0;
                     }
                     .chatbox::-webkit-scrollbar {
                         width: 8px;
@@ -3157,7 +3156,7 @@ def page_agent():
                     }
                     .msg { 
                         display: flex;
-                        margin: 12px 0;
+                        margin: 10px 0;
                         animation: fadeIn 0.3s ease-in;
                     }
                     @keyframes fadeIn {
@@ -3168,7 +3167,7 @@ def page_agent():
                     .msg.right { justify-content: flex-end; }
                     .bubble { 
                         max-width: 70%;
-                        padding: 12px 16px;
+                        padding: 10px 14px;
                         border-radius: 16px;
                         box-shadow: 0 2px 8px rgba(0,0,0,0.08);
                         word-wrap: break-word;
@@ -3188,24 +3187,24 @@ def page_agent():
                     .meta { 
                         font-size: 10px;
                         color: #64748b;
-                        margin-top: 6px;
+                        margin-top: 4px;
                         font-style: italic;
                     }
                     .name { 
                         font-weight: 700;
-                        font-size: 13px;
-                        margin-bottom: 6px;
+                        font-size: 12px;
+                        margin-bottom: 4px;
                         color: #0f172a;
                         letter-spacing: 0.3px;
                     }
                     .empty-state {
                         text-align: center;
-                        padding: 60px 20px;
+                        padding: 40px 20px;
                         color: #94a3b8;
                     }
                     .empty-state-icon {
-                        font-size: 48px;
-                        margin-bottom: 16px;
+                        font-size: 36px;
+                        margin-bottom: 12px;
                     }
                     </style>
                     """,
@@ -3226,7 +3225,7 @@ def page_agent():
                     st.markdown(
                         '<div class="empty-state">'
                         '<div class="empty-state-icon">💬</div>'
-                        '<div>Belum ada memo untuk case ini</div>'
+                        '<div style="font-size:14px;">Belum ada memo untuk case ini</div>'
                         '</div>',
                         unsafe_allow_html=True
                     )
@@ -3260,7 +3259,7 @@ def page_agent():
                         "Tulis memo untuk Supervisor",
                         value="",
                         placeholder="Ketik pesan Anda di sini...",
-                        height=100,
+                        height=80,
                         help="Tekan Ctrl+Enter atau klik tombol Kirim"
                     )
                     send = st.form_submit_button("📤 Kirim", use_container_width=True)
@@ -5130,7 +5129,6 @@ def page_tracer():
 
     # --- Internal Memo tab ---
     with sub_tabs[1]:
-        st.subheader("Internal Memo (Tracer ↔ Supervisor)")
         ag_no = sel_row.get('Agreement_No')
         
         if not ag_no:
@@ -5144,17 +5142,18 @@ def page_tracer():
                     background: linear-gradient(to bottom, #f8fafc 0%, #ffffff 100%);
                     border: 1px solid #e2e8f0;
                     border-radius: 16px;
-                    padding: 16px;
-                    margin-bottom: 16px;
+                    padding: 12px;
+                    margin: 0;
                 }
                 .chatbox { 
                     background: #ffffff;
                     border: 1px solid #e5e7eb;
                     border-radius: 12px;
-                    padding: 16px;
-                    height: 450px;
+                    padding: 12px;
+                    height: 400px;
                     overflow-y: auto;
                     box-shadow: inset 0 2px 4px rgba(0,0,0,0.03);
+                    margin: 0;
                 }
                 .chatbox::-webkit-scrollbar {
                     width: 8px;
@@ -5172,7 +5171,7 @@ def page_tracer():
                 }
                 .msg { 
                     display: flex;
-                    margin: 12px 0;
+                    margin: 10px 0;
                     animation: fadeIn 0.3s ease-in;
                 }
                 @keyframes fadeIn {
@@ -5183,7 +5182,7 @@ def page_tracer():
                 .msg.right { justify-content: flex-end; }
                 .bubble { 
                     max-width: 70%;
-                    padding: 12px 16px;
+                    padding: 10px 14px;
                     border-radius: 16px;
                     box-shadow: 0 2px 8px rgba(0,0,0,0.08);
                     word-wrap: break-word;
@@ -5203,24 +5202,24 @@ def page_tracer():
                 .meta { 
                     font-size: 10px;
                     color: #64748b;
-                    margin-top: 6px;
+                    margin-top: 4px;
                     font-style: italic;
                 }
                 .name { 
                     font-weight: 700;
-                    font-size: 13px;
-                    margin-bottom: 6px;
+                    font-size: 12px;
+                    margin-bottom: 4px;
                     color: #0f172a;
                     letter-spacing: 0.3px;
                 }
                 .empty-state {
                     text-align: center;
-                    padding: 60px 20px;
+                    padding: 40px 20px;
                     color: #94a3b8;
                 }
                 .empty-state-icon {
-                    font-size: 48px;
-                    margin-bottom: 16px;
+                    font-size: 36px;
+                    margin-bottom: 12px;
                 }
                 </style>
                 """,
@@ -5239,7 +5238,7 @@ def page_tracer():
                 st.markdown(
                     '<div class="empty-state">'
                     '<div class="empty-state-icon">💬</div>'
-                    '<div>Belum ada memo untuk case ini</div>'
+                    '<div style="font-size:14px;">Belum ada memo untuk case ini</div>'
                     '</div>',
                     unsafe_allow_html=True
                 )
@@ -5272,7 +5271,7 @@ def page_tracer():
                     "Tulis memo untuk Supervisor",
                     value="",
                     placeholder="Ketik pesan Anda di sini...",
-                    height=100,
+                    height=80,
                     help="Tekan Ctrl+Enter atau klik tombol Kirim"
                 )
                 send = st.form_submit_button("📤 Kirim", use_container_width=True)
