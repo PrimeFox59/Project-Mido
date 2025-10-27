@@ -4873,23 +4873,33 @@ def page_supervisor():
                 else:
                     st.info("Tidak ditemukan loan untuk NIK tersebut.")
 def page_tracer():
-    require_roles(("Superuser", "Tracer"))
+    require_roles(("Superuser", "Supervisor", "Tracer"))
     u = current_user()
+    user_role = u.get('role') if u else None
     tracer_name = (u.get('full_name') or u.get('name')) if u else None
     st.title("Tracer Menu")
     if not tracer_name:
         st.error("Tidak dapat menentukan nama tracer. Silakan login ulang.")
         return
-    st.caption(f"Assignment untuk: {tracer_name}")
-
-    # Fetch rows assigned to this tracer (Assigned_To = user name)
-    rows = fetchall(
-        "SELECT id, TRC_Code, Agreement_No, Debtor_Name, NIK_KTP, EMPLOYMENT_UPDATE, EMPLOYER, Debtor_Legal_Name, Employee_Name, Employee_ID_Number, Debtor_Relation_to_Employee, Masked_Company_Name, created_at "
-        "FROM assign_tracer WHERE IFNULL(Assigned_To,'') = ? ORDER BY id DESC LIMIT 500",
-        (tracer_name,)
-    )
+    
+    # Jika Supervisor/Superuser: tampilkan semua assignment
+    # Jika Tracer: hanya tampilkan assignment untuk dirinya sendiri
+    if user_role in ("Superuser", "Supervisor"):
+        st.caption(f"Mode: **{user_role}** — Melihat semua assignment tracer")
+        rows = fetchall(
+            "SELECT id, TRC_Code, Agreement_No, Debtor_Name, NIK_KTP, EMPLOYMENT_UPDATE, EMPLOYER, Debtor_Legal_Name, Employee_Name, Employee_ID_Number, Debtor_Relation_to_Employee, Masked_Company_Name, Assigned_To, created_at "
+            "FROM assign_tracer ORDER BY id DESC LIMIT 500"
+        )
+    else:
+        st.caption(f"Assignment untuk: {tracer_name}")
+        rows = fetchall(
+            "SELECT id, TRC_Code, Agreement_No, Debtor_Name, NIK_KTP, EMPLOYMENT_UPDATE, EMPLOYER, Debtor_Legal_Name, Employee_Name, Employee_ID_Number, Debtor_Relation_to_Employee, Masked_Company_Name, Assigned_To, created_at "
+            "FROM assign_tracer WHERE IFNULL(Assigned_To,'') = ? ORDER BY id DESC LIMIT 500",
+            (tracer_name,)
+        )
+    
     if not rows:
-        st.info("Belum ada assignment untuk Anda.")
+        st.info("Belum ada assignment.")
         return
 
     st.subheader("Daftar Assignment")
@@ -4923,6 +4933,7 @@ def page_tracer():
             'Employee_Name': r.get('Employee_Name'),
             'Employee_ID_Number': r.get('Employee_ID_Number'),
             'Debtor_Relation_to_Employee': r.get('Debtor_Relation_to_Employee'),
+            'Assigned_To': r.get('Assigned_To'),
             'Assigned_At': r.get('created_at'),
         } for r in filtered_rows
     ]
@@ -4945,26 +4956,35 @@ def page_tracer():
     else:
         df_view['Selected'] = []
 
+    # Column config dengan tambahan Assigned_To
+    col_config = {
+        'Selected': st.column_config.CheckboxColumn('Selected', help='Centang untuk memilih assignment'),
+        'ID': st.column_config.TextColumn('ID'),
+        'TRC_Code': st.column_config.TextColumn('TRC Code'),
+        'Case_ID': st.column_config.TextColumn('Case ID'),
+        'Debtor_Name': st.column_config.TextColumn('Debtor Name'),
+        'NIK_KTP': st.column_config.TextColumn('NIK KTP'),
+        'EMPLOYMENT_UPDATE': st.column_config.TextColumn('EMPLOYMENT UPDATE'),
+        'EMPLOYER': st.column_config.TextColumn('EMPLOYER'),
+        'Debtor_Legal_Name': st.column_config.TextColumn('Debtor Legal Name'),
+        'Employee_Name': st.column_config.TextColumn('Employee Name'),
+        'Employee_ID_Number': st.column_config.TextColumn('Employee ID Number'),
+        'Debtor_Relation_to_Employee': st.column_config.TextColumn('Debtor Relation to Employee'),
+        'Assigned_At': st.column_config.TextColumn('Assigned_At'),
+    }
+    
+    # Tambahkan kolom Assigned_To jika Supervisor/Superuser
+    disabled_cols = ['ID','TRC_Code','Case_ID','Debtor_Name','NIK_KTP','EMPLOYMENT_UPDATE','EMPLOYER','Debtor_Legal_Name','Employee_Name','Employee_ID_Number','Debtor_Relation_to_Employee','Assigned_At']
+    if user_role in ("Superuser", "Supervisor"):
+        col_config['Assigned_To'] = st.column_config.TextColumn('Assigned To')
+        disabled_cols.append('Assigned_To')
+    
     edited = st.data_editor(
         df_view,
         hide_index=True,
         use_container_width=True,
-        column_config={
-            'Selected': st.column_config.CheckboxColumn('Selected', help='Centang untuk memilih assignment'),
-            'ID': st.column_config.TextColumn('ID'),
-            'TRC_Code': st.column_config.TextColumn('TRC Code'),
-            'Case_ID': st.column_config.TextColumn('Case ID'),
-            'Debtor_Name': st.column_config.TextColumn('Debtor Name'),
-            'NIK_KTP': st.column_config.TextColumn('NIK KTP'),
-            'EMPLOYMENT_UPDATE': st.column_config.TextColumn('EMPLOYMENT UPDATE'),
-            'EMPLOYER': st.column_config.TextColumn('EMPLOYER'),
-            'Debtor_Legal_Name': st.column_config.TextColumn('Debtor Legal Name'),
-            'Employee_Name': st.column_config.TextColumn('Employee Name'),
-            'Employee_ID_Number': st.column_config.TextColumn('Employee ID Number'),
-            'Debtor_Relation_to_Employee': st.column_config.TextColumn('Debtor Relation to Employee'),
-            'Assigned_At': st.column_config.TextColumn('Assigned_At'),
-        },
-        disabled=['ID','TRC_Code','Case_ID','Debtor_Name','NIK_KTP','EMPLOYMENT_UPDATE','EMPLOYER','Debtor_Legal_Name','Employee_Name','Employee_ID_Number','Debtor_Relation_to_Employee','Assigned_At'],
+        column_config=col_config,
+        disabled=disabled_cols,
     )
 
     selected_list = []
@@ -5150,9 +5170,15 @@ def page_tracer():
                     author_name = (r.get('author_name') or '').strip()
                     msg = (r.get('message') or '').strip()
                     ts = (r.get('created_at') or '').replace('T', ' ')
-                    mine = (author_role == 'Tracer' and author_name == tracer_name)
+                    
+                    # Tentukan apakah pesan ini dari user saat ini
+                    if user_role == 'Tracer':
+                        mine = (author_role == 'Tracer' and author_name == tracer_name)
+                    else:
+                        mine = (author_role in ('Supervisor', 'Superuser') and author_name == tracer_name)
+                    
                     side = 'right' if mine else 'left'
-                    name = 'Saya' if mine else (author_name or author_role or 'Supervisor')
+                    name = 'Saya' if mine else (author_name or author_role or 'Unknown')
                     safe_msg = msg.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('\n','<br/>')
                     
                     st.markdown(f"""
@@ -5165,10 +5191,19 @@ def page_tracer():
                         </div>
                     """, unsafe_allow_html=True)
 
-            # Send message form
+            # Send message form - label dan role tergantung user
+            if user_role in ('Supervisor', 'Superuser'):
+                form_label = "Tulis memo untuk Tracer"
+                send_as_role = "Supervisor"
+                target_role = "Tracer"
+            else:
+                form_label = "Tulis memo untuk Supervisor"
+                send_as_role = "Tracer"
+                target_role = "Supervisor"
+                
             with st.form("tracer_internal_memo_chat"):
                 msg = st.text_area(
-                    "Tulis memo untuk Supervisor",
+                    form_label,
                     value="",
                     placeholder="Ketik pesan Anda di sini...",
                     height=80,
@@ -5179,7 +5214,7 @@ def page_tracer():
                     try:
                         execute(
                             "INSERT INTO memos (Agreement_No, author_role, author_name, target_role, message) VALUES (?,?,?,?,?)",
-                            (ag_no, "Tracer", tracer_name, "Supervisor", msg.strip())
+                            (ag_no, send_as_role, tracer_name, target_role, msg.strip())
                         )
                         st.success("✅ Memo berhasil dikirim!")
                         st.rerun()
