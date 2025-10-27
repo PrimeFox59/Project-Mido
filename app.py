@@ -4833,29 +4833,67 @@ def page_tracer():
             continue
         filtered_rows.append(r)
 
-    # Quick table view of key identifiers
-    df_view = pd.DataFrame([
+    # Selectable table (similar to Agent page)
+    data = [
         {
             'ID': r['id'],
-            'TRC Code': r['TRC_Code'],
-            'Case ID': r['Agreement_No'],
-            'Debtor Name': r['Debtor_Name'],
-            'NIK KTP': r['NIK_KTP'],
-            'Assigned At': r['created_at'],
+            'Case_ID': r['Agreement_No'],
+            'Debtor_Name': r['Debtor_Name'],
+            'NIK': r['NIK_KTP'],
+            'Assigned_At': r['created_at'],
         } for r in filtered_rows
-    ])
-    st.dataframe(df_view, use_container_width=True, hide_index=True)
+    ]
+    df_view = pd.DataFrame(data)
+
+    prev_selected = set(st.session_state.get('tracer_selected_list', []) or [])
+    col_sa, col_cl = st.columns([1,1])
+    with col_sa:
+        select_all = st.checkbox("Pilih semua", key="tr_select_all")
+    with col_cl:
+        clear_all = st.checkbox("Kosongkan pilihan", key="tr_clear_all")
+
+    if not df_view.empty:
+        if select_all:
+            df_view.insert(0, 'Selected', True)
+        elif clear_all:
+            df_view.insert(0, 'Selected', False)
+        else:
+            df_view.insert(0, 'Selected', df_view['ID'].apply(lambda x: x in prev_selected))
+    else:
+        df_view['Selected'] = []
+
+    edited = st.data_editor(
+        df_view,
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            'Selected': st.column_config.CheckboxColumn('Selected', help='Centang untuk memilih assignment'),
+            'ID': st.column_config.TextColumn('ID'),
+            'Case_ID': st.column_config.TextColumn('Case_ID'),
+            'Debtor_Name': st.column_config.TextColumn('Debtor_Name'),
+            'NIK': st.column_config.TextColumn('NIK'),
+            'Assigned_At': st.column_config.TextColumn('Assigned_At'),
+        },
+        disabled=['ID','Case_ID','Debtor_Name','NIK','Assigned_At'],
+    )
+
+    selected_list = []
+    if edited is not None and not edited.empty:
+        try:
+            selected_list = [int(row['ID']) for _, row in edited.iterrows() if bool(row.get('Selected'))]
+        except Exception:
+            selected_list = []
+    st.session_state['tracer_selected_list'] = selected_list
+    sel_id = selected_list[0] if selected_list else None
 
     st.markdown("---")
     st.subheader("Update Detail Employment")
     st.caption("Pilih satu baris kemudian isi data yang diperlukan.")
 
     # Select a row to update
-    id_options = [r['id'] for r in filtered_rows]
-    sel_id = st.selectbox("Pilih ID Assignment", id_options, key="tr_sel_id")
     sel_row = next((r for r in filtered_rows if r['id'] == sel_id), None)
     if not sel_row:
-        st.warning("Data tidak ditemukan.")
+        st.info("Centang satu baris pada tabel di atas untuk mulai mengedit.")
         return
 
     with st.form("tracer_update_form"):
