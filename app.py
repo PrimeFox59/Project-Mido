@@ -3891,6 +3891,11 @@ def page_supervisor():
                                     )
                                 except Exception:
                                     pass
+                                # Immediate user feedback before rerun
+                                try:
+                                    st.toast(f"Upload berhasil: disimpan {saved:,}, dilewati {skipped:,}.", icon="✅")
+                                except Exception:
+                                    pass
                                 # Clear uploader to prevent re-upload on rerun
                                 st.session_state['sup_upload_file'] = None
                                 st.rerun()
