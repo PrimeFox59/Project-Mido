@@ -2868,7 +2868,7 @@ def page_agent():
                         "Nomor WhatsApp baru (opsional)",
                         value="",
                         placeholder="Nomor WA lain yang dipakai debitur saat ini",
-                        help="Tidak menggantikan nomor terdaftar. Akan ditambahkan ke Additional Contacts."
+                        help="Tidak menggantikan nomor terdaftar. Akan ditambahkan ke Remarks."
                     )
 
                     show_next = "CICIL" in (scheme or "").upper()
@@ -3025,22 +3025,21 @@ def page_agent():
                             ] else 0)
                         )
                         v_reg_phone = st.text_input("REGISTERED PHONE", value=sup_agent.get('REGISTERED_PHONE','') or "")
-                        v_payment = st.text_input("Payment", value=str(sup_agent.get('Payment') or ""))
                     with csb:
-                        v_add_contacts = st.text_area("Additional Contacts", value=sup_agent.get('Additional_Contacts','') or "", height=80)
-                        v_remarks = st.text_area("Remarks Suggested NIK Prospect", value=sup_agent.get('Remarks_Suggested_NIK_Prospect','') or "", height=80)
+                        v_add_contacts = st.text_area("Remarks", value=sup_agent.get('Additional_Contacts','') or "", height=80)
+                        v_remarks = st.text_area("Suggested NIK", value=sup_agent.get('Remarks_Suggested_NIK_Prospect','') or "", height=80)
                     submit_sup = st.form_submit_button("Simpan ke supervisor_data")
                     if submit_sup:
                         try:
                             if sup_agent.get('id') is not None:
                                 execute(
-                                    "UPDATE supervisor_data SET STATUS=?, REGISTERED_PHONE=?, Additional_Contacts=?, Remarks_Suggested_NIK_Prospect=?, Payment=? WHERE id=?",
-                                    (v_status.strip(), v_reg_phone.strip(), v_add_contacts.strip(), v_remarks.strip(), v_payment.strip(), sup_agent.get('id'))
+                                    "UPDATE supervisor_data SET STATUS=?, REGISTERED_PHONE=?, Additional_Contacts=?, Remarks_Suggested_NIK_Prospect=? WHERE id=?",
+                                    (v_status.strip(), v_reg_phone.strip(), v_add_contacts.strip(), v_remarks.strip(), sup_agent.get('id'))
                                 )
                             else:
                                 execute(
-                                    "UPDATE supervisor_data SET STATUS=?, REGISTERED_PHONE=?, Additional_Contacts=?, Remarks_Suggested_NIK_Prospect=?, Payment=? WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=?",
-                                    (v_status.strip(), v_reg_phone.strip(), v_add_contacts.strip(), v_remarks.strip(), v_payment.strip(), sel, sel, sel)
+                                    "UPDATE supervisor_data SET STATUS=?, REGISTERED_PHONE=?, Additional_Contacts=?, Remarks_Suggested_NIK_Prospect=? WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=?",
+                                    (v_status.strip(), v_reg_phone.strip(), v_add_contacts.strip(), v_remarks.strip(), sel, sel, sel)
                                 )
                             try:
                                 u = current_user() or {}
@@ -4296,8 +4295,8 @@ def page_supervisor():
                     "Phone_Number_2": st.column_config.TextColumn("Phone 2", disabled=True),
                     "STATUS": st.column_config.TextColumn("STATUS", disabled=True),
                     "REGISTERED_PHONE": st.column_config.TextColumn("REGISTERED PHONE", disabled=True),
-                    "Additional_Contacts": st.column_config.TextColumn("Additional Contacts", disabled=True),
-                    "Remarks_Suggested_NIK_Prospect": st.column_config.TextColumn("Remarks Suggested NIK Prospect", disabled=True),
+                    "Additional_Contacts": st.column_config.TextColumn("Remarks", disabled=True),
+                    "Remarks_Suggested_NIK_Prospect": st.column_config.TextColumn("Suggested NIK", disabled=True),
                     "Payment": st.column_config.TextColumn("Payment", disabled=True),
                     "Paid_Off_Status": st.column_config.TextColumn("Paid Off Status", disabled=True),
                 },
