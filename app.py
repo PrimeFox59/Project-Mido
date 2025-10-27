@@ -3029,7 +3029,12 @@ def page_user_setting():
         return
     
     # Tabs untuk memisahkan kategori informasi
-    tabs = st.tabs(["Basic Info", "Personal Details", "Banking Info", "Certification"])
+    # Tambahkan tab User Management khusus untuk Supervisor/Superuser
+    user_role = u.get('role')
+    if user_role in ("Superuser", "Supervisor"):
+        tabs = st.tabs(["Basic Info", "Personal Details", "Banking Info", "Certification", "User Management"])
+    else:
+        tabs = st.tabs(["Basic Info", "Personal Details", "Banking Info", "Certification"])
     
     # --- Basic Info Tab ---
     with tabs[0]:
@@ -3278,6 +3283,259 @@ def page_user_setting():
                         st.error("Failed to upload certificate to Google Drive.")
                 except Exception as e:
                     st.error(f"Upload failed: {e}")
+    
+    # --- User Management Tab (Khusus Supervisor/Superuser) ---
+    if user_role in ("Superuser", "Supervisor"):
+        with tabs[4]:
+            st.subheader("👥 User Management")
+            st.caption("Manage users, approve pending registrations, and edit user details")
+            
+            # Sub-tabs untuk User Management
+            mgmt_tabs = st.tabs(["Pending Approvals", "All Users", "Add New User"])
+            
+            # --- Pending Approvals Sub-tab ---
+            with mgmt_tabs[0]:
+                st.markdown("#### 📋 Pending User Approvals")
+                pending_users = fetchall("SELECT * FROM users WHERE approved=0 ORDER BY created_at DESC")
+                
+                if not pending_users:
+                    st.info("✅ No pending approvals.")
+                else:
+                    st.warning(f"⚠️ {len(pending_users)} user(s) waiting for approval")
+                    
+                    for pending_user in pending_users:
+                        with st.expander(f"👤 {pending_user.get('full_name') or pending_user.get('name')} - {pending_user.get('login_id')}"):
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.write(f"**Name:** {pending_user.get('full_name') or pending_user.get('name')}")
+                                st.write(f"**Login ID:** {pending_user.get('login_id')}")
+                                st.write(f"**Email:** {pending_user.get('email')}")
+                                st.write(f"**Role:** {pending_user.get('role')}")
+                            with col2:
+                                st.write(f"**Division:** {pending_user.get('division') or 'N/A'}")
+                                st.write(f"**Phone:** {pending_user.get('phone_number') or 'N/A'}")
+                                st.write(f"**Registered:** {pending_user.get('created_at')}")
+                            
+                            st.markdown("---")
+                            acol1, acol2, acol3 = st.columns([1, 1, 2])
+                            with acol1:
+                                if st.button("✅ Approve", key=f"approve_{pending_user.get('id')}"):
+                                    try:
+                                        execute("UPDATE users SET approved=1 WHERE id=?", (pending_user.get('id'),))
+                                        execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                                                (u.get('id'), "USER_APPROVE", f"Approved user: {pending_user.get('login_id')}"))
+                                        st.success(f"✅ Approved {pending_user.get('login_id')}")
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(f"Failed to approve: {e}")
+                            with acol2:
+                                if st.button("❌ Reject", key=f"reject_{pending_user.get('id')}"):
+                                    try:
+                                        execute("DELETE FROM users WHERE id=?", (pending_user.get('id'),))
+                                        execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                                                (u.get('id'), "USER_REJECT", f"Rejected user: {pending_user.get('login_id')}"))
+                                        st.success(f"❌ Rejected and deleted {pending_user.get('login_id')}")
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(f"Failed to reject: {e}")
+            
+            # --- All Users Sub-tab ---
+            with mgmt_tabs[1]:
+                st.markdown("#### 📊 All Users")
+                
+                # Filter
+                fcol1, fcol2, fcol3 = st.columns(3)
+                with fcol1:
+                    filter_role = st.selectbox("Filter by Role", ["All", "Superuser", "Supervisor", "Tracer", "Agent"], key="filter_role")
+                with fcol2:
+                    filter_status = st.selectbox("Filter by Status", ["All", "Approved", "Pending"], key="filter_status")
+                with fcol3:
+                    search_name = st.text_input("Search by Name/Login ID", key="search_user")
+                
+                # Build query
+                query = "SELECT * FROM users WHERE 1=1"
+                params = []
+                
+                if filter_role != "All":
+                    query += " AND role=?"
+                    params.append(filter_role)
+                
+                if filter_status == "Approved":
+                    query += " AND approved=1"
+                elif filter_status == "Pending":
+                    query += " AND approved=0"
+                
+                if search_name:
+                    query += " AND (full_name LIKE ? OR name LIKE ? OR login_id LIKE ?)"
+                    params.extend([f"%{search_name}%", f"%{search_name}%", f"%{search_name}%"])
+                
+                query += " ORDER BY created_at DESC"
+                
+                all_users = fetchall(query, tuple(params))
+                
+                if not all_users:
+                    st.info("No users found with current filters.")
+                else:
+                    st.caption(f"Found {len(all_users)} user(s)")
+                    
+                    # Display users in data editor for easy viewing
+                    users_data = []
+                    for usr in all_users:
+                        users_data.append({
+                            'ID': usr.get('id'),
+                            'Name': usr.get('full_name') or usr.get('name'),
+                            'Login ID': usr.get('login_id'),
+                            'Email': usr.get('email'),
+                            'Role': usr.get('role'),
+                            'Division': usr.get('division') or '',
+                            'Approved': '✅' if usr.get('approved') else '❌',
+                            'Created': usr.get('created_at')
+                        })
+                    
+                    df_users = pd.DataFrame(users_data)
+                    st.dataframe(df_users, use_container_width=True, hide_index=True)
+                    
+                    st.markdown("---")
+                    st.markdown("#### Edit/Delete User")
+                    
+                    selected_user_id = st.selectbox(
+                        "Select user to edit/delete",
+                        options=[usr.get('id') for usr in all_users],
+                        format_func=lambda x: f"{next((u.get('full_name') or u.get('name') for u in all_users if u.get('id') == x), 'Unknown')} ({next((u.get('login_id') for u in all_users if u.get('id') == x), 'N/A')})",
+                        key="select_edit_user"
+                    )
+                    
+                    if selected_user_id:
+                        selected_user = next((u for u in all_users if u.get('id') == selected_user_id), None)
+                        
+                        if selected_user:
+                            edit_col, delete_col = st.columns([3, 1])
+                            
+                            with edit_col:
+                                st.markdown("**Edit User Details**")
+                                with st.form(f"edit_user_form_{selected_user_id}"):
+                                    edit_full_name = st.text_input("Full Name", value=selected_user.get('full_name') or "")
+                                    edit_login_id = st.text_input("Login ID", value=selected_user.get('login_id') or "")
+                                    edit_email = st.text_input("Email", value=selected_user.get('email') or "")
+                                    edit_role = st.selectbox("Role", ["Superuser", "Supervisor", "Tracer", "Agent"], 
+                                                            index=["Superuser", "Supervisor", "Tracer", "Agent"].index(selected_user.get('role')) if selected_user.get('role') in ["Superuser", "Supervisor", "Tracer", "Agent"] else 0)
+                                    edit_division = st.text_input("Division", value=selected_user.get('division') or "")
+                                    edit_approved = st.checkbox("Approved", value=bool(selected_user.get('approved')))
+                                    
+                                    # Option to reset password
+                                    st.markdown("**Reset Password (Optional)**")
+                                    new_password = st.text_input("New Password", type="password", key=f"new_pwd_{selected_user_id}")
+                                    
+                                    submitted_edit = st.form_submit_button("💾 Save Changes")
+                                    
+                                    if submitted_edit:
+                                        try:
+                                            updates = []
+                                            params_update = []
+                                            
+                                            if edit_full_name != (selected_user.get('full_name') or ""):
+                                                updates.append("full_name=?")
+                                                params_update.append(edit_full_name)
+                                            
+                                            if edit_login_id != (selected_user.get('login_id') or ""):
+                                                updates.append("login_id=?")
+                                                params_update.append(edit_login_id)
+                                            
+                                            if edit_email != (selected_user.get('email') or ""):
+                                                updates.append("email=?")
+                                                params_update.append(edit_email)
+                                            
+                                            if edit_role != selected_user.get('role'):
+                                                updates.append("role=?")
+                                                params_update.append(edit_role)
+                                            
+                                            if edit_division != (selected_user.get('division') or ""):
+                                                updates.append("division=?")
+                                                params_update.append(edit_division)
+                                            
+                                            if edit_approved != bool(selected_user.get('approved')):
+                                                updates.append("approved=?")
+                                                params_update.append(1 if edit_approved else 0)
+                                            
+                                            if new_password:
+                                                updates.append("password_hash=?")
+                                                params_update.append(hash_password(new_password))
+                                            
+                                            if updates:
+                                                params_update.append(selected_user_id)
+                                                execute(f"UPDATE users SET {', '.join(updates)} WHERE id=?", tuple(params_update))
+                                                
+                                                # Audit log
+                                                execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                                                        (u.get('id'), "USER_EDIT", f"Edited user: {edit_login_id}"))
+                                                
+                                                st.success(f"✅ User {edit_login_id} updated successfully!")
+                                                st.rerun()
+                                            else:
+                                                st.info("No changes detected.")
+                                        except Exception as e:
+                                            st.error(f"Failed to update user: {e}")
+                            
+                            with delete_col:
+                                st.markdown("**Delete User**")
+                                st.warning("⚠️ This action cannot be undone!")
+                                
+                                if st.button("🗑️ Delete User", key=f"delete_user_{selected_user_id}"):
+                                    if selected_user_id == u.get('id'):
+                                        st.error("❌ You cannot delete yourself!")
+                                    else:
+                                        try:
+                                            execute("DELETE FROM users WHERE id=?", (selected_user_id,))
+                                            execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                                                    (u.get('id'), "USER_DELETE", f"Deleted user: {selected_user.get('login_id')}"))
+                                            st.success(f"✅ User {selected_user.get('login_id')} deleted successfully!")
+                                            st.rerun()
+                                        except Exception as e:
+                                            st.error(f"Failed to delete user: {e}")
+            
+            # --- Add New User Sub-tab ---
+            with mgmt_tabs[2]:
+                st.markdown("#### ➕ Add New User")
+                st.caption("Create a new user account (will be automatically approved)")
+                
+                with st.form("add_new_user_form"):
+                    new_full_name = st.text_input("Full Name *", key="new_full_name")
+                    new_login_id = st.text_input("Login ID *", key="new_login_id", help="Unique username for login")
+                    new_email = st.text_input("Email", key="new_email")
+                    new_password = st.text_input("Password *", type="password", key="new_password")
+                    new_password_confirm = st.text_input("Confirm Password *", type="password", key="new_password_confirm")
+                    new_role = st.selectbox("Role *", ["Supervisor", "Tracer", "Agent", "Superuser"], key="new_role")
+                    new_division = st.text_input("Division", key="new_division")
+                    
+                    submitted_new = st.form_submit_button("➕ Create User")
+                    
+                    if submitted_new:
+                        if not new_full_name or not new_login_id or not new_password:
+                            st.error("❌ Please fill in all required fields (*)")
+                        elif new_password != new_password_confirm:
+                            st.error("❌ Passwords do not match!")
+                        else:
+                            # Check if login_id already exists
+                            existing = fetchone("SELECT id FROM users WHERE login_id=?", (new_login_id,))
+                            if existing:
+                                st.error(f"❌ Login ID '{new_login_id}' already exists!")
+                            else:
+                                try:
+                                    execute(
+                                        """INSERT INTO users (name, full_name, login_id, email, password_hash, role, division, approved) 
+                                           VALUES (?, ?, ?, ?, ?, ?, ?, 1)""",
+                                        (new_full_name, new_full_name, new_login_id, new_email, 
+                                         hash_password(new_password), new_role, new_division)
+                                    )
+                                    
+                                    # Audit log
+                                    execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                                            (u.get('id'), "USER_CREATE", f"Created user: {new_login_id} (Role: {new_role})"))
+                                    
+                                    st.success(f"✅ User '{new_login_id}' created successfully!")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Failed to create user: {e}")
 
 # -------------------------
 # Supervisor Page
