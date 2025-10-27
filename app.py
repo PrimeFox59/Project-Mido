@@ -4837,10 +4837,17 @@ def page_tracer():
     data = [
         {
             'ID': r['id'],
-            'Case_ID': r['Agreement_No'],
-            'Debtor_Name': r['Debtor_Name'],
-            'NIK': r['NIK_KTP'],
-            'Assigned_At': r['created_at'],
+            'TRC_Code': r.get('TRC_Code'),
+            'Case_ID': r.get('Agreement_No'),
+            'Debtor_Name': r.get('Debtor_Name'),
+            'NIK_KTP': r.get('NIK_KTP'),
+            'EMPLOYMENT_UPDATE': r.get('EMPLOYMENT_UPDATE'),
+            'EMPLOYER': r.get('EMPLOYER'),
+            'Debtor_Legal_Name': r.get('Debtor_Legal_Name'),
+            'Employee_Name': r.get('Employee_Name'),
+            'Employee_ID_Number': r.get('Employee_ID_Number'),
+            'Debtor_Relation_to_Employee': r.get('Debtor_Relation_to_Employee'),
+            'Assigned_At': r.get('created_at'),
         } for r in filtered_rows
     ]
     df_view = pd.DataFrame(data)
@@ -4869,12 +4876,19 @@ def page_tracer():
         column_config={
             'Selected': st.column_config.CheckboxColumn('Selected', help='Centang untuk memilih assignment'),
             'ID': st.column_config.TextColumn('ID'),
-            'Case_ID': st.column_config.TextColumn('Case_ID'),
-            'Debtor_Name': st.column_config.TextColumn('Debtor_Name'),
-            'NIK': st.column_config.TextColumn('NIK'),
+            'TRC_Code': st.column_config.TextColumn('TRC Code'),
+            'Case_ID': st.column_config.TextColumn('Case ID'),
+            'Debtor_Name': st.column_config.TextColumn('Debtor Name'),
+            'NIK_KTP': st.column_config.TextColumn('NIK KTP'),
+            'EMPLOYMENT_UPDATE': st.column_config.TextColumn('EMPLOYMENT UPDATE'),
+            'EMPLOYER': st.column_config.TextColumn('EMPLOYER'),
+            'Debtor_Legal_Name': st.column_config.TextColumn('Debtor Legal Name'),
+            'Employee_Name': st.column_config.TextColumn('Employee Name'),
+            'Employee_ID_Number': st.column_config.TextColumn('Employee ID Number'),
+            'Debtor_Relation_to_Employee': st.column_config.TextColumn('Debtor Relation to Employee'),
             'Assigned_At': st.column_config.TextColumn('Assigned_At'),
         },
-        disabled=['ID','Case_ID','Debtor_Name','NIK','Assigned_At'],
+        disabled=['ID','TRC_Code','Case_ID','Debtor_Name','NIK_KTP','EMPLOYMENT_UPDATE','EMPLOYER','Debtor_Legal_Name','Employee_Name','Employee_ID_Number','Debtor_Relation_to_Employee','Assigned_At'],
     )
 
     selected_list = []
