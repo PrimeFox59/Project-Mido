@@ -353,7 +353,10 @@ def init_db():
         """
     )
     try:
-        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_unique ON payments(Agreement_No, paid_date)")
+        # Drop old UNIQUE index if exists (allow multiple payments on same date)
+        c.execute("DROP INDEX IF EXISTS idx_payments_unique")
+        # Create regular indexes (non-unique)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_payments_agreement ON payments(Agreement_No)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_payments_date ON payments(paid_date)")
     except Exception:
         pass
@@ -2488,7 +2491,7 @@ def page_agent():
     # Jika Agent: hanya tampilkan assignment untuk dirinya sendiri
     if user_role in ("Superuser", "Supervisor"):
         st.caption(f"Mode: **{user_role}** — Melihat semua assignment agent")
-        rows = fetchall("SELECT Agreement_No, Agent_Assigned_To, assigned_at FROM agent_assignments ORDER BY assigned_at DESC LIMIT 500")
+        rows = fetchall("SELECT Agreement_No AS Case_ID, Agent_Assigned_To, assigned_at FROM agent_assignments ORDER BY assigned_at DESC LIMIT 500")
     else:
         # Simple PTP notif today
         today_str = today_wib().isoformat()
@@ -2498,31 +2501,42 @@ def page_agent():
             st.success(f"Hai {agent_name}, hari ini kamu ada {count_ptp} PTP. Klik di bawah untuk lihat daftar.")
         
         # Agent's assigned loans
-        rows = fetchall("SELECT Agreement_No, Agent_Assigned_To, assigned_at FROM agent_assignments WHERE Agent_Assigned_To=? ORDER BY assigned_at DESC LIMIT 500", (agent_name,))
+        rows = fetchall("SELECT Agreement_No AS Case_ID, Agent_Assigned_To, assigned_at FROM agent_assignments WHERE Agent_Assigned_To=? ORDER BY assigned_at DESC LIMIT 500", (agent_name,))
     
     if not rows:
         st.info("Belum ada assignment.")
         return
 
     # Tabs layout to tidy up Agent Menu
-    tabs = st.tabs([
-        "Cases",
-        "My PTP",
-        "Monthly Payment Recap",
-        "All-time Payment Recap",
-        "Email Templates",
-    ])
+    # Tambahkan tab Cicilan Approval untuk Supervisor
+    if user_role in ("Superuser", "Supervisor"):
+        tabs = st.tabs([
+            "Cases",
+            "Cicilan Approval",
+            "My PTP",
+            "Monthly Payment Recap",
+            "All-time Payment Recap",
+            "Email Templates",
+        ])
+    else:
+        tabs = st.tabs([
+            "Cases",
+            "My PTP",
+            "Monthly Payment Recap",
+            "All-time Payment Recap",
+            "Email Templates",
+        ])
 
     # --- Cases tab ---
     with tabs[0]:
         q_ag = st.text_input("Cari Case_ID", key="ag_q_no")
-        filtered = [r for r in rows if (not q_ag or q_ag.strip() in str(r.get('Agreement_No') or ''))]
+        filtered = [r for r in rows if (not q_ag or q_ag.strip() in str(r.get('Case_ID') or ''))]
 
         st.subheader("Assignments")
         # Build a monitoring-style selectable table
         data = [
             {
-                "Case_ID": r.get("Agreement_No"),
+                "Case_ID": r.get("Case_ID"),
                 "Agent": r.get("Agent_Assigned_To"),
                 "assigned_at": r.get("assigned_at"),
             }
@@ -2599,11 +2613,8 @@ def page_agent():
         
         # Inline sub-tabs for the selected case actions (di dalam tab Cases)
         st.markdown("---")
-        # Conditional tabs: tambahkan "Cicilan Approval" jika Supervisor
-        if user_role in ("Superuser", "Supervisor"):
-            sub_tabs = st.tabs(["Update Data", "Report Payment/PTP", "Internal Memo", "Cicilan Approval"])
-        else:
-            sub_tabs = st.tabs(["Update Data", "Report Payment/PTP", "Internal Memo"]) 
+        # Sub-tabs untuk update data, report payment, dan memo
+        sub_tabs = st.tabs(["Update Data", "Report Payment/PTP", "Internal Memo"]) 
 
         # --- Update Data sub-tab ---
         with sub_tabs[0]:
@@ -2782,9 +2793,10 @@ def page_agent():
                         st.warning("Untuk skema CICIL, isi jumlah dan semua tanggal rencana cicilan.")
                     else:
                         try:
-                            # 1) Simpan pembayaran
+                            # 1) Simpan pembayaran - gunakan INSERT OR REPLACE untuk menghindari UNIQUE constraint error
+                            # Jika sudah ada payment di tanggal yang sama, akan di-replace
                             execute(
-                                "INSERT INTO payments (Agreement_No, paid_amount, paid_date, status, source_file, uploaded_by) VALUES (?,?,?,?,?,?)",
+                                "INSERT OR REPLACE INTO payments (Agreement_No, paid_amount, paid_date, status, source_file, uploaded_by) VALUES (?,?,?,?,?,?)",
                                 (sel, float(paid_amount or 0), (paid_date.isoformat() if paid_date else None), scheme, None, agent_name)
                             )
                             # Audit log pembayaran
@@ -3001,218 +3013,163 @@ def page_agent():
                         except Exception as e:
                             st.error(f"❌ Gagal mengirim memo: {e}")
 
-        # --- Cicilan Approval tab (hanya untuk Supervisor) ---
-        if user_role in ('Supervisor', 'Superuser'):
-            with sub_tabs[3]:
-                st.subheader("📋 Cicilan Approval")
-                st.markdown("Daftar pengajuan cicilan yang menunggu persetujuan dari Supervisor")
+    # --- Cicilan Approval tab (sejajar dengan Cases, hanya untuk Supervisor) ---
+    if user_role in ('Supervisor', 'Superuser'):
+        with tabs[1]:
+            st.subheader("📋 Cicilan Approval")
+            st.caption("Daftar pengajuan cicilan yang menunggu persetujuan dari Supervisor")
+            
+            # Query untuk mendapatkan case dengan status cicilan
+            cicilan_cases = fetchall("""
+                SELECT 
+                    ar.Agreement_No AS Case_ID,
+                    ar.agent as Agent,
+                    ar.agent_status as Status_Cicilan,
+                    ar.agent_ptp_amount as Jumlah_Cicilan,
+                    ar.agent_ptp_date as Tanggal_Cicilan,
+                    ar.updated_at as Tanggal_Pengajuan,
+                    IFNULL(ar.approval_status, 'pending') as Approval_Status,
+                    ar.approval_by as Approved_By,
+                    ar.approval_at as Approval_Date,
+                    sd.Customer_name,
+                    sd.Principle_Outstanding
+                FROM agent_results ar
+                LEFT JOIN supervisor_data sd ON sd.Case_ID = ar.Agreement_No 
+                    OR sd.Virtual_Account_Number = ar.Agreement_No 
+                    OR sd.Third_Uid = ar.Agreement_No
+                WHERE ar.agent_status IN ('CICIL OS', 'CICIL LUNDIS', 'CICIL POKOK')
+                ORDER BY 
+                    CASE WHEN IFNULL(ar.approval_status, 'pending') = 'pending' THEN 0 ELSE 1 END,
+                    ar.updated_at DESC
+                LIMIT 200
+            """)
+            
+            if not cicilan_cases:
+                st.info("✅ Tidak ada pengajuan cicilan yang perlu di-review")
+            else:
+                # Summary metrics
+                df_cicilan = pd.DataFrame(cicilan_cases)
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    pending_count = len(df_cicilan[df_cicilan['Approval_Status'] == 'pending'])
+                    st.metric("⏳ Menunggu Approval", pending_count)
+                with col2:
+                    approved_count = len(df_cicilan[df_cicilan['Approval_Status'] == 'approved'])
+                    st.metric("✅ Sudah Disetujui", approved_count)
+                with col3:
+                    rejected_count = len(df_cicilan[df_cicilan['Approval_Status'] == 'rejected'])
+                    st.metric("❌ Ditolak", rejected_count)
                 
-                # Query untuk mendapatkan case dengan status cicilan dan approval_status = 'pending'
-                cicilan_cases = fetchall("""
-                    SELECT 
-                        ar.Agreement_No,
-                        ar.agent as Agent,
-                        ar.agent_status as Status_Cicilan,
-                        ar.updated_at as Tanggal_Pengajuan,
-                        IFNULL(ar.approval_status, 'pending') as Approval_Status,
-                        ar.approval_by as Approved_By,
-                        ar.approval_at as Approval_Date
-                    FROM agent_results ar
-                    WHERE ar.agent_status IN ('CICIL OS', 'CICIL LUNDIS', 'CICIL POKOK')
-                    ORDER BY 
-                        CASE WHEN IFNULL(ar.approval_status, 'pending') = 'pending' THEN 0 ELSE 1 END,
-                        ar.updated_at DESC
-                    LIMIT 200
-                """)
+                st.divider()
                 
-                if not cicilan_cases:
-                    st.info("✅ Tidak ada pengajuan cicilan yang perlu di-review")
+                # Filter by status
+                status_filter = st.multiselect(
+                    "Filter Status Approval",
+                    options=['pending', 'approved', 'rejected'],
+                    default=['pending'],
+                    key="cicilan_status_filter"
+                )
+                
+                if status_filter:
+                    df_filtered = df_cicilan[df_cicilan['Approval_Status'].isin(status_filter)]
                 else:
-                    df_cicilan = pd.DataFrame(cicilan_cases)
-                    
-                    # Filter options
-                    status_filter = st.multiselect(
-                        "Filter Status Approval",
-                        options=['pending', 'approved', 'rejected'],
-                        default=['pending']
-                    )
-                    
-                    if status_filter:
-                        df_filtered = df_cicilan[df_cicilan['Approval_Status'].isin(status_filter)]
-                    else:
-                        df_filtered = df_cicilan
-                    
-                    # Display summary
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        pending_count = len(df_cicilan[df_cicilan['Approval_Status'] == 'pending'])
-                        st.metric("⏳ Pending", pending_count)
-                    with col2:
-                        approved_count = len(df_cicilan[df_cicilan['Approval_Status'] == 'approved'])
-                        st.metric("✅ Approved", approved_count)
-                    with col3:
-                        rejected_count = len(df_cicilan[df_cicilan['Approval_Status'] == 'rejected'])
-                        st.metric("❌ Rejected", rejected_count)
-                    
-                    st.divider()
-                    
-                    # Display filtered data
-                    st.dataframe(
-                        df_filtered,
-                        use_container_width=True,
-                        hide_index=True,
-                        column_config={
-                            "Approval_Status": st.column_config.TextColumn(
-                                "Status",
-                                help="Status persetujuan cicilan"
-                            )
-                        }
-                    )
-                    
-                    # Detail review per case
-                    st.divider()
-                    st.subheader("🔍 Detail Review Cicilan")
-                    
-                    # Select case untuk review
-                    pending_cases = df_cicilan[df_cicilan['Approval_Status'] == 'pending']['Agreement_No'].tolist()
-                    
-                    if not pending_cases:
-                        st.info("✅ Semua pengajuan sudah di-review")
-                    else:
-                        selected_case = st.selectbox(
-                            "Pilih Case ID untuk Review",
-                            options=pending_cases,
-                            help="Pilih Agreement Number yang akan di-review"
-                        )
-                        
-                        if selected_case:
-                            # Get case details
-                            case_detail = fetchone("""
-                                SELECT 
-                                    ar.*,
-                                    sd.Customer_name,
-                                    sd.Principle_Outstanding,
-                                    sd.DPD
-                                FROM agent_results ar
-                                LEFT JOIN supervisor_data sd ON sd.Agreement_No = ar.Agreement_No
-                                WHERE ar.Agreement_No = ?
-                            """, (selected_case,))
+                    df_filtered = df_cicilan
+                
+                # Display table with approval actions
+                st.markdown("### 📊 Daftar Pengajuan Cicilan")
+                
+                for idx, row in df_filtered.iterrows():
+                    with st.expander(
+                        f"{'⏳' if row['Approval_Status'] == 'pending' else '✅' if row['Approval_Status'] == 'approved' else '❌'} "
+                        f"{row['Case_ID']} - {row['Customer_name']} - {row['Status_Cicilan']}"
+                    ):
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.write(f"**Case ID:** {row['Case_ID']}")
+                            st.write(f"**Customer:** {row['Customer_name']}")
+                            st.write(f"**Agent:** {row['Agent']}")
+                            st.write(f"**Status Cicilan:** {row['Status_Cicilan']}")
+                        with col2:
+                            try:
+                                outstanding = float(row['Principle_Outstanding'] or 0)
+                                st.write(f"**Outstanding:** Rp {outstanding:,.0f}")
+                            except:
+                                st.write(f"**Outstanding:** {row['Principle_Outstanding']}")
                             
-                            if case_detail:
-                                st.markdown("### 📄 Informasi Case")
-                                col1, col2 = st.columns(2)
-                                with col1:
-                                    st.write(f"**Agreement No:** {case_detail.get('Agreement_No', '-')}")
-                                    st.write(f"**Customer:** {case_detail.get('Customer_name', '-')}")
-                                    st.write(f"**Agent:** {case_detail.get('agent', '-')}")
-                                    st.write(f"**Status Cicilan:** {case_detail.get('agent_status', '-')}")
-                                with col2:
-                                    # Convert Principle_Outstanding to number if possible
+                            if row.get('Jumlah_Cicilan'):
+                                st.write(f"**Jumlah Cicilan:** Rp {row['Jumlah_Cicilan']:,.0f}")
+                            if row.get('Tanggal_Cicilan'):
+                                st.write(f"**Tanggal Jatuh Tempo:** {row['Tanggal_Cicilan']}")
+                            st.write(f"**Tanggal Pengajuan:** {row['Tanggal_Pengajuan']}")
+                        
+                        st.write(f"**Status:** {row['Approval_Status'].upper()}")
+                        
+                        if row['Approval_Status'] == 'approved' and row.get('Approved_By'):
+                            st.success(f"✅ Disetujui oleh {row['Approved_By']} pada {row['Approval_Date']}")
+                        elif row['Approval_Status'] == 'rejected' and row.get('Approved_By'):
+                            st.error(f"❌ Ditolak oleh {row['Approved_By']} pada {row['Approval_Date']}")
+                        elif row['Approval_Status'] == 'pending':
+                            # Approval buttons
+                            col1, col2, col3 = st.columns([1, 1, 2])
+                            with col1:
+                                if st.button("✅ APPROVE", key=f"approve_{row['Case_ID']}", type="primary", use_container_width=True):
                                     try:
-                                        outstanding = float(case_detail.get('Principle_Outstanding', 0) or 0)
-                                        st.write(f"**Outstanding:** Rp {outstanding:,.0f}")
-                                    except:
-                                        st.write(f"**Outstanding:** {case_detail.get('Principle_Outstanding', '-')}")
-                                    st.write(f"**DPD:** {case_detail.get('DPD', '-')}")
-                                    st.write(f"**Tanggal Pengajuan:** {case_detail.get('updated_at', '-')}")
-                                
-                                # Get payment plan details
-                                st.markdown("### 💰 Skema Pembayaran Cicilan")
-                                payment_plans = fetchall("""
-                                    SELECT 
-                                        plan_number,
-                                        plan_amount,
-                                        plan_date,
-                                        status
-                                    FROM payments
-                                    WHERE Agreement_No = ?
-                                    ORDER BY plan_number
-                                """, (selected_case,))
-                                
-                                if payment_plans:
-                                    df_plans = pd.DataFrame(payment_plans)
-                                    st.dataframe(
-                                        df_plans,
-                                        use_container_width=True,
-                                        hide_index=True,
-                                        column_config={
-                                            "plan_number": "Cicilan Ke",
-                                            "plan_amount": st.column_config.NumberColumn(
-                                                "Jumlah",
-                                                format="Rp %.0f"
-                                            ),
-                                            "plan_date": "Tanggal",
-                                            "status": "Status"
-                                        }
-                                    )
-                                    
-                                    # Summary
-                                    total_amount = sum(p.get('plan_amount', 0) for p in payment_plans)
-                                    st.write(f"**Total Cicilan:** {len(payment_plans)} kali")
-                                    st.write(f"**Total Jumlah:** Rp {total_amount:,.0f}")
-                                else:
-                                    st.warning("⚠️ Belum ada skema pembayaran yang diinput untuk case ini")
-                                
-                                # Approval/Reject buttons
-                                st.divider()
-                                st.markdown("### 🎯 Keputusan Approval")
-                                
-                                col1, col2, col3 = st.columns([1, 1, 2])
-                                with col1:
-                                    if st.button("✅ APPROVE", type="primary", use_container_width=True):
-                                        try:
-                                            execute("""
-                                                UPDATE agent_results 
-                                                SET approval_status = 'approved',
-                                                    approval_by = ?,
-                                                    approval_at = CURRENT_TIMESTAMP
-                                                WHERE Agreement_No = ?
-                                            """, (agent_name, selected_case))
-                                            
-                                            # Log audit
-                                            execute("""
-                                                INSERT INTO audit_logs (username, action, target_table, target_id, details)
-                                                VALUES (?, 'APPROVE_CICILAN', 'agent_results', ?, ?)
-                                            """, (agent_name, selected_case, f"Approved {case_detail.get('agent_status', '')}"))
-                                            
-                                            st.success("✅ Cicilan berhasil di-approve!")
-                                            st.rerun()
-                                        except Exception as e:
-                                            st.error(f"❌ Gagal approve: {e}")
-                                
-                                with col2:
-                                    if st.button("❌ REJECT", type="secondary", use_container_width=True):
-                                        try:
-                                            execute("""
-                                                UPDATE agent_results 
-                                                SET approval_status = 'rejected',
-                                                    approval_by = ?,
-                                                    approval_at = CURRENT_TIMESTAMP
-                                                WHERE Agreement_No = ?
-                                            """, (agent_name, selected_case))
-                                            
-                                            # Log audit
-                                            execute("""
-                                                INSERT INTO audit_logs (username, action, target_table, target_id, details)
-                                                VALUES (?, 'REJECT_CICILAN', 'agent_results', ?, ?)
-                                            """, (agent_name, selected_case, f"Rejected {case_detail.get('agent_status', '')}"))
-                                            
-                                            st.warning("⚠️ Cicilan berhasil di-reject!")
-                                            st.rerun()
-                                        except Exception as e:
-                                            st.error(f"❌ Gagal reject: {e}")
-                                
-                                with col3:
-                                    st.caption("Klik APPROVE untuk menyetujui atau REJECT untuk menolak pengajuan cicilan")
+                                        execute("""
+                                            UPDATE agent_results 
+                                            SET approval_status = 'approved',
+                                                approval_by = ?,
+                                                approval_at = CURRENT_TIMESTAMP
+                                            WHERE Agreement_No = ?
+                                        """, (agent_name, row['Case_ID']))
+                                        
+                                        # Log audit
+                                        execute("""
+                                            INSERT INTO audit_logs (user_id, action, details)
+                                            VALUES (?, 'APPROVE_CICILAN', ?)
+                                        """, (u.get('id'), f"Approved {row['Case_ID']} - {row['Status_Cicilan']}"))
+                                        
+                                        st.success("✅ Cicilan berhasil di-approve!")
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(f"❌ Gagal approve: {e}")
+                            
+                            with col2:
+                                if st.button("❌ REJECT", key=f"reject_{row['Case_ID']}", type="secondary", use_container_width=True):
+                                    try:
+                                        execute("""
+                                            UPDATE agent_results 
+                                            SET approval_status = 'rejected',
+                                                approval_by = ?,
+                                                approval_at = CURRENT_TIMESTAMP
+                                            WHERE Agreement_No = ?
+                                        """, (agent_name, row['Case_ID']))
+                                        
+                                        # Log audit
+                                        execute("""
+                                            INSERT INTO audit_logs (user_id, action, details)
+                                            VALUES (?, 'REJECT_CICILAN', ?)
+                                        """, (u.get('id'), f"Rejected {row['Case_ID']} - {row['Status_Cicilan']}"))
+                                        
+                                        st.warning("⚠️ Cicilan berhasil di-reject!")
+                                        st.rerun()
+                                    except Exception as e:
+                                        st.error(f"❌ Gagal reject: {e}")
+                            
+                            with col3:
+                                st.caption("Klik APPROVE untuk menyetujui atau REJECT untuk menolak")
 
     # --- My PTP tab ---
-    with tabs[1]:
+    # Index tab disesuaikan: untuk Supervisor tabs[2], untuk Agent tabs[1]
+    ptp_tab_idx = 2 if user_role in ('Supervisor', 'Superuser') else 1
+    with tabs[ptp_tab_idx]:
         st.subheader("My PTP")
         ptps = fetchall("SELECT Agreement_No as Case_ID, agent_ptp_amount, agent_ptp_date, agent_status, updated_at FROM agent_results WHERE agent=? AND IFNULL(agent_status,'')='PTP' ORDER BY agent_ptp_date DESC LIMIT 500", (agent_name,))
         st.dataframe(pd.DataFrame(ptps), use_container_width=True, hide_index=True)
 
     # --- Monthly Payment Recap tab ---
-    with tabs[2]:
+    # Index disesuaikan: untuk Supervisor tabs[3], untuk Agent tabs[2]
+    monthly_tab_idx = 3 if user_role in ('Supervisor', 'Superuser') else 2
+    with tabs[monthly_tab_idx]:
         st.subheader("Monthly Payment Recap")
         start_of_month = today_wib().replace(day=1)
         rec = fetchall(
@@ -3230,7 +3187,9 @@ def page_agent():
         st.metric("Total Bulan Ini", f"{total:,.0f}")
 
     # --- All-time Payment Recap tab ---
-    with tabs[3]:
+    # Index disesuaikan: untuk Supervisor tabs[4], untuk Agent tabs[3]
+    alltime_tab_idx = 4 if user_role in ('Supervisor', 'Superuser') else 3
+    with tabs[alltime_tab_idx]:
         st.subheader("All-time Payment Recap")
         rec_all = fetchall(
             """
@@ -3247,7 +3206,9 @@ def page_agent():
         st.metric("Total Sepanjang Waktu", f"{total_all:,.0f}")
 
     # --- Email Templates tab ---
-    with tabs[4]:
+    # Index disesuaikan: untuk Supervisor tabs[5], untuk Agent tabs[4]
+    email_tab_idx = 5 if user_role in ('Supervisor', 'Superuser') else 4
+    with tabs[email_tab_idx]:
         sel = st.session_state.get('agent_selected')
         info = fetchone("SELECT Debtor_Name, NIK_KTP FROM assign_tracer WHERE Agreement_No=?", (sel,)) or {} if sel else {}
         st.subheader("Email Templates")
