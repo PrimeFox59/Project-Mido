@@ -2869,6 +2869,9 @@ def page_agent():
                                         cicilan = float(row['Jumlah_Cicilan'])
                                         sisa_outstanding = max(0, outstanding - cicilan)
                                         st.caption(f"💡 Sisa setelah approve: Rp {sisa_outstanding:,.0f}")
+                                        # Tambahkan indikator jika akan menjadi Paid Off
+                                        if sisa_outstanding == 0:
+                                            st.success("🎉 Status akan berubah menjadi **PAID OFF** setelah approve!")
                                     except:
                                         pass
                                 elif row['Approval_Status'] == 'approved':
@@ -2925,6 +2928,28 @@ def page_agent():
                                                 WHERE Case_ID = ?
                                             """, (ptp_amount, ptp_amount, row['Case_ID']))
                                             
+                                            # Cek apakah Outstanding sudah mencapai nol, jika ya set Paid_Off = Yes
+                                            check_outstanding = fetchone("""
+                                                SELECT CAST(IFNULL(Principle_Outstanding, '0') AS REAL) as outstanding
+                                                FROM supervisor_data
+                                                WHERE Case_ID = ?
+                                            """, (row['Case_ID'],))
+                                            
+                                            if check_outstanding and check_outstanding.get('outstanding', 0) == 0:
+                                                # Outstanding sudah nol, set Paid_Off = Yes
+                                                execute("""
+                                                    UPDATE supervisor_data
+                                                    SET Paid_Off = 'Yes'
+                                                    WHERE Case_ID = ?
+                                                """, (row['Case_ID'],))
+                                                
+                                                # Log status paid off
+                                                execute("""
+                                                    INSERT INTO audit_logs (user_id, action, details)
+                                                    VALUES (?, 'SET_PAID_OFF', ?)
+                                                """, (u.get('id'), 
+                                                      f"Set Paid_Off=Yes for {row['Case_ID']} (Outstanding reached 0)"))
+                                            
                                             # Log perubahan Principle_Outstanding
                                             execute("""
                                                 INSERT INTO audit_logs (user_id, action, details)
@@ -2938,7 +2963,12 @@ def page_agent():
                                             VALUES (?, 'APPROVE_CICILAN', ?)
                                         """, (u.get('id'), f"Approved {row['Case_ID']} - {row['Status_Cicilan']} - Amount: {ptp_amount:,.0f}"))
                                         
-                                        st.success(f"✅ Cicilan berhasil di-approve! Principle_Outstanding dikurangi: {ptp_amount:,.0f}")
+                                        # Cek apakah case sudah Paid Off untuk pesan yang lebih informatif
+                                        paid_off_check = fetchone("SELECT Paid_Off FROM supervisor_data WHERE Case_ID = ?", (row['Case_ID'],))
+                                        if paid_off_check and paid_off_check.get('Paid_Off', '').upper() == 'YES':
+                                            st.success(f"✅ Cicilan berhasil di-approve! Outstanding dikurangi: Rp {ptp_amount:,.0f}\n\n🎉 **Status berubah menjadi PAID OFF!**")
+                                        else:
+                                            st.success(f"✅ Cicilan berhasil di-approve! Outstanding dikurangi: Rp {ptp_amount:,.0f}")
                                         st.rerun()
                                     except Exception as e:
                                         st.error(f"❌ Gagal approve: {e}")
@@ -5613,7 +5643,8 @@ def page_guide():
     - **Action:**
       - ✅ APPROVE: Update status + Kurangi Principle_Outstanding + Audit log
       - ❌ REJECT: Update status saja (Outstanding tidak berubah)
-    - **Audit Trail:** Semua approval/reject dicatat di `audit_logs` dengan detail amount dan Case ID
+    - **Auto Paid-Off:** Jika setelah approve Outstanding mencapai 0, sistem otomatis set `Paid_Off = 'Yes'`
+    - **Audit Trail:** Semua approval/reject dicatat di `audit_logs` dengan detail amount, Case ID, dan perubahan status paid-off
     """, unsafe_allow_html=True)
 
     st.header("4) Monitoring & Analytics")
