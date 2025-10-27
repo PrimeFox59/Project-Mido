@@ -1702,16 +1702,28 @@ def page_auth():
         /* Hide sidebar on login page */
         [data-testid="stSidebar"] {display: none !important;}
         
-        /* Limit content width to centered layout on login page */
+        /* Limit content width to compact centered layout on login page */
         .main .block-container {
-            max-width: 730px !important;
-            padding-left: 5rem !important;
-            padding-right: 5rem !important;
+            max-width: 480px !important;
+            padding-left: 2rem !important;
+            padding-right: 2rem !important;
+            padding-top: 3rem !important;
         }
         
         /* Center the container */
         section[data-testid="stMain"] > div {
             max-width: 100%;
+            display: flex;
+            justify-content: center;
+        }
+        
+        /* Responsive for mobile */
+        @media (max-width: 768px) {
+            .main .block-container {
+                max-width: 100% !important;
+                padding-left: 1rem !important;
+                padding-right: 1rem !important;
+            }
         }
         </style>
     """, unsafe_allow_html=True)
