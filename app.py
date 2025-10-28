@@ -1931,11 +1931,17 @@ def page_gdrive():
         with st.form('add_note_form'):
             new_note = st.text_input('Catatan baru', key='new_note_input')
             submitted = st.form_submit_button('Tambah Catatan')
-            if submitted and new_note.strip():
-                creator = (user.get('login_id') or user.get('email') or '-') if user else '-'
-                execute("INSERT INTO record_notes (note, created_by) VALUES (?, ?)", (new_note.strip(), creator))
-                st.success('Catatan ditambahkan.')
-                st.rerun()
+            if submitted:
+                if not new_note.strip():
+                    st.toast("⚠️ Catatan tidak boleh kosong!", icon="⚠️")
+                else:
+                    try:
+                        creator = (user.get('login_id') or user.get('email') or '-') if user else '-'
+                        execute("INSERT INTO record_notes (note, created_by) VALUES (?, ?)", (new_note.strip(), creator))
+                        st.toast("✅ Catatan berhasil ditambahkan!", icon="✅")
+                        st.rerun()
+                    except Exception as e:
+                        st.toast(f"❌ Gagal menambahkan catatan: {e}", icon="❌")
         # List notes
         notes = fetchall("SELECT * FROM record_notes ORDER BY id DESC LIMIT 50")
         if not notes:
@@ -3239,10 +3245,10 @@ def page_agent():
                                 )
                             except Exception:
                                 pass
-                            st.success("Data supervisor berhasil diperbarui.")
+                            st.toast("✅ Data supervisor berhasil diperbarui!", icon="✅")
                             st.rerun()
                         except Exception as e:
-                            st.error(f"Gagal memperbarui data supervisor: {e}")
+                            st.toast(f"❌ Gagal memperbarui data: {e}", icon="❌")
 
         # --- Report Payment/PTP sub-tab (hanya tampil jika STATUS = PTP) ---
         if current_status == "PTP":
@@ -3349,11 +3355,11 @@ def page_agent():
                         submit = st.form_submit_button("Simpan")
                     if submit:
                         if paid_amount is None or float(paid_amount) <= 0:
-                            st.warning("Nominal Pembayaran harus lebih dari 0.")
+                            st.toast("⚠️ Nominal Pembayaran harus lebih dari 0!", icon="⚠️")
                         elif not paid_date:
-                            st.warning("Tanggal Pembayaran wajib diisi.")
+                            st.toast("⚠️ Tanggal Pembayaran wajib diisi!", icon="⚠️")
                         elif is_cicil and (not plan_dates or any(d is None for d in plan_dates)):
-                            st.warning("Untuk skema CICIL, isi jumlah dan semua tanggal rencana cicilan.")
+                            st.toast("⚠️ Untuk skema CICIL, isi semua tanggal rencana!", icon="⚠️")
                         else:
                             try:
                                 # Upload bukti gambar ke Google Drive jika ada
@@ -3373,9 +3379,9 @@ def page_agent():
                                         mimetype = uploaded_proof.type or "image/jpeg"
                                         proof_drive_id = upload_bytes(service, FOLDER_ID_DEFAULT, proof_filename, proof_bytes, mimetype)
                                         
-                                        st.success(f"✅ Bukti gambar berhasil diupload: {proof_filename}")
+                                        st.toast(f"✅ Bukti gambar berhasil diupload: {proof_filename}", icon="✅")
                                     except Exception as e:
-                                        st.warning(f"⚠️ Gagal upload gambar ke Drive: {e}. Payment tetap disimpan tanpa bukti gambar.")
+                                        st.toast(f"⚠️ Gagal upload gambar: {e}. Payment tetap disimpan.", icon="⚠️")
                                 
                                 # 1) Simpan pembayaran dengan info bukti gambar
                                 execute(
@@ -3464,12 +3470,12 @@ def page_agent():
                                             except Exception:
                                                 pass
                                     except Exception as e:
-                                        st.error(f"Gagal menyimpan rencana PTP cicilan: {e}")
+                                        st.toast(f"⚠️ Gagal menyimpan rencana PTP: {e}", icon="⚠️")
 
-                                st.success("Laporan tersimpan.")
+                                st.toast("✅ Laporan pembayaran berhasil disimpan!", icon="✅")
                                 st.rerun()
                             except Exception as e:
-                                st.error(f"Gagal menyimpan laporan: {e}")
+                                st.toast(f"❌ Gagal menyimpan laporan: {e}", icon="❌")
 
         # --- Internal Memo sub-tab (index dinamis: 2 jika ada PTP, 1 jika tidak ada PTP) ---
         memo_tab_index = 2 if current_status == "PTP" else 1
@@ -3586,16 +3592,19 @@ def page_agent():
                         help="Tekan Ctrl+Enter atau klik tombol Kirim"
                     )
                     send = st.form_submit_button("📤 Kirim", use_container_width=True)
-                    if send and msg and msg.strip():
-                        try:
-                            execute(
-                                "INSERT INTO memos (Agreement_No, author_role, author_name, target_role, message) VALUES (?,?,?,?,?)",
-                                (sel, send_as_role, agent_name, target_role, msg.strip())
-                            )
-                            st.success("✅ Memo berhasil dikirim!")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ Gagal mengirim memo: {e}")
+                    if send:
+                        if not msg or not msg.strip():
+                            st.toast("⚠️ Pesan tidak boleh kosong!", icon="⚠️")
+                        else:
+                            try:
+                                execute(
+                                    "INSERT INTO memos (Agreement_No, author_role, author_name, target_role, message) VALUES (?,?,?,?,?)",
+                                    (sel, send_as_role, agent_name, target_role, msg.strip())
+                                )
+                                st.toast("✅ Memo berhasil dikirim!", icon="✅")
+                                st.rerun()
+                            except Exception as e:
+                                st.toast(f"❌ Gagal mengirim memo: {e}", icon="❌")
 
     # --- Cicilan Approval tab (sejajar dengan Cases, hanya untuk Supervisor) ---
     if user_role in ('Supervisor', 'Superuser'):
@@ -3781,12 +3790,12 @@ def page_agent():
                                         # Cek apakah case sudah Paid Off untuk pesan yang lebih informatif
                                         paid_off_check = fetchone("SELECT Paid_Off FROM supervisor_data WHERE Case_ID = ?", (row['Case_ID'],))
                                         if paid_off_check and paid_off_check.get('Paid_Off', '').upper() == 'YES':
-                                            st.success(f"✅ Cicilan berhasil di-approve! Outstanding dikurangi: Rp {ptp_amount:,.0f}\n\n🎉 **Status berubah menjadi PAID OFF!**")
+                                            st.toast(f"✅ Cicilan di-approve! Outstanding: Rp {ptp_amount:,.0f}. 🎉 Status PAID OFF!", icon="✅")
                                         else:
-                                            st.success(f"✅ Cicilan berhasil di-approve! Outstanding dikurangi: Rp {ptp_amount:,.0f}")
+                                            st.toast(f"✅ Cicilan di-approve! Outstanding dikurangi: Rp {ptp_amount:,.0f}", icon="✅")
                                         st.rerun()
                                     except Exception as e:
-                                        st.error(f"❌ Gagal approve: {e}")
+                                        st.toast(f"❌ Gagal approve: {e}", icon="❌")
                             
                             with col2:
                                 if st.button("❌ REJECT", key=f"reject_{row['Case_ID']}", type="secondary", use_container_width=True):
@@ -3805,10 +3814,10 @@ def page_agent():
                                             VALUES (?, 'REJECT_CICILAN', ?)
                                         """, (u.get('id'), f"Rejected {row['Case_ID']} - {row['Status_Cicilan']}"))
                                         
-                                        st.warning("⚠️ Cicilan berhasil di-reject!")
+                                        st.toast("⚠️ Cicilan berhasil di-reject!", icon="⚠️")
                                         st.rerun()
                                     except Exception as e:
-                                        st.error(f"❌ Gagal reject: {e}")
+                                        st.toast(f"❌ Gagal reject: {e}", icon="❌")
                             
                             with col3:
                                 st.caption("Klik APPROVE untuk menyetujui atau REJECT untuk menolak")
@@ -4342,14 +4351,14 @@ def page_user_setting():
                 
                 if pw1 or pw2:
                     if pw1 != pw2:
-                        st.error("Password and confirmation do not match.")
+                        st.toast("❌ Password dan konfirmasi tidak cocok!", icon="❌")
                     elif pw1.strip():
                         updates.append("password_hash=?")
                         params.append(hash_password(pw1.strip()))
                         changed = True
                 
                 if not changed:
-                    st.info("No changes to update.")
+                    st.toast("ℹ️ Tidak ada perubahan untuk disimpan", icon="ℹ️")
                 else:
                     params.append(u.get('id'))
                     try:
@@ -4362,10 +4371,10 @@ def page_user_setting():
                                     (u.get('id'), "USER_UPDATE", detail))
                         except Exception:
                             pass
-                        st.success("✅ Basic information updated successfully.")
+                        st.toast("✅ Informasi dasar berhasil diperbarui!", icon="✅")
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Failed to update: {e}")
+                        st.toast(f"❌ Gagal update: {e}", icon="❌")
     
     # --- Personal Details Tab ---
     with tabs[1]:
@@ -4410,7 +4419,7 @@ def page_user_setting():
                         params.append(join_str)
                 
                 if not updates:
-                    st.info("No changes to update.")
+                    st.toast("ℹ️ Tidak ada perubahan untuk disimpan", icon="ℹ️")
                 else:
                     params.append(u.get('id'))
                     try:
@@ -4423,10 +4432,10 @@ def page_user_setting():
                                     (u.get('id'), "USER_UPDATE", detail))
                         except Exception:
                             pass
-                        st.success("✅ Personal details updated successfully.")
+                        st.toast("✅ Detail personal berhasil diperbarui!", icon="✅")
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Failed to update: {e}")
+                        st.toast(f"❌ Gagal update: {e}", icon="❌")
     
     # --- Banking Info Tab ---
     with tabs[2]:
@@ -4453,7 +4462,7 @@ def page_user_setting():
                     params.append(nama_rekening_bca.strip())
                 
                 if not updates:
-                    st.info("No changes to update.")
+                    st.toast("ℹ️ Tidak ada perubahan untuk disimpan", icon="ℹ️")
                 else:
                     params.append(u.get('id'))
                     try:
@@ -4466,10 +4475,10 @@ def page_user_setting():
                                     (u.get('id'), "USER_UPDATE", detail))
                         except Exception:
                             pass
-                        st.success("✅ Banking information updated successfully.")
+                        st.toast("✅ Informasi banking berhasil diperbarui!", icon="✅")
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Failed to update: {e}")
+                        st.toast(f"❌ Gagal update: {e}", icon="❌")
     
     # --- Certification Tab ---
     with tabs[3]:
@@ -7538,15 +7547,13 @@ def page_tracer():
                     except Exception:
                         pass
                     # Warn if new NIK is frozen
-                    try:
-                        if nik_new and is_frozen_by_nik(nik_new):
-                            st.warning("Perhatian: NIK ini berada dalam daftar freeze.")
-                    except Exception:
-                        pass
-                    st.success("Data berhasil diperbarui.")
+                    if nik_new and is_frozen_by_nik(nik_new):
+                        st.toast("⚠️ Perhatian: NIK ini berada dalam daftar freeze!", icon="⚠️")
+                    
+                    st.toast("✅ Data berhasil diperbarui!", icon="✅")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Gagal update: {e}")
+                    st.toast(f"❌ Gagal update: {e}", icon="❌")
 
     # --- Internal Memo tab ---
     with sub_tabs[1]:
@@ -7662,15 +7669,19 @@ def page_tracer():
                     help="Tekan Ctrl+Enter atau klik tombol Kirim"
                 )
                 send = st.form_submit_button("📤 Kirim", use_container_width=True)
-                if send and msg and msg.strip():
-                    try:
-                        execute(
-                            "INSERT INTO memos (Agreement_No, author_role, author_name, target_role, message) VALUES (?,?,?,?,?)",
-                            (ag_no, send_as_role, tracer_name, target_role, msg.strip())
-                        )
-                        st.success("✅ Memo berhasil dikirim!")
-                        st.rerun()
-                    except Exception as e:
+                if send:
+                    if not msg or not msg.strip():
+                        st.toast("⚠️ Pesan tidak boleh kosong!", icon="⚠️")
+                    else:
+                        try:
+                            execute(
+                                "INSERT INTO memos (Agreement_No, author_role, author_name, target_role, message) VALUES (?,?,?,?,?)",
+                                (ag_no, send_as_role, tracer_name, target_role, msg.strip())
+                            )
+                            st.toast("✅ Memo berhasil dikirim!", icon="✅")
+                            st.rerun()
+                        except Exception as e:
+                            st.toast(f"❌ Gagal mengirim memo: {e}", icon="❌")
                         st.error(f"❌ Gagal mengirim memo: {e}")
 
 def page_guide():
