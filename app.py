@@ -2062,12 +2062,12 @@ def main():
     # CRITICAL: PRE-LOGIN AUTO-RESTORE (WAJIB sync dari Drive sebelum backup!)
     # ========================================================================
     # Ini adalah safeguard utama untuk mencegah overwrite backup lama saat reboot/autosleep
-    # Flow: Deteksi DB fresh → Restore dari Drive → Baru boleh backup
+    # Flow: Deteksi DB fresh → Tampilkan halaman Restore System → Manual restore
     if "prelogin_auto_restore_done" not in st.session_state:
         is_fresh = _is_probably_fresh_seed_db()
         
         if is_fresh:
-            # DB FRESH terdeteksi! WAJIB restore dari Drive terlebih dahulu
+            # DB FRESH terdeteksi! Redirect ke halaman Restore System
             try:
                 if "service_account" not in st.secrets:
                     st.session_state['prelogin_auto_restore_result'] = {
@@ -2075,29 +2075,19 @@ def main():
                         'message': '⚠️ DB fresh terdeteksi, tapi service_account tidak tersedia untuk restore.',
                         'time': datetime.utcnow().isoformat()
                     }
+                    st.session_state.page = 'RestoreStatus'
                 else:
                     service_pre = build_drive_service()
-                    # Force restore (ignore auto_restore_enabled setting untuk keamanan data)
-                    ok_pre, msg_pre = attempt_auto_restore_if_seed(service_pre, FOLDER_ID_DEFAULT)
-                    st.session_state['prelogin_auto_restore_result'] = {
-                        'success': ok_pre,
-                        'message': msg_pre,
-                        'time': datetime.utcnow().isoformat()
-                    }
-                    # Sinkronkan flag untuk mencegah backup langsung setelah restore
-                    st.session_state['auto_restore_checked'] = 'restored' if ok_pre else 'checked'
-                    
-                    # Re-init DB setelah restore untuk memuat data fresh
-                    if ok_pre:
-                        init_db()
-                        # Set flag agar tidak backup dalam 10 menit ke depan
-                        set_setting('auto_restore_last_time', datetime.utcnow().isoformat())
+                    st.session_state['restore_service'] = service_pre
+                    st.session_state['restore_folder_id'] = FOLDER_ID_DEFAULT
+                    st.session_state.page = 'RestoreSystem'
             except Exception as e:
                 st.session_state['prelogin_auto_restore_result'] = {
                     'success': False,
-                    'message': f'❌ Auto-Restore error: {e}',
+                    'message': f'❌ Gagal connect ke Google Drive: {e}',
                     'time': datetime.utcnow().isoformat()
                 }
+                st.session_state.page = 'RestoreStatus'
         else:
             # DB tidak fresh, lanjutkan normal
             st.session_state['prelogin_auto_restore_result'] = {
@@ -2105,17 +2095,9 @@ def main():
                 'message': '✅ DB sudah berisi data, tidak perlu restore.',
                 'time': datetime.utcnow().isoformat()
             }
+            st.session_state.page = 'Authentication'
         
         st.session_state['prelogin_auto_restore_done'] = True
-        
-        # Tentukan halaman tujuan
-        msg_prelogin = st.session_state['prelogin_auto_restore_result'].get('message','')
-        if msg_prelogin.startswith('✅ DB sudah berisi'):
-            # Skip restore status page, langsung ke login
-            st.session_state.page = 'Authentication'
-        else:
-            # Tampilkan status restore (berhasil/gagal)
-            st.session_state.page = 'RestoreStatus'
     
     # Reset flags lama jika user kembali ke halaman login setelah selesai
     if "page" not in st.session_state:
@@ -2194,20 +2176,185 @@ def main():
         # Logic auto restore awal sudah dilakukan sebelum halaman login (RestoreStatus page).
         pass
     
+    # Halaman Restore System (saat DB fresh, sebelum login)
+    if st.session_state.page == 'RestoreSystem' and not user:
+        st.markdown("""
+        <style>
+        /* Hide sidebar on restore page */
+        [data-testid="stSidebar"] {display: none !important;}
+        
+        /* Limit content width to compact centered layout */
+        .main .block-container {
+            max-width: 600px !important;
+            padding-left: 2rem !important;
+            padding-right: 2rem !important;
+            padding-top: 3rem !important;
+        }
+        
+        /* Center the container */
+        section[data-testid="stMain"] > div {
+            max-width: 100%;
+            display: flex;
+            justify-content: center;
+        }
+        
+        /* Responsive for mobile */
+        @media (max-width: 768px) {
+            .main .block-container {
+                max-width: 100% !important;
+                padding-left: 1rem !important;
+                padding-right: 1rem !important;
+            }
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        st.image("logo.png", width=180)
+        st.title("🔄 Restore System")
+        st.markdown("---")
+        
+        st.warning("⚠️ Database fresh terdeteksi!")
+        st.info("💡 Sistem mendeteksi database masih kosong atau baru di-reset. Silakan restore dari backup Google Drive untuk memulihkan data.")
+        
+        st.markdown("### 📦 Status Database")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("User Terdaftar", "≤ 2 (Seed)")
+        with col2:
+            st.metric("Backup Log", "Kosong")
+        
+        st.markdown("---")
+        st.markdown("### 🔍 Cara Kerja Restore")
+        st.markdown("""
+        1. Sistem akan mencari file backup terbaru di Google Drive
+        2. File backup akan divalidasi (format SQLite, ukuran > 50KB)
+        3. Database saat ini akan di-backup lokal sebagai `.before_restore.bak`
+        4. Data dari backup akan dipulihkan ke database utama
+        5. Setelah berhasil, Anda akan diarahkan ke halaman login
+        """)
+        
+        st.markdown("---")
+        
+        # Tombol restore
+        col_btn1, col_btn2 = st.columns([3, 2])
+        with col_btn1:
+            if st.button("⬇️ Restore dari Drive", type="primary", use_container_width=True):
+                with st.spinner("🔄 Memproses restore dari Google Drive..."):
+                    try:
+                        service = st.session_state.get('restore_service')
+                        folder_id = st.session_state.get('restore_folder_id', FOLDER_ID_DEFAULT)
+                        
+                        if not service:
+                            st.error("❌ Service Google Drive tidak tersedia")
+                            st.session_state['prelogin_auto_restore_result'] = {
+                                'success': False,
+                                'message': '❌ Service Google Drive tidak tersedia',
+                                'time': datetime.utcnow().isoformat()
+                            }
+                        else:
+                            # Force restore
+                            ok_pre, msg_pre = attempt_auto_restore_if_seed(service, folder_id)
+                            st.session_state['prelogin_auto_restore_result'] = {
+                                'success': ok_pre,
+                                'message': msg_pre,
+                                'time': datetime.utcnow().isoformat()
+                            }
+                            
+                            # Sinkronkan flag untuk mencegah backup langsung setelah restore
+                            st.session_state['auto_restore_checked'] = 'restored' if ok_pre else 'checked'
+                            
+                            # Re-init DB setelah restore untuk memuat data fresh
+                            if ok_pre:
+                                init_db()
+                                # Set flag agar tidak backup dalam 15 menit ke depan
+                                set_setting('auto_restore_last_time', datetime.utcnow().isoformat())
+                                
+                    except Exception as e:
+                        st.session_state['prelogin_auto_restore_result'] = {
+                            'success': False,
+                            'message': f'❌ Auto-Restore error: {e}',
+                            'time': datetime.utcnow().isoformat()
+                        }
+                    
+                    # Redirect ke RestoreStatus
+                    st.session_state.page = 'RestoreStatus'
+                    st.rerun()
+        
+        with col_btn2:
+            if st.button("⏭️ Skip (Lanjut Login)", use_container_width=True):
+                st.warning("⚠️ Skip restore tidak direkomendasikan!")
+                st.session_state.page = 'Authentication'
+                st.rerun()
+        
+        st.markdown("---")
+        st.caption("⚙️ Restore System — Minama Felonic Solutions")
+        return
+    
     # Halaman status restore (sebelum login) bila baru saja wake & mencoba restore
     if st.session_state.page == 'RestoreStatus' and not user:
-        st.title('⏳ Memeriksa / Memulihkan Database')
+        st.markdown("""
+        <style>
+        /* Hide sidebar on restore status page */
+        [data-testid="stSidebar"] {display: none !important;}
+        
+        /* Limit content width to compact centered layout */
+        .main .block-container {
+            max-width: 600px !important;
+            padding-left: 2rem !important;
+            padding-right: 2rem !important;
+            padding-top: 3rem !important;
+        }
+        
+        /* Center the container */
+        section[data-testid="stMain"] > div {
+            max-width: 100%;
+            display: flex;
+            justify-content: center;
+        }
+        
+        /* Responsive for mobile */
+        @media (max-width: 768px) {
+            .main .block-container {
+                max-width: 100% !important;
+                padding-left: 1rem !important;
+                padding-right: 1rem !important;
+            }
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        st.image("logo.png", width=180)
+        st.title('⏳ Status Restore')
+        st.markdown("---")
+        
         res = st.session_state.get('prelogin_auto_restore_result', {})
         if res.get('success'):
-            st.success(f"✅ Berhasil restore otomatis: {res.get('message','')} ")
+            st.success(f"✅ Berhasil restore: {res.get('message','')} ")
             st.info("💡 Database telah dipulihkan dari backup Google Drive. Silakan login untuk melanjutkan.")
             
             # Tambahkan informasi tentang backup pertama setelah login
             st.caption("📌 Setelah login pertama kali, sistem akan membuat backup baru untuk checkpoint.")
+            
+            # Auto-redirect ke login setelah 2 detik
+            import time
+            with st.spinner("Mengarahkan ke halaman login..."):
+                time.sleep(2)
+            st.session_state.page = 'Authentication'
+            st.rerun()
         else:
-            st.info(res.get('message','Tidak ada informasi restore.'))
-        st.caption(f"⏰ Waktu: {res.get('time','-')}")
-        st.markdown('---')
+            st.error("❌ Restore gagal!")
+            st.warning(res.get('message','Tidak ada informasi restore.'))
+            st.caption(f"⏰ Waktu: {res.get('time','-')}")
+            
+            st.markdown("---")
+            st.markdown("### 🔧 Langkah Selanjutnya")
+            st.markdown("""
+            - Periksa koneksi Google Drive
+            - Pastikan file backup tersedia di Drive
+            - Hubungi administrator jika masalah berlanjut
+            """)
+        
+        st.markdown("---")
         if st.button('🔐 Lanjut ke Login »', type='primary', use_container_width=True):
             st.session_state.page = 'Authentication'
             st.rerun()
