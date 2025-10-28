@@ -295,7 +295,9 @@ def init_db():
             'NIK_KTP', 'EMPLOYMENT_UPDATE', 'EMPLOYER',
             'Debtor_Legal_Name', 'Employee_Name', 'Employee_ID_Number', 'Debtor_Relation_to_Employee',
             # Agent-updated fields (optional on upload)
-            'STATUS', 'REGISTERED_PHONE', 'Additional_Contacts', 'Remarks_Suggested_NIK_Prospect', 'Payment', 'Paid_Off_Status', 'Paid_Off'
+            'STATUS', 'REGISTERED_PHONE', 'Additional_Contacts', 'Remarks_Suggested_NIK_Prospect', 'Payment', 'Paid_Off_Status', 'Paid_Off',
+            # Approval fields
+            'approval_status', 'approved_by', 'approved_at'
         ]:
             if col not in cols:
                 c.execute(f"ALTER TABLE supervisor_data ADD COLUMN {col} TEXT")
@@ -3499,120 +3501,218 @@ def page_dashboard():
         greet = "Selamat malam"
     st.markdown(f"<h2 style='margin-bottom:0'>Halo, {greet} {name}</h2>", unsafe_allow_html=True)
 
-    # -------- KPI calculations --------
+    # -------- KPI calculations (Financial Focus) --------
     today = today_wib()
-    start_of_week = today - timedelta(days=today.weekday())
     start_of_month = today.replace(day=1)
     last_month_end = start_of_month - timedelta(days=1)
     last_month_start = last_month_end.replace(day=1)
 
-    # Total users (approved)
-    total_users = (fetchone("SELECT COUNT(*) c FROM users WHERE approved=1") or {}).get('c', 0)
-    # Active (login) today
-    active_today = (fetchone("""
-        SELECT COUNT(DISTINCT user_id) c
-        FROM audit_logs
-        WHERE action='LOGIN' AND DATE(timestamp) = DATE(?)
-    """, (today.isoformat(),)) or {}).get('c', 0)
+    # A) Running Month Saving = Total paid_amount bulan berjalan
+    running_month_saving = (fetchone("""
+        SELECT COALESCE(SUM(paid_amount), 0) as total
+        FROM payments
+        WHERE DATE(paid_date) >= DATE(?)
+    """, (start_of_month.isoformat(),)) or {}).get('total', 0)
 
-    # Completed = agreements with any payment recorded
-    completed_total = (fetchone("SELECT COUNT(DISTINCT Agreement_No) c FROM payments WHERE COALESCE(paid_amount,0) > 0") or {}).get('c', 0)
-    # Total assigned loans (active)
-    assigned_total = (fetchone("SELECT COUNT(DISTINCT Agreement_No) c FROM agent_assignments WHERE IFNULL(active,1)=1") or {}).get('c', 0)
-    pending_total = max(assigned_total - completed_total, 0)
-
-    # Completed this week and this month (for tiny captions)
-    completed_week = (fetchone("SELECT COUNT(DISTINCT Agreement_No) c FROM payments WHERE DATE(paid_date) >= DATE(?)", (start_of_week.isoformat(),)) or {}).get('c', 0)
-    completed_month = (fetchone("SELECT COUNT(DISTINCT Agreement_No) c FROM payments WHERE DATE(paid_date) BETWEEN DATE(?) AND DATE(?)", (start_of_month.isoformat(), today.isoformat())) or {}).get('c', 0)
-
-    # Docs/new assignments this month vs last month
-    new_this_month = (fetchone("SELECT COUNT(DISTINCT Agreement_No) c FROM agent_assignments WHERE DATE(assigned_at) BETWEEN DATE(?) AND DATE(?)", (start_of_month.isoformat(), today.isoformat())) or {}).get('c', 0)
-    new_last_month = (fetchone("SELECT COUNT(DISTINCT Agreement_No) c FROM agent_assignments WHERE DATE(assigned_at) BETWEEN DATE(?) AND DATE(?)", (last_month_start.isoformat(), last_month_end.isoformat())) or {}).get('c', 0)
-    pct_vs_last = 0.0
+    # B) Last Month Total = Total paid_amount bulan lalu
+    last_month_saving = (fetchone("""
+        SELECT COALESCE(SUM(paid_amount), 0) as total
+        FROM payments
+        WHERE DATE(paid_date) BETWEEN DATE(?) AND DATE(?)
+    """, (last_month_start.isoformat(), last_month_end.isoformat())) or {}).get('total', 0)
+    
+    # Comparison: hijau jika running month > last month, merah jika lebih kecil
+    saving_trend = "up" if running_month_saving >= last_month_saving else "down"
+    saving_diff = running_month_saving - last_month_saving
+    saving_pct = 0.0
     try:
-        if new_last_month > 0:
-            pct_vs_last = (new_this_month / new_last_month) * 100.0
+        if last_month_saving > 0:
+            saving_pct = (saving_diff / last_month_saving) * 100.0
     except Exception:
-        pct_vs_last = 0.0
+        saving_pct = 0.0
 
-    # Pending delta vs yesterday
-    yesterday = today - timedelta(days=1)
-    assigned_y = (fetchone("SELECT COUNT(DISTINCT Agreement_No) c FROM agent_assignments WHERE DATE(assigned_at) <= DATE(?)", (yesterday.isoformat(),)) or {}).get('c', 0)
-    completed_y = (fetchone("SELECT COUNT(DISTINCT Agreement_No) c FROM payments WHERE DATE(paid_date) <= DATE(?)", (yesterday.isoformat(),)) or {}).get('c', 0)
-    pending_y = max(assigned_y - completed_y, 0)
-    delta_pending = pending_total - pending_y
+    # C) Stock PTP = Total agent_ptp_amount dengan status PTP (belum paid)
+    stock_ptp = (fetchone("""
+        SELECT COALESCE(SUM(agent_ptp_amount), 0) as total
+        FROM agent_results
+        WHERE UPPER(agent_status) = 'PTP'
+        AND Agreement_No NOT IN (
+            SELECT DISTINCT Agreement_No FROM payments WHERE COALESCE(paid_amount,0) > 0
+        )
+    """) or {}).get('total', 0)
 
-    # -------- KPI cards (styled) --------
+    # D) Forecast Closing = Running Month Saving + Stock PTP bulan berjalan
+    # PTP bulan berjalan = PTP yang dibuat bulan ini
+    ptp_this_month = (fetchone("""
+        SELECT COALESCE(SUM(agent_ptp_amount), 0) as total
+        FROM agent_results
+        WHERE UPPER(agent_status) = 'PTP'
+        AND DATE(updated_at) >= DATE(?)
+        AND Agreement_No NOT IN (
+            SELECT DISTINCT Agreement_No FROM payments WHERE COALESCE(paid_amount,0) > 0
+        )
+    """, (start_of_month.isoformat(),)) or {}).get('total', 0)
+    
+    forecast_closing = running_month_saving + ptp_this_month
+
+    # -------- Enhanced KPI cards (Financial Dashboard) --------
     st.markdown(
         """
         <style>
-        /* KPI cards - row of 4 with soft accent circle like the reference */
-        .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 12px 0 4px 0; }
-        @media (max-width: 1100px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+        /* Enhanced KPI cards with modern financial dashboard aesthetic */
+        .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin: 16px 0 8px 0; }
+        @media (max-width: 1200px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); gap: 14px; } }
         @media (max-width: 700px) { .kpi-grid { grid-template-columns: 1fr; } }
-        .kpi-card { position: relative; overflow: hidden; background: #fff; border: 1px solid #E9ECEF; border-radius: 16px; padding: 18px; box-shadow: 0 2px 6px rgba(16,24,40,0.05); }
-        .kpi-card::after { content:""; position:absolute; right:-30px; top:-40px; width:180px; height:180px; border-radius: 50%; background: radial-gradient(circle at center, var(--accent-light, #EEF4FF), rgba(255,255,255,0) 65%); opacity:.8; }
-        .kpi-title { letter-spacing: .4px; text-transform: uppercase; font-size: 12px; color: #475467; margin-bottom: 8px; }
-        .kpi-value { font-size: 30px; font-weight: 800; color: var(--accent, #1F2937); line-height: 1.1; }
-        .kpi-sub { font-size: 12px; color: #667085; margin-top: 6px; }
-        /* Accent variants */
-        .accent-orange { --accent: #F97316; --accent-light: #FFF7ED; }
-        .accent-blue   { --accent: #2563EB; --accent-light: #EEF4FF; }
-        .accent-purple { --accent: #9333EA; --accent-light: #F4F3FF; }
-        .accent-green  { --accent: #16A34A; --accent-light: #ECFDF3; }
-        /* Pills (still used in approvals banner) */
-        .pill { display:inline-flex; align-items:center; gap:6px; padding:2px 8px; border-radius: 999px; font-size:12px; }
+        
+        /* Financial KPI card with gradient background */
+        .kpi-card { 
+            position: relative; 
+            overflow: hidden; 
+            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+            border: 1px solid #E5E7EB; 
+            border-radius: 20px; 
+            padding: 24px 20px; 
+            box-shadow: 0 4px 12px rgba(16,24,40,0.08), 0 1px 3px rgba(16,24,40,0.05);
+            transition: all 0.3s ease;
+        }
+        .kpi-card:hover {
+            box-shadow: 0 8px 24px rgba(16,24,40,0.12), 0 2px 6px rgba(16,24,40,0.08);
+            transform: translateY(-2px);
+        }
+        
+        /* Accent circle (decorative element) */
+        .kpi-card::after { 
+            content:""; 
+            position:absolute; 
+            right:-40px; 
+            top:-50px; 
+            width:200px; 
+            height:200px; 
+            border-radius: 50%; 
+            background: radial-gradient(circle at center, var(--accent-light, #EEF4FF), rgba(255,255,255,0) 60%); 
+            opacity:.5;
+            z-index: 0;
+        }
+        
+        /* Content layer above decoration */
+        .kpi-card > * { position: relative; z-index: 1; }
+        
+        /* Title with icon support */
+        .kpi-title { 
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            letter-spacing: .5px; 
+            text-transform: uppercase; 
+            font-size: 11px; 
+            font-weight: 700;
+            color: #6B7280; 
+            margin-bottom: 12px;
+        }
+        
+        /* Large value with currency formatting */
+        .kpi-value { 
+            font-size: 32px; 
+            font-weight: 800; 
+            color: var(--accent, #111827); 
+            line-height: 1.1;
+            margin-bottom: 8px;
+            letter-spacing: -0.5px;
+        }
+        
+        /* Subtitle with trend indicators */
+        .kpi-sub { 
+            font-size: 13px; 
+            color: #9CA3AF; 
+            margin-top: 4px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        /* Trend badge */
+        .trend-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .trend-up { background: #ECFDF3; color: #047857; }
+        .trend-down { background: #FEF2F2; color: #DC2626; }
+        
+        /* Color variants for different metrics */
+        .accent-teal { --accent: #0D9488; --accent-light: #CCFBF1; }
+        .accent-emerald { --accent: #059669; --accent-light: #D1FAE5; }
+        .accent-amber { --accent: #F59E0B; --accent-light: #FEF3C7; }
+        .accent-violet { --accent: #7C3AED; --accent-light: #EDE9FE; }
+        
+        /* Pills (approval banner) */
+        .pill { display:inline-flex; align-items:center; gap:6px; padding:3px 10px; border-radius: 999px; font-size:12px; font-weight: 600; }
         .pill-warning { background:#FFF7ED; color:#C2410C; }
         .pill-success { background:#ECFDF3; color:#027A48; }
         .pill-info { background:#EEF4FF; color:#3538CD; }
-        .pill-purple { background:#F4F3FF; color:#6941C6; }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    # Render KPI cards side-by-side using Streamlit columns (more reliable than cross-markdown wrappers)
+    # Render enhanced financial KPI cards
     kpi_cols = st.columns(4)
+    
     with kpi_cols[0]:
         st.markdown(
             f"""
-            <div class='kpi-card accent-orange'>
-                <div class='kpi-title'>Dokumen Pending</div>
-                <div class='kpi-value'>{pending_total:,}</div>
-                <div class='kpi-sub'>{{sign}}{abs(delta_pending):,} dari kemarin</div>
-            </div>
-            """.replace("{sign}", "+" if delta_pending>=0 else "-"),
-            unsafe_allow_html=True,
-        )
-    with kpi_cols[1]:
-        st.markdown(
-            f"""
-            <div class='kpi-card accent-blue'>
-                <div class='kpi-title'>Dokumen Selesai</div>
-                <div class='kpi-value'>{completed_total:,}</div>
-                <div class='kpi-sub'>+{completed_week:,} minggu ini</div>
+            <div class='kpi-card accent-teal'>
+                <div class='kpi-title'>💰 Running Month Saving</div>
+                <div class='kpi-value'>Rp {running_month_saving:,.0f}</div>
+                <div class='kpi-sub'>Total pembayaran bulan ini</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
+    
+    with kpi_cols[1]:
+        trend_color = "#059669" if saving_trend == "up" else "#DC2626"
+        trend_icon = "↗" if saving_trend == "up" else "↘"
+        trend_class = "trend-up" if saving_trend == "up" else "trend-down"
+        st.markdown(
+            f"""
+            <div class='kpi-card accent-emerald'>
+                <div class='kpi-title'>📊 Last Month</div>
+                <div class='kpi-value'>Rp {last_month_saving:,.0f}</div>
+                <div class='kpi-sub'>
+                    <span class='trend-badge {trend_class}'>{trend_icon} {abs(saving_pct):.1f}%</span>
+                    <span style='color: {trend_color}; font-weight: 600;'>
+                        {"Lebih tinggi" if saving_trend == "up" else "Lebih rendah"}
+                    </span>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    
     with kpi_cols[2]:
         st.markdown(
             f"""
-            <div class='kpi-card accent-purple'>
-                <div class='kpi-title'>Total User</div>
-                <div class='kpi-value'>{total_users:,}</div>
-                <div class='kpi-sub'>{active_today:,} aktif hari ini</div>
+            <div class='kpi-card accent-amber'>
+                <div class='kpi-title'>🎯 Stock PTP</div>
+                <div class='kpi-value'>Rp {stock_ptp:,.0f}</div>
+                <div class='kpi-sub'>Total janji bayar aktif</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
+    
     with kpi_cols[3]:
         st.markdown(
             f"""
-            <div class='kpi-card accent-green'>
-                <div class='kpi-title'>Dokumen Bulan Ini</div>
-                <div class='kpi-value'>{new_this_month:,}</div>
-                <div class='kpi-sub'>{(pct_vs_last or 0):.0f}% dari bulan lalu</div>
+            <div class='kpi-card accent-violet'>
+                <div class='kpi-title'>🚀 Forecast Closing</div>
+                <div class='kpi-value'>Rp {forecast_closing:,.0f}</div>
+                <div class='kpi-sub'>Saving + Prospect bulan ini</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -4225,7 +4325,7 @@ def page_supervisor():
     require_roles(("Superuser", "Supervisor"))
     st.title("Supervisor Menu")
     # Monitoring first so it's the default view
-    tabs = st.tabs(["Monitoring", "Input", "Trace Assigning", "Agent Assigning", "Trace Results", "Enriched & Lookup", "Freeze Manager"])
+    tabs = st.tabs(["Monitoring", "Data Approval", "Input", "Trace Assigning", "Agent Assigning", "Trace Results", "Enriched & Lookup", "Freeze Manager"])
 
     # --- Monitoring Tab ---
     with tabs[0]:
@@ -4514,8 +4614,169 @@ def page_supervisor():
 
         # Enriched Monitoring & Lookup NIK dipindahkan ke tab khusus "Enriched & Lookup"
 
-    # --- Input Tab ---
+    # --- Data Approval Tab ---
     with tabs[1]:
+        st.subheader("📋 Data Approval - Supervisor")
+        st.caption("Approve atau Reject data supervisor sebelum dapat di-assign ke Tracer/Agent. Status: PENDING → APPROVED/REJECTED")
+        
+        # Filter
+        filter_status = st.selectbox("Filter by Status", ["PENDING", "APPROVED", "REJECTED", "ALL"], index=0, key="approval_filter")
+        
+        # Query data berdasarkan filter
+        where_approval = []
+        params_approval = []
+        if filter_status != "ALL":
+            if filter_status == "PENDING":
+                where_approval.append("(approval_status IS NULL OR approval_status = 'PENDING')")
+            else:
+                where_approval.append("approval_status = ?")
+                params_approval.append(filter_status)
+        
+        where_sql_approval = " AND ".join(where_approval) if where_approval else "1=1"
+        
+        rows_approval = fetchall(
+            f"""
+            SELECT id, Case_ID, Customer_name, NIK_KTP, DPD, Principle_Outstanding, 
+                   COALESCE(approval_status, 'PENDING') as approval_status, 
+                   approved_by, approved_at
+            FROM supervisor_data
+            WHERE {where_sql_approval}
+            ORDER BY id DESC
+            LIMIT 200
+            """,
+            tuple(params_approval)
+        )
+        
+        if not rows_approval:
+            st.info("Tidak ada data yang perlu di-approve.")
+        else:
+            df_approval = pd.DataFrame(rows_approval)
+            df_approval.insert(0, "Selected", False)
+            
+            st.caption(f"Menampilkan {len(df_approval)} data dengan status: {filter_status}")
+            
+            # Checkbox select all
+            select_all_approval = st.checkbox("Pilih semua yang ditampilkan", key="approval_select_all")
+            if select_all_approval:
+                df_approval["Selected"] = True
+            
+            # Data editor
+            edited_approval = st.data_editor(
+                df_approval,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Selected": st.column_config.CheckboxColumn("Pilih", default=False),
+                    "id": st.column_config.TextColumn("ID", disabled=True),
+                    "Case_ID": st.column_config.TextColumn("Case ID", disabled=True),
+                    "Customer_name": st.column_config.TextColumn("Customer", disabled=True),
+                    "NIK_KTP": st.column_config.TextColumn("NIK", disabled=True),
+                    "DPD": st.column_config.TextColumn("DPD", disabled=True),
+                    "Principle_Outstanding": st.column_config.TextColumn("Outstanding", disabled=True),
+                    "approval_status": st.column_config.TextColumn("Status", disabled=True),
+                    "approved_by": st.column_config.TextColumn("Approved By", disabled=True),
+                    "approved_at": st.column_config.TextColumn("Approved At", disabled=True),
+                },
+                num_rows="fixed"
+            )
+            
+            # Get selected rows
+            try:
+                selected_approval_rows = edited_approval[edited_approval["Selected"] == True]
+            except Exception:
+                selected_approval_rows = pd.DataFrame()
+            
+            # Action buttons
+            col_approve, col_reject = st.columns(2)
+            
+            with col_approve:
+                st.markdown("#### ✅ Approve Selected")
+                if st.button("APPROVE", type="primary", key="btn_approve_data"):
+                    if len(selected_approval_rows) == 0:
+                        st.warning("Pilih minimal satu baris dahulu.")
+                    else:
+                        try:
+                            u = current_user() or {}
+                            by = (u.get('full_name') or u.get('login_id') or '-')
+                            approved_at = now_wib().isoformat()
+                            approved_count = 0
+                            
+                            for _, row in selected_approval_rows.iterrows():
+                                case_id = row.get('Case_ID')
+                                try:
+                                    execute(
+                                        """
+                                        UPDATE supervisor_data
+                                        SET approval_status = 'APPROVED',
+                                            approved_by = ?,
+                                            approved_at = ?
+                                        WHERE Case_ID = ?
+                                        """,
+                                        (by, approved_at, case_id)
+                                    )
+                                    approved_count += 1
+                                except Exception:
+                                    pass
+                            
+                            # Audit log
+                            try:
+                                execute(
+                                    "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                                    (u.get('id') if u else None, "DATA_APPROVAL", f"Approved {approved_count} data by {by}")
+                                )
+                            except Exception:
+                                pass
+                            
+                            st.success(f"✅ Berhasil approve {approved_count} data!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Gagal approve data: {e}")
+            
+            with col_reject:
+                st.markdown("#### ❌ Reject Selected")
+                if st.button("REJECT", key="btn_reject_data"):
+                    if len(selected_approval_rows) == 0:
+                        st.warning("Pilih minimal satu baris dahulu.")
+                    else:
+                        try:
+                            u = current_user() or {}
+                            by = (u.get('full_name') or u.get('login_id') or '-')
+                            rejected_at = now_wib().isoformat()
+                            rejected_count = 0
+                            
+                            for _, row in selected_approval_rows.iterrows():
+                                case_id = row.get('Case_ID')
+                                try:
+                                    execute(
+                                        """
+                                        UPDATE supervisor_data
+                                        SET approval_status = 'REJECTED',
+                                            approved_by = ?,
+                                            approved_at = ?
+                                        WHERE Case_ID = ?
+                                        """,
+                                        (by, rejected_at, case_id)
+                                    )
+                                    rejected_count += 1
+                                except Exception:
+                                    pass
+                            
+                            # Audit log
+                            try:
+                                execute(
+                                    "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                                    (u.get('id') if u else None, "DATA_REJECTION", f"Rejected {rejected_count} data by {by}")
+                                )
+                            except Exception:
+                                pass
+                            
+                            st.success(f"❌ Berhasil reject {rejected_count} data!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Gagal reject data: {e}")
+
+    # --- Input Tab ---
+    with tabs[2]:
         st.subheader("Upload Excel/CSV Supervisor Data")
         field_names = [
             "DT", "Lending_Entity", "Date", "Case_ID", "Task_ID", "Customer_name", "email", "Gender", "Customer_Occupation", "DPD", "Principle_Outstanding", "Principal_Overdue_CURR", "Interest_Overdue_CURR", "Last_Late_Fee", "Return_Date", "Detail", "Loan_Type", "Third_Uid", "Product", "Home_Address", "Province", "City", "Street", "RoomNumber", "Postcode", "Assignment_Date", "Withdrawal_Date", "Phone_Number_1", "Phone_Number_2", "Contact_Type_1", "Contact_Name_1", "Contact_Phone_1", "Contact_Type_2", "Contact_Name_2", "Contact_Phone_2", "Contact_Type_3", "Contact_Name_3", "Contact_Phone_3", "Contact_Type_4", "Contact_Name_4", "Contact_Phone_4", "Contact_Type_5", "Contact_Name_5", "Contact_Phone_5", "Contact_Type_6", "Contact_Name_6", "Contact_Phone_6", "Contact_Type_7", "Contact_Name_7", "Contact_Phone_7", "Contact_Type_8", "Contact_Name_8", "Contact_Phone_8", "Total_debt_in_third_party", "Repayment_on_third_Party", "Remaining_Loan_on_third_Party", "Virtual_Account_Number",
@@ -4742,7 +5003,9 @@ def page_supervisor():
         st.markdown("---")
         
 
-    with tabs[2]:
+    # --- Trace Assigning Tab ---
+    with tabs[3]:
+        st.subheader("Assign ke Tracer")
         q1, q2, q3, q4 = st.columns([1.2, 1.2, 1.2, 0.6])
         with q1:
             f_case = st.text_input("Filter Case_ID", key="ta_f_case")
@@ -4753,8 +5016,12 @@ def page_supervisor():
         with q4:
             limit_rows = st.number_input("Limit Row", min_value=10, max_value=2000, value=200, step=10, key="ta_limit")
 
-    # Build SQL with filters
+    # Build SQL with filters + exclude yang sudah di-assign ke Agent
         where = ["Case_ID IS NOT NULL", "TRIM(Case_ID)<>''"]
+        # VALIDASI: Hanya tampilkan data yang sudah APPROVED
+        where.append("approval_status = 'APPROVED'")
+        # VALIDASI: Exclude Case_ID yang sudah di-assign ke Agent
+        where.append("Case_ID NOT IN (SELECT Agreement_No FROM agent_assignments WHERE IFNULL(active,1)=1)")
         params = []
         if f_case:
             where.append("Case_ID LIKE ?")
@@ -4865,12 +5132,19 @@ def page_supervisor():
                     conn = _sql.connect(DB_PATH, timeout=30)
                     conn.row_factory = sqlite3.Row
                     cur = conn.cursor()
-                    inserted = 0; updated = 0; frozen = 0
+                    inserted = 0; updated = 0; frozen = 0; already_agent = 0
                     for _, r in (edited[edited["Selected"] == True]).iterrows():
                         agr = str(r.get("Case_ID") or "").strip()
                         if not agr:
                             continue
                         nik_val = str(r.get("NIK_KTP") or "").strip() or None
+                        
+                        # VALIDASI: Cek apakah sudah di-assign ke Agent
+                        check_agent = cur.execute("SELECT COUNT(*) as cnt FROM agent_assignments WHERE Agreement_No=? AND IFNULL(active,1)=1", (agr,)).fetchone()
+                        if check_agent and check_agent['cnt'] > 0:
+                            already_agent += 1
+                            continue
+                        
                         # Freeze checks
                         if is_frozen_by_agreement(agr) or (nik_val and is_frozen_by_nik(nik_val)):
                             frozen += 1
@@ -4897,12 +5171,17 @@ def page_supervisor():
                         except Exception:
                             pass
                     conn.commit(); conn.close()
-                    done = (len(sel) - frozen)
-                    st.success(f"Assign selesai. Diproses: {done}. Dilewati karena Freeze: {frozen}.")
+                    done = (len(sel) - frozen - already_agent)
+                    msg = f"Assign selesai. Diproses: {done}."
+                    if frozen > 0:
+                        msg += f" Dilewati karena Freeze: {frozen}."
+                    if already_agent > 0:
+                        msg += f" Dilewati karena sudah di-assign ke Agent: {already_agent}."
+                    st.success(msg)
                     # Audit
                     u = current_user() or {}
                     try:
-                        execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (u.get('id'), "TRACE_ASSIGN_FROM_SUP_TABLE", f"{done} rows to {target_tracer_tbl}; frozen {frozen}"))
+                        execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (u.get('id'), "TRACE_ASSIGN_FROM_SUP_TABLE", f"{done} rows to {target_tracer_tbl}; frozen {frozen}; already_agent {already_agent}"))
                     except Exception:
                         pass
                     st.rerun()
@@ -4926,12 +5205,19 @@ def page_supervisor():
                     conn.row_factory = sqlite3.Row
                     cur = conn.cursor()
                     counts = {t: 0 for t in tracers_multi}
-                    frozen = 0; done = 0
+                    frozen = 0; done = 0; already_agent = 0
                     for i, r in enumerate(rows_to_assign):
                         agr = str(r.get("Case_ID") or "").strip()
                         if not agr:
                             continue
                         nik_val = str(r.get("NIK_KTP") or "").strip() or None
+                        
+                        # VALIDASI: Cek apakah sudah di-assign ke Agent
+                        check_agent = cur.execute("SELECT COUNT(*) as cnt FROM agent_assignments WHERE Agreement_No=? AND IFNULL(active,1)=1", (agr,)).fetchone()
+                        if check_agent and check_agent['cnt'] > 0:
+                            already_agent += 1
+                            continue
+                        
                         if is_frozen_by_agreement(agr) or (nik_val and is_frozen_by_nik(nik_val)):
                             frozen += 1
                             continue
@@ -4958,11 +5244,17 @@ def page_supervisor():
                     conn.commit(); conn.close()
                     # Summary
                     summary = ", ".join([f"{k}:{v}" for k,v in counts.items()])
-                    st.success(f"Distribusi selesai. Diproses: {done}. Freeze: {frozen}. Rincian: {summary}")
+                    msg = f"Distribusi selesai. Diproses: {done}."
+                    if frozen > 0:
+                        msg += f" Freeze: {frozen}."
+                    if already_agent > 0:
+                        msg += f" Sudah di-assign ke Agent: {already_agent}."
+                    msg += f" Rincian: {summary}"
+                    st.success(msg)
                     # Audit
                     u = current_user() or {}
                     try:
-                        execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (u.get('id'), "TRACE_ASSIGN_RANDOM_FROM_SUP_TABLE", f"done {done}; frozen {frozen}; {summary}"))
+                        execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (u.get('id'), "TRACE_ASSIGN_RANDOM_FROM_SUP_TABLE", f"done {done}; frozen {frozen}; already_agent {already_agent}; {summary}"))
                     except Exception:
                         pass
                     st.rerun()
@@ -5071,7 +5363,7 @@ def page_supervisor():
 
 
     # --- Agent Assigning Tab ---
-    with tabs[3]:
+    with tabs[4]:
         st.subheader("Assign ke Agent")
         # Filters similar to Trace Assigning
         q1, q2, q3, q4 = st.columns([1.2, 1.2, 1.2, 0.6])
@@ -5088,6 +5380,8 @@ def page_supervisor():
 
         # Build SQL with filters
         wh = ["Case_ID IS NOT NULL", "TRIM(Case_ID)<>''"]
+        # VALIDASI: Hanya tampilkan data yang sudah APPROVED
+        wh.append("approval_status = 'APPROVED'")
         par = []
         if fa_case:
             wh.append("Case_ID LIKE ?")
@@ -5100,6 +5394,8 @@ def page_supervisor():
             par.extend([f"%{fa_phone.strip()}%", f"%{fa_phone.strip()}%"])
         if hide_assigned:
             wh.append("Case_ID NOT IN (SELECT Agreement_No FROM agent_assignments WHERE IFNULL(active,1)=1)")
+        # Exclude data already assigned to tracer
+        wh.append("Case_ID NOT IN (SELECT Agreement_No FROM assign_tracer WHERE IFNULL(Assigned_To,'')!='')")
         wh_sql = " AND ".join(wh) if wh else "1=1"
 
         # Determine available columns dynamically
@@ -5194,6 +5490,7 @@ def page_supervisor():
                         u = current_user() or {}
                         by = (u.get('full_name') or u.get('login_id') or '-')
                         frozen_skips = 0
+                        already_tracer = 0
                         assigned = 0
                         for _, r in selected_rows.iterrows():
                             agr = str(r.get('Case_ID') or '').strip()
@@ -5204,6 +5501,18 @@ def page_supervisor():
                                 if is_frozen_by_agreement(agr):
                                     frozen_skips += 1
                                     continue
+                            except Exception:
+                                pass
+                            # Check if already assigned to tracer
+                            try:
+                                conn = get_connection()
+                                cur = conn.cursor()
+                                cur.execute("SELECT COUNT(*) as cnt FROM assign_tracer WHERE Agreement_No=? AND IFNULL(Assigned_To,'')!=''", (agr,))
+                                if cur.fetchone()['cnt'] > 0:
+                                    already_tracer += 1
+                                    conn.close()
+                                    continue
+                                conn.close()
                             except Exception:
                                 pass
                             try:
@@ -5226,11 +5535,11 @@ def page_supervisor():
                         try:
                             execute(
                                 "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
-                                (u.get('id') if u else None, "AGENT_ASSIGN_FROM_SUP_TABLE", f"Assigned {assigned} to {sel_agent}; frozen skipped {frozen_skips}")
+                                (u.get('id') if u else None, "AGENT_ASSIGN_FROM_SUP_TABLE", f"Assigned {assigned} to {sel_agent}; frozen: {frozen_skips}; already_tracer: {already_tracer}")
                             )
                         except Exception:
                             pass
-                        st.success(f"Berhasil assign {assigned} dokumen. Dilewati (frozen): {frozen_skips}.")
+                        st.success(f"Diproses: {assigned}. Freeze: {frozen_skips}. Sudah di-assign ke Tracer: {already_tracer}.")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Gagal assign: {e}")
@@ -5253,11 +5562,24 @@ def page_supervisor():
                         _rand.shuffle(ids)
                         assigned = 0
                         frozen_skips = 0
+                        already_tracer = 0
                         for i, agr in enumerate(ids):
                             try:
                                 if is_frozen_by_agreement(agr):
                                     frozen_skips += 1
                                     continue
+                            except Exception:
+                                pass
+                            # Check if already assigned to tracer
+                            try:
+                                conn = get_connection()
+                                cur = conn.cursor()
+                                cur.execute("SELECT COUNT(*) as cnt FROM assign_tracer WHERE Agreement_No=? AND IFNULL(Assigned_To,'')!=''", (agr,))
+                                if cur.fetchone()['cnt'] > 0:
+                                    already_tracer += 1
+                                    conn.close()
+                                    continue
+                                conn.close()
                             except Exception:
                                 pass
                             agent = sel_agents[i % len(sel_agents)]
@@ -5281,18 +5603,18 @@ def page_supervisor():
                         try:
                             execute(
                                 "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
-                                (u.get('id') if u else None, "AGENT_ASSIGN_RANDOM_FROM_SUP_TABLE", f"Assigned {assigned} among {len(sel_agents)} agents; frozen skipped {frozen_skips}")
+                                (u.get('id') if u else None, "AGENT_ASSIGN_RANDOM_FROM_SUP_TABLE", f"Assigned {assigned} among {len(sel_agents)} agents; frozen: {frozen_skips}; already_tracer: {already_tracer}")
                             )
                         except Exception:
                             pass
-                        st.success(f"Distribusi selesai. Berhasil: {assigned}. Dilewati (frozen): {frozen_skips}.")
+                        st.success(f"Diproses: {assigned}. Freeze: {frozen_skips}. Sudah di-assign ke Tracer: {already_tracer}.")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Gagal melakukan distribusi: {e}")
         
 
     # --- Freeze Manager Tab ---
-    with tabs[6]:
+    with tabs[7]:
         st.subheader("Freeze Manager (NIK / Agreement_No)")
         st.caption("Gunakan fitur ini untuk mem-freeze debitur berdasarkan NIK atau kontrak tertentu. Data yang di-freeze tidak akan dapat di-assign ke Tracer maupun Agent.")
 
@@ -5446,7 +5768,7 @@ def page_supervisor():
                 st.error(f"Gagal membaca file: {e}")
 
     # --- Trace Results Tab ---
-    with tabs[4]:
+    with tabs[5]:
         st.subheader("Trace Results (Touch Logs)")
         st.caption("Tambah catatan trace dan lihat log.")
 
@@ -5522,7 +5844,7 @@ def page_supervisor():
     # --- Monitoring Tab (moved to first) end ---
 
     # --- Enriched & Lookup Tab ---
-    with tabs[5]:
+    with tabs[6]:
         st.title("Enriched Monitoring & Lookup")
         left, right = st.columns([2, 1])
         with left:
