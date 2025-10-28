@@ -4328,7 +4328,7 @@ def page_supervisor():
     require_roles(("Superuser", "Supervisor"))
     st.title("Supervisor Menu")
     # Monitoring first so it's the default view
-    tabs = st.tabs(["Monitoring", "Data Approval", "Input", "Trace Assigning", "Agent Assigning", "Trace Results", "Enriched & Lookup", "Freeze Manager"])
+    tabs = st.tabs(["Monitoring", "Input", "Trace Assigning", "Agent Assigning", "Trace Results", "Enriched & Lookup", "Freeze Manager"])
 
     # --- Monitoring Tab ---
     with tabs[0]:
@@ -4617,169 +4617,8 @@ def page_supervisor():
 
         # Enriched Monitoring & Lookup NIK dipindahkan ke tab khusus "Enriched & Lookup"
 
-    # --- Data Approval Tab ---
-    with tabs[1]:
-        st.subheader("📋 Data Approval - Supervisor")
-        st.caption("Approve atau Reject data supervisor sebelum dapat di-assign ke Tracer/Agent. Status: PENDING → APPROVED/REJECTED")
-        
-        # Filter
-        filter_status = st.selectbox("Filter by Status", ["PENDING", "APPROVED", "REJECTED", "ALL"], index=0, key="approval_filter")
-        
-        # Query data berdasarkan filter
-        where_approval = []
-        params_approval = []
-        if filter_status != "ALL":
-            if filter_status == "PENDING":
-                where_approval.append("(approval_status IS NULL OR approval_status = 'PENDING')")
-            else:
-                where_approval.append("approval_status = ?")
-                params_approval.append(filter_status)
-        
-        where_sql_approval = " AND ".join(where_approval) if where_approval else "1=1"
-        
-        rows_approval = fetchall(
-            f"""
-            SELECT id, Case_ID, Customer_name, NIK_KTP, DPD, Principle_Outstanding, 
-                   COALESCE(approval_status, 'PENDING') as approval_status, 
-                   approved_by, approved_at
-            FROM supervisor_data
-            WHERE {where_sql_approval}
-            ORDER BY id DESC
-            LIMIT 200
-            """,
-            tuple(params_approval)
-        )
-        
-        if not rows_approval:
-            st.info("Tidak ada data yang perlu di-approve.")
-        else:
-            df_approval = pd.DataFrame(rows_approval)
-            df_approval.insert(0, "Selected", False)
-            
-            st.caption(f"Menampilkan {len(df_approval)} data dengan status: {filter_status}")
-            
-            # Checkbox select all
-            select_all_approval = st.checkbox("Pilih semua yang ditampilkan", key="approval_select_all")
-            if select_all_approval:
-                df_approval["Selected"] = True
-            
-            # Data editor
-            edited_approval = st.data_editor(
-                df_approval,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "Selected": st.column_config.CheckboxColumn("Pilih", default=False),
-                    "id": st.column_config.TextColumn("ID", disabled=True),
-                    "Case_ID": st.column_config.TextColumn("Case ID", disabled=True),
-                    "Customer_name": st.column_config.TextColumn("Customer", disabled=True),
-                    "NIK_KTP": st.column_config.TextColumn("NIK", disabled=True),
-                    "DPD": st.column_config.TextColumn("DPD", disabled=True),
-                    "Principle_Outstanding": st.column_config.TextColumn("Outstanding", disabled=True),
-                    "approval_status": st.column_config.TextColumn("Status", disabled=True),
-                    "approved_by": st.column_config.TextColumn("Approved By", disabled=True),
-                    "approved_at": st.column_config.TextColumn("Approved At", disabled=True),
-                },
-                num_rows="fixed"
-            )
-            
-            # Get selected rows
-            try:
-                selected_approval_rows = edited_approval[edited_approval["Selected"] == True]
-            except Exception:
-                selected_approval_rows = pd.DataFrame()
-            
-            # Action buttons
-            col_approve, col_reject = st.columns(2)
-            
-            with col_approve:
-                st.markdown("#### ✅ Approve Selected")
-                if st.button("APPROVE", type="primary", key="btn_approve_data"):
-                    if len(selected_approval_rows) == 0:
-                        st.warning("Pilih minimal satu baris dahulu.")
-                    else:
-                        try:
-                            u = current_user() or {}
-                            by = (u.get('full_name') or u.get('login_id') or '-')
-                            approved_at = now_wib().isoformat()
-                            approved_count = 0
-                            
-                            for _, row in selected_approval_rows.iterrows():
-                                case_id = row.get('Case_ID')
-                                try:
-                                    execute(
-                                        """
-                                        UPDATE supervisor_data
-                                        SET approval_status = 'APPROVED',
-                                            approved_by = ?,
-                                            approved_at = ?
-                                        WHERE Case_ID = ?
-                                        """,
-                                        (by, approved_at, case_id)
-                                    )
-                                    approved_count += 1
-                                except Exception:
-                                    pass
-                            
-                            # Audit log
-                            try:
-                                execute(
-                                    "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
-                                    (u.get('id') if u else None, "DATA_APPROVAL", f"Approved {approved_count} data by {by}")
-                                )
-                            except Exception:
-                                pass
-                            
-                            st.success(f"✅ Berhasil approve {approved_count} data!")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Gagal approve data: {e}")
-            
-            with col_reject:
-                st.markdown("#### ❌ Reject Selected")
-                if st.button("REJECT", key="btn_reject_data"):
-                    if len(selected_approval_rows) == 0:
-                        st.warning("Pilih minimal satu baris dahulu.")
-                    else:
-                        try:
-                            u = current_user() or {}
-                            by = (u.get('full_name') or u.get('login_id') or '-')
-                            rejected_at = now_wib().isoformat()
-                            rejected_count = 0
-                            
-                            for _, row in selected_approval_rows.iterrows():
-                                case_id = row.get('Case_ID')
-                                try:
-                                    execute(
-                                        """
-                                        UPDATE supervisor_data
-                                        SET approval_status = 'REJECTED',
-                                            approved_by = ?,
-                                            approved_at = ?
-                                        WHERE Case_ID = ?
-                                        """,
-                                        (by, rejected_at, case_id)
-                                    )
-                                    rejected_count += 1
-                                except Exception:
-                                    pass
-                            
-                            # Audit log
-                            try:
-                                execute(
-                                    "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
-                                    (u.get('id') if u else None, "DATA_REJECTION", f"Rejected {rejected_count} data by {by}")
-                                )
-                            except Exception:
-                                pass
-                            
-                            st.success(f"❌ Berhasil reject {rejected_count} data!")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Gagal reject data: {e}")
-
     # --- Input Tab ---
-    with tabs[2]:
+    with tabs[1]:
         st.subheader("Upload Excel/CSV Supervisor Data")
         field_names = [
             "DT", "Lending_Entity", "Date", "Case_ID", "Task_ID", "Customer_name", "email", "Gender", "Customer_Occupation", "DPD", "Principle_Outstanding", "Principal_Overdue_CURR", "Interest_Overdue_CURR", "Last_Late_Fee", "Return_Date", "Detail", "Loan_Type", "Third_Uid", "Product", "Home_Address", "Province", "City", "Street", "RoomNumber", "Postcode", "Assignment_Date", "Withdrawal_Date", "Phone_Number_1", "Phone_Number_2", "Contact_Type_1", "Contact_Name_1", "Contact_Phone_1", "Contact_Type_2", "Contact_Name_2", "Contact_Phone_2", "Contact_Type_3", "Contact_Name_3", "Contact_Phone_3", "Contact_Type_4", "Contact_Name_4", "Contact_Phone_4", "Contact_Type_5", "Contact_Name_5", "Contact_Phone_5", "Contact_Type_6", "Contact_Name_6", "Contact_Phone_6", "Contact_Type_7", "Contact_Name_7", "Contact_Phone_7", "Contact_Type_8", "Contact_Name_8", "Contact_Phone_8", "Total_debt_in_third_party", "Repayment_on_third_Party", "Remaining_Loan_on_third_Party", "Virtual_Account_Number",
@@ -5007,7 +4846,7 @@ def page_supervisor():
         
 
     # --- Trace Assigning Tab ---
-    with tabs[3]:
+    with tabs[2]:
         st.subheader("Assign ke Tracer")
         q1, q2, q3, q4 = st.columns([1.2, 1.2, 1.2, 0.6])
         with q1:
@@ -5366,7 +5205,7 @@ def page_supervisor():
 
 
     # --- Agent Assigning Tab ---
-    with tabs[4]:
+    with tabs[3]:
         st.subheader("Assign ke Agent")
         # Filters similar to Trace Assigning
         q1, q2, q3, q4 = st.columns([1.2, 1.2, 1.2, 0.6])
@@ -5617,9 +5456,9 @@ def page_supervisor():
         
 
     # --- Freeze Manager Tab ---
-    with tabs[7]:
+    with tabs[6]:
         st.markdown("### 🔒 Freeze Manager - Entity Protection System")
-        st.caption("Manajemen freeze/unfreeze untuk NIK dan Agreement. Data yang frozen tidak bisa di-assign dan ter-proteksi dari collection activity.")
+        st.caption("Manajemen freeze/unfreeze untuk NIK dan Case ID. Data yang frozen tidak bisa di-assign dan ter-proteksi dari collection activity.")
         
         # Enhanced CSS
         st.markdown("""
@@ -5690,7 +5529,7 @@ def page_supervisor():
             st.markdown(f"""
             <div class='freeze-stat-card' style='background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);'>
                 <h3>📄 {frozen_agrs}</h3>
-                <p>Frozen by Agreement</p>
+                <p>Frozen by Case ID</p>
             </div>
             """, unsafe_allow_html=True)
         
@@ -5755,9 +5594,9 @@ def page_supervisor():
                             st.error(f"❌ Gagal menyimpan: {e}")
 
         with col_fz2:
-            with st.expander("📄 Freeze by Agreement", expanded=True):
+            with st.expander("📄 Freeze by Case ID", expanded=True):
                 st.caption("Freeze a specific loan contract")
-                agr_in = st.text_input("Agreement No", key="freeze_agr", placeholder="e.g., AGR2025001")
+                agr_in = st.text_input("Case ID", key="freeze_agr", placeholder="e.g., AGR2025001")
                 reason_agr = st.selectbox("Alasan Freeze", [
                     "Disputed Amount",
                     "Wrong Debtor Assignment",
@@ -5774,22 +5613,22 @@ def page_supervisor():
                     if info:
                         st.info(f"📋 **{info.get('Debtor_Name') or '-'}**\n\n🆔 NIK: {info.get('NIK_KTP') or '-'}\n\n👤 Tracer: {info.get('Assigned_To') or '-'}")
                 
-                if st.button("🔒 Freeze Agreement", key="btn_freeze_agr", type="primary", use_container_width=True):
+                if st.button("🔒 Freeze Case ID", key="btn_freeze_agr", type="primary", use_container_width=True):
                     agr_val = (agr_in or '').strip()
                     if not agr_val:
-                        st.warning("⚠️ Masukkan Agreement No terlebih dahulu.")
+                        st.warning("⚠️ Masukkan Case ID terlebih dahulu.")
                     else:
                         try:
                             exists = fetchone("SELECT id FROM frozen_entities WHERE active=1 AND Agreement_No=? LIMIT 1", (agr_val,))
                             if exists:
-                                st.info("ℹ️ Agreement ini sudah dalam status Freeze.")
+                                st.info("ℹ️ Case ID ini sudah dalam status Freeze.")
                             else:
                                 u = current_user() or {}
                                 execute(
                                     "INSERT INTO frozen_entities (Agreement_No, reason, note, created_by) VALUES (?,?,?,?)",
                                     (agr_val, reason_agr, (note_agr or '').strip() or None, (u.get('full_name') or u.get('login_id') or '-'))
                                 )
-                                st.success("✅ Berhasil mem-freeze Agreement.")
+                                st.success("✅ Berhasil mem-freeze Case ID.")
                                 st.rerun()
                         except Exception as e:
                             st.error(f"❌ Gagal menyimpan: {e}")
@@ -5802,7 +5641,7 @@ def page_supervisor():
         # Enhanced filters
         filter_col1, filter_col2, filter_col3, filter_col4 = st.columns(4)
         with filter_col1:
-            filter_type = st.selectbox("Filter by Type", ["All", "NIK Only", "Agreement Only"], index=0, key="freeze_filter_type")
+            filter_type = st.selectbox("Filter by Type", ["All", "NIK Only", "Case ID Only"], index=0, key="freeze_filter_type")
         with filter_col2:
             filter_reason = st.text_input("Search Reason", key="freeze_filter_reason", placeholder="Search...")
         with filter_col3:
@@ -5816,7 +5655,7 @@ def page_supervisor():
         
         if filter_type == "NIK Only":
             q_freeze += " AND NIK_KTP IS NOT NULL AND NIK_KTP != ''"
-        elif filter_type == "Agreement Only":
+        elif filter_type == "Case ID Only":
             q_freeze += " AND Agreement_No IS NOT NULL AND Agreement_No != ''"
         
         if filter_reason:
@@ -5848,8 +5687,8 @@ def page_supervisor():
                     entity_type = "NIK"
                 elif agr:
                     cnt = (fetchone("SELECT COUNT(*) c FROM assign_tracer WHERE Agreement_No=?", (agr,)) or {}).get('c', 0)
-                    target = f"📄 AGR: {agr}"
-                    entity_type = "Agreement"
+                    target = f"📄 Case ID: {agr}"
+                    entity_type = "Case ID"
                 else:
                     cnt = 0
                     target = "❓ Unknown"
@@ -5930,7 +5769,7 @@ def page_supervisor():
 
 
     # --- Trace Results Tab ---
-    with tabs[5]:
+    with tabs[4]:
         st.markdown("### 📝 Trace Results - Touch Activity Logs")
         st.caption("Record dan monitor semua aktivitas tracing. Real-time tracking untuk setiap interaksi dengan debitur.")
         
@@ -6007,7 +5846,7 @@ def page_supervisor():
                 st.markdown("#### Basic Information")
                 c1, c2 = st.columns(2)
                 with c1:
-                    agr_input = st.text_input("🔖 Agreement No *", placeholder="e.g., AGR2025001")
+                    agr_input = st.text_input("🔖 Case ID *", placeholder="e.g., AGR2025001")
                     tracer_sel = st.text_input("👤 Tracer Name", value=(current_user().get('full_name') if current_user() else ''), disabled=True)
                 with c2:
                     status_sel = st.selectbox("📊 Status *", ["", "TRACED", "CONTACTED", "RTP", "PTP", "PAYING", "UNREACHABLE", "REFUSED", "PROMISE_BROKEN", "OTHER"])
@@ -6029,7 +5868,7 @@ def page_supervisor():
                 
                 if submitted:
                     if not agr_input.strip():
-                        st.error("❌ Agreement No wajib diisi!")
+                        st.error("❌ Case ID wajib diisi!")
                     elif not status_sel:
                         st.error("❌ Status wajib dipilih!")
                     elif not touch_type:
@@ -6067,7 +5906,7 @@ def page_supervisor():
         # Filter row 1
         fc1, fc2, fc3, fc4 = st.columns(4)
         with fc1:
-            f_agr = st.text_input("🔖 Agreement No", key="trace_q_agr", placeholder="Search...")
+            f_agr = st.text_input("🔖 Case ID", key="trace_q_agr", placeholder="Search...")
         with fc2:
             f_tracer = st.text_input("👤 Tracer", key="trace_q_tracer", placeholder="Search...")
         with fc3:
@@ -6137,14 +5976,14 @@ def page_supervisor():
             df_logs = pd.DataFrame(logs)
             
             # Rename columns for better display
-            df_logs.columns = ['Agreement No', 'Tracer', 'Status', 'Party', 'Method', 'Notes Preview', 'Touched At', 'Created By']
+            df_logs.columns = ['Case ID', 'Tracer', 'Status', 'Party', 'Method', 'Notes Preview', 'Touched At', 'Created By']
             
             st.dataframe(
                 df_logs, 
                 use_container_width=True, 
                 hide_index=True,
                 column_config={
-                    "Agreement No": st.column_config.TextColumn("Agreement No", width="medium"),
+                    "Case ID": st.column_config.TextColumn("Case ID", width="medium"),
                     "Tracer": st.column_config.TextColumn("Tracer", width="medium"),
                     "Status": st.column_config.TextColumn("Status", width="small"),
                     "Party": st.column_config.TextColumn("Party", width="medium"),
@@ -6169,7 +6008,7 @@ def page_supervisor():
 
 
     # --- Enriched & Lookup Tab ---
-    with tabs[6]:
+    with tabs[5]:
         st.markdown("### 🔍 Enriched Monitoring & Global Lookup")
         st.caption("360° view untuk setiap loan: tracking lengkap dari assignment hingga pembayaran")
         
@@ -6206,7 +6045,7 @@ def page_supervisor():
             # Enhanced Filters - Row 1
             fcol1, fcol2, fcol3, fcol4 = st.columns(4)
             with fcol1:
-                f_ag = st.text_input("🔖 Agreement No", key="en_ag", placeholder="Search...")
+                f_ag = st.text_input("🔖 Case ID", key="en_ag", placeholder="Search...")
             with fcol2:
                 f_nik = st.text_input("🆔 NIK", key="en_nik", placeholder="Search...")
             with fcol3:
@@ -6315,7 +6154,7 @@ def page_supervisor():
                 
                 # Rename columns
                 df_en.columns = [
-                    'Agreement No', 'Debtor', 'NIK', 'Tracer', 'Company', 'Agent', 
+                    'Case ID', 'Debtor', 'NIK', 'Tracer', 'Company', 'Agent', 
                     'Assigned At', 'Trace Status', 'Last Touch', 'Agent Status', 
                     'PTP Amount', 'PTP Date', 'Paid Total', 'Last Paid', 'Pipeline Stage'
                 ]
@@ -6325,7 +6164,7 @@ def page_supervisor():
                     use_container_width=True,
                     hide_index=True,
                     column_config={
-                        "Agreement No": st.column_config.TextColumn("Agreement No", width="medium"),
+                        "Case ID": st.column_config.TextColumn("Case ID", width="medium"),
                         "Debtor": st.column_config.TextColumn("Debtor", width="medium"),
                         "NIK": st.column_config.TextColumn("NIK", width="small"),
                         "Tracer": st.column_config.TextColumn("Tracer", width="small"),
@@ -6397,16 +6236,16 @@ def page_supervisor():
             
             st.markdown("---")
             
-            # Agreement Lookup
+            # Case ID Lookup
             with st.container():
                 st.markdown("""
                 <div class='lookup-card' style='background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);'>
-                    <h3>🔖 Agreement Lookup</h3>
-                    <p style='font-size:13px; margin:0; opacity:0.9;'>Detail lengkap per Agreement</p>
+                    <h3>🔖 Case ID Lookup</h3>
+                    <p style='font-size:13px; margin:0; opacity:0.9;'>Detail lengkap per Case ID</p>
                 </div>
                 """, unsafe_allow_html=True)
                 
-                agr_q = st.text_input("Masukkan Agreement No", key="monitor_agr_lookup", placeholder="e.g., AGR2025001")
+                agr_q = st.text_input("Masukkan Case ID", key="monitor_agr_lookup", placeholder="e.g., AGR2025001")
                 
                 if agr_q and len(agr_q.strip()) >= 3:
                     # Get comprehensive data
@@ -6430,7 +6269,7 @@ def page_supervisor():
                     """, (f"%{agr_q.strip()}%",))
                     
                     if agr_detail:
-                        st.success(f"✅ Agreement: **{agr_detail['Agreement_No']}**")
+                        st.success(f"✅ Case ID: **{agr_detail['Agreement_No']}**")
                         
                         # Display details
                         col1, col2 = st.columns(2)
@@ -6453,7 +6292,7 @@ def page_supervisor():
                         if frozen_agr:
                             st.error(f"🔒 **FROZEN:** {frozen_agr.get('reason') or 'No reason specified'}")
                     else:
-                        st.info("ℹ️ Agreement tidak ditemukan.")
+                        st.info("ℹ️ Case ID tidak ditemukan.")
 
 def page_tracer():
     require_roles(("Superuser", "Supervisor", "Tracer"))
@@ -6470,14 +6309,31 @@ def page_tracer():
     if user_role in ("Superuser", "Supervisor"):
         st.caption(f"Mode: **{user_role}** — Melihat semua assignment tracer")
         rows = fetchall(
-            "SELECT id, TRC_Code, Agreement_No, Debtor_Name, NIK_KTP, EMPLOYMENT_UPDATE, EMPLOYER, Debtor_Legal_Name, Employee_Name, Employee_ID_Number, Debtor_Relation_to_Employee, Masked_Company_Name, Assigned_To, created_at "
-            "FROM assign_tracer ORDER BY id DESC LIMIT 500"
+            """
+            SELECT at.id, at.TRC_Code, at.Agreement_No, at.Debtor_Name, at.NIK_KTP, 
+                   at.EMPLOYMENT_UPDATE, at.EMPLOYER, at.Debtor_Legal_Name, 
+                   at.Employee_Name, at.Employee_ID_Number, at.Debtor_Relation_to_Employee, 
+                   at.Masked_Company_Name, at.Assigned_To, at.created_at,
+                   sd.Remarks_Suggested_NIK_Prospect
+            FROM assign_tracer at
+            LEFT JOIN supervisor_data sd ON at.Agreement_No = sd.Case_ID
+            ORDER BY at.id DESC LIMIT 500
+            """
         )
     else:
         st.caption(f"Assignment untuk: {tracer_name}")
         rows = fetchall(
-            "SELECT id, TRC_Code, Agreement_No, Debtor_Name, NIK_KTP, EMPLOYMENT_UPDATE, EMPLOYER, Debtor_Legal_Name, Employee_Name, Employee_ID_Number, Debtor_Relation_to_Employee, Masked_Company_Name, Assigned_To, created_at "
-            "FROM assign_tracer WHERE IFNULL(Assigned_To,'') = ? ORDER BY id DESC LIMIT 500",
+            """
+            SELECT at.id, at.TRC_Code, at.Agreement_No, at.Debtor_Name, at.NIK_KTP, 
+                   at.EMPLOYMENT_UPDATE, at.EMPLOYER, at.Debtor_Legal_Name, 
+                   at.Employee_Name, at.Employee_ID_Number, at.Debtor_Relation_to_Employee, 
+                   at.Masked_Company_Name, at.Assigned_To, at.created_at,
+                   sd.Remarks_Suggested_NIK_Prospect
+            FROM assign_tracer at
+            LEFT JOIN supervisor_data sd ON at.Agreement_No = sd.Case_ID
+            WHERE IFNULL(at.Assigned_To,'') = ? 
+            ORDER BY at.id DESC LIMIT 500
+            """,
             (tracer_name,)
         )
     
@@ -6510,6 +6366,7 @@ def page_tracer():
             'Case_ID': r.get('Agreement_No'),
             'Debtor_Name': r.get('Debtor_Name'),
             'NIK_KTP': r.get('NIK_KTP'),
+            'Suggested_NIK': r.get('Remarks_Suggested_NIK_Prospect') or '',
             'EMPLOYMENT_UPDATE': r.get('EMPLOYMENT_UPDATE'),
             'EMPLOYER': r.get('EMPLOYER'),
             'Debtor_Legal_Name': r.get('Debtor_Legal_Name'),
@@ -6547,6 +6404,7 @@ def page_tracer():
         'Case_ID': st.column_config.TextColumn('Case ID'),
         'Debtor_Name': st.column_config.TextColumn('Debtor Name'),
         'NIK_KTP': st.column_config.TextColumn('NIK KTP'),
+        'Suggested_NIK': st.column_config.TextColumn('Suggested NIK (by Agent)', help='NIK yang disarankan oleh Agent'),
         'EMPLOYMENT_UPDATE': st.column_config.TextColumn('EMPLOYMENT UPDATE'),
         'EMPLOYER': st.column_config.TextColumn('EMPLOYER'),
         'Debtor_Legal_Name': st.column_config.TextColumn('Debtor Legal Name'),
@@ -6557,7 +6415,7 @@ def page_tracer():
     }
     
     # Tambahkan kolom Assigned_To jika Supervisor/Superuser
-    disabled_cols = ['ID','TRC_Code','Case_ID','Debtor_Name','NIK_KTP','EMPLOYMENT_UPDATE','EMPLOYER','Debtor_Legal_Name','Employee_Name','Employee_ID_Number','Debtor_Relation_to_Employee','Assigned_At']
+    disabled_cols = ['ID','TRC_Code','Case_ID','Debtor_Name','NIK_KTP','Suggested_NIK','EMPLOYMENT_UPDATE','EMPLOYER','Debtor_Legal_Name','Employee_Name','Employee_ID_Number','Debtor_Relation_to_Employee','Assigned_At']
     if user_role in ("Superuser", "Supervisor"):
         col_config['Assigned_To'] = st.column_config.TextColumn('Assigned To')
         disabled_cols.append('Assigned_To')
