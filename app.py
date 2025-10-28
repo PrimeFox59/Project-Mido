@@ -528,6 +528,9 @@ def logout_user():
     for k in ["auto_restore_checked", "auto_backup_checked", "auto_restore_attempted"]:
         if k in st.session_state:
             del st.session_state[k]
+    # Hapus pesan login agar tidak muncul setelah logout
+    if "login_status_message" in st.session_state:
+        st.session_state.login_status_message = {"type": None, "text": ""}
     st.session_state.page = "Authentication"
 
 def fetchall(query, params=()):
@@ -5719,53 +5722,7 @@ def page_supervisor():
                     st.error(f"Gagal unfreeze: {e}")
 
         st.markdown("---")
-        st.subheader("Upload Agent Assignments (CSV/XLSX)")
-        st.caption("Kolom: Agreement_No, Agent_Assigned_To. Duplikat Agreement_No akan diabaikan.")
-        f = st.file_uploader("Pilih file", type=["csv", "xlsx"], key="agent_assign_upload")
-        if f is not None:
-            try:
-                if f.name.lower().endswith('.csv'):
-                    dfa = pd.read_csv(f)
-                else:
-                    try:
-                        import openpyxl  # noqa: F401
-                        dfa = pd.read_excel(f, engine='openpyxl')
-                    except Exception:
-                        dfa = pd.read_excel(f)
-                dfa.columns = [str(c).strip() for c in dfa.columns]
-                req = {"Agreement_No", "Agent_Assigned_To"}
-                if not req.issubset(set(dfa.columns)):
-                    st.error(f"Kolom wajib tidak lengkap. Ditemukan: {list(dfa.columns)}")
-                else:
-                    ok = 0; skip = 0
-                    u = current_user() or {}
-                    by = (u.get('full_name') or u.get('login_id') or '-')
-                    for _, r in dfa.iterrows():
-                        agr = str(r.get('Agreement_No') or '').strip()
-                        agt = str(r.get('Agent_Assigned_To') or '').strip()
-                        if not agr or not agt:
-                            skip += 1
-                            continue
-                        # Enforce freeze for Agent assignment upload
-                        try:
-                            if is_frozen_by_agreement(agr):
-                                skip += 1
-                                continue
-                            info = fetchone("SELECT NIK_KTP FROM assign_tracer WHERE Agreement_No=?", (agr,)) or {}
-                            nik = (info.get('NIK_KTP') or '').strip()
-                            if nik and is_frozen_by_nik(nik):
-                                skip += 1
-                                continue
-                        except Exception:
-                            pass
-                        try:
-                            execute("INSERT OR IGNORE INTO agent_assignments (Agreement_No, Agent_Assigned_To, assigned_by) VALUES (?,?,?)", (agr, agt, by))
-                            ok += 1
-                        except Exception:
-                            skip += 1
-                    st.success(f"Upload selesai. Disimpan: {ok}. Dilewati: {skip}.")
-            except Exception as e:
-                st.error(f"Gagal membaca file: {e}")
+        
 
     # --- Trace Results Tab ---
     with tabs[5]:
