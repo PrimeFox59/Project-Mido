@@ -3835,41 +3835,84 @@ def page_agent():
                     )
                 
                 # Query payments dengan bukti gambar
-                p_query = """
-                    SELECT p.id, p.Agreement_No AS Case_ID, p.paid_amount, p.paid_date, 
-                           p.status, p.uploaded_by, p.uploaded_at,
-                           p.proof_image_drive_id, p.proof_image_filename,
-                           IFNULL(p.approval_status, 'pending') as approval_status,
-                           p.approval_by, p.approval_at, p.rejection_notes,
-                           sd.Customer_name, sd.Principle_Outstanding
-                    FROM payments p
-                    LEFT JOIN supervisor_data sd ON sd.Case_ID = p.Agreement_No 
-                        OR sd.Virtual_Account_Number = p.Agreement_No
-                        OR sd.Third_Uid = p.Agreement_No
-                    WHERE 1=1
-                """
-                p_params = []
-                
-                if p_case_filter:
-                    p_query += " AND p.Agreement_No LIKE ?"
-                    p_params.append(f"%{p_case_filter}%")
-                if p_agent_filter:
-                    p_query += " AND p.uploaded_by LIKE ?"
-                    p_params.append(f"%{p_agent_filter}%")
-                if p_with_proof == "With Proof":
-                    p_query += " AND p.proof_image_drive_id IS NOT NULL"
-                elif p_with_proof == "No Proof":
-                    p_query += " AND p.proof_image_drive_id IS NULL"
-                
-                # Filter by approval status
-                if p_status_filter:
-                    placeholders = ','.join(['?'] * len(p_status_filter))
-                    p_query += f" AND IFNULL(p.approval_status, 'pending') IN ({placeholders})"
-                    p_params.extend(p_status_filter)
-                
-                p_query += " ORDER BY p.paid_date DESC, p.uploaded_at DESC LIMIT 100"
-                
-                payment_rows = fetchall(p_query, tuple(p_params))
+                # Try-except untuk backward compatibility
+                payment_rows = []
+                try:
+                    p_query = """
+                        SELECT p.id, p.Agreement_No AS Case_ID, p.paid_amount, p.paid_date, 
+                               p.status, p.uploaded_by, p.uploaded_at,
+                               p.proof_image_drive_id, p.proof_image_filename,
+                               IFNULL(p.approval_status, 'pending') as approval_status,
+                               IFNULL(p.approval_by, '') as approval_by, 
+                               IFNULL(p.approval_at, '') as approval_at, 
+                               IFNULL(p.rejection_notes, '') as rejection_notes,
+                               sd.Customer_name, sd.Principle_Outstanding
+                        FROM payments p
+                        LEFT JOIN supervisor_data sd ON sd.Case_ID = p.Agreement_No 
+                            OR sd.Virtual_Account_Number = p.Agreement_No
+                            OR sd.Third_Uid = p.Agreement_No
+                        WHERE 1=1
+                    """
+                    p_params = []
+                    
+                    if p_case_filter:
+                        p_query += " AND p.Agreement_No LIKE ?"
+                        p_params.append(f"%{p_case_filter}%")
+                    if p_agent_filter:
+                        p_query += " AND p.uploaded_by LIKE ?"
+                        p_params.append(f"%{p_agent_filter}%")
+                    if p_with_proof == "With Proof":
+                        p_query += " AND p.proof_image_drive_id IS NOT NULL"
+                    elif p_with_proof == "No Proof":
+                        p_query += " AND p.proof_image_drive_id IS NULL"
+                    
+                    # Filter by approval status
+                    if p_status_filter:
+                        placeholders = ','.join(['?'] * len(p_status_filter))
+                        p_query += f" AND IFNULL(p.approval_status, 'pending') IN ({placeholders})"
+                        p_params.extend(p_status_filter)
+                    
+                    p_query += " ORDER BY p.paid_date DESC, p.uploaded_at DESC LIMIT 100"
+                    
+                    payment_rows = fetchall(p_query, tuple(p_params))
+                except Exception as e:
+                    # Fallback: Query tanpa approval columns (backward compatibility)
+                    st.warning(f"⚠️ Menggunakan mode kompatibilitas. Kolom approval belum tersedia di database.")
+                    try:
+                        p_query_fallback = """
+                            SELECT p.id, p.Agreement_No AS Case_ID, p.paid_amount, p.paid_date, 
+                                   p.status, p.uploaded_by, p.uploaded_at,
+                                   p.proof_image_drive_id, p.proof_image_filename,
+                                   'pending' as approval_status,
+                                   '' as approval_by, 
+                                   '' as approval_at, 
+                                   '' as rejection_notes,
+                                   sd.Customer_name, sd.Principle_Outstanding
+                            FROM payments p
+                            LEFT JOIN supervisor_data sd ON sd.Case_ID = p.Agreement_No 
+                                OR sd.Virtual_Account_Number = p.Agreement_No
+                                OR sd.Third_Uid = p.Agreement_No
+                            WHERE 1=1
+                        """
+                        p_params_fallback = []
+                        
+                        if p_case_filter:
+                            p_query_fallback += " AND p.Agreement_No LIKE ?"
+                            p_params_fallback.append(f"%{p_case_filter}%")
+                        if p_agent_filter:
+                            p_query_fallback += " AND p.uploaded_by LIKE ?"
+                            p_params_fallback.append(f"%{p_agent_filter}%")
+                        if p_with_proof == "With Proof":
+                            p_query_fallback += " AND p.proof_image_drive_id IS NOT NULL"
+                        elif p_with_proof == "No Proof":
+                            p_query_fallback += " AND p.proof_image_drive_id IS NULL"
+                        
+                        p_query_fallback += " ORDER BY p.paid_date DESC, p.uploaded_at DESC LIMIT 100"
+                        
+                        payment_rows = fetchall(p_query_fallback, tuple(p_params_fallback))
+                    except Exception as e2:
+                        st.error(f"❌ Error query payments: {e2}")
+                        payment_rows = []
                 
                 # Summary metrics untuk payment
                 if payment_rows:
