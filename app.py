@@ -4778,7 +4778,7 @@ def page_supervisor():
     require_roles(("Superuser", "Supervisor"))
     st.title("Supervisor Menu")
     # Monitoring first so it's the default view
-    tabs = st.tabs(["Monitoring", "Input", "Trace Assigning", "Agent Assigning", "Trace Results", "Enriched & Lookup", "Freeze Manager"])
+    tabs = st.tabs(["Monitoring", "Payment Recap", "Input", "Trace Assigning", "Agent Assigning", "Trace Results", "Enriched & Lookup", "Freeze Manager"])
 
     # --- Monitoring Tab ---
     with tabs[0]:
@@ -5067,8 +5067,242 @@ def page_supervisor():
 
         # Enriched Monitoring & Lookup NIK dipindahkan ke tab khusus "Enriched & Lookup"
 
-    # --- Input Tab ---
+    # --- Payment Recap Tab ---
     with tabs[1]:
+        st.subheader("📊 Payment Recap")
+        
+        # Summary Metrics
+        col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+        
+        # Get payment recap data
+        recap_query = """
+            SELECT 
+                COALESCE(sd.Case_ID, p.Agreement_No) AS Case_ID,
+                sd.Product,
+                p.paid_date AS Date,
+                sd.Customer_name,
+                p.paid_amount AS Savings,
+                ar.agent_status AS Skema_Pelunasan,
+                COALESCE(sd.Paid_Off, 'NO') AS PAID_OFF,
+                COALESCE(ar.agent, p.uploaded_by) AS Agent,
+                strftime('%b, %Y', p.paid_date) AS Month,
+                'N/A' AS Case_Batch
+            FROM payments p
+            LEFT JOIN supervisor_data sd 
+                ON sd.Case_ID = p.Agreement_No 
+                OR sd.Virtual_Account_Number = p.Agreement_No
+                OR sd.Third_Uid = p.Agreement_No
+            LEFT JOIN agent_results ar 
+                ON ar.Agreement_No = p.Agreement_No
+                AND ar.approval_status = 'approved'
+            WHERE p.status = 'approved'
+            ORDER BY p.paid_date DESC
+        """
+        
+        recap_df = pd.read_sql_query(recap_query, conn)
+        
+        if not recap_df.empty:
+            # Calculate metrics
+            total_savings = recap_df['Savings'].sum()
+            total_cases = recap_df['Case_ID'].nunique()
+            total_agents = recap_df['Agent'].nunique()
+            paid_off_count = len(recap_df[recap_df['PAID_OFF'] == 'YES'])
+            
+            with col_m1:
+                st.markdown(f"""
+                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                            padding: 20px; border-radius: 12px; color: white; text-align: center;
+                            box-shadow: 0 8px 24px rgba(102,126,234,0.35);">
+                    <div style="font-size: 28px; font-weight: 900; margin-bottom: 5px;">
+                        Rp {total_savings:,.0f}
+                    </div>
+                    <div style="font-size: 11px; opacity: 0.95; font-weight: 600;">
+                        Total Savings
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col_m2:
+                st.markdown(f"""
+                <div style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); 
+                            padding: 20px; border-radius: 12px; color: white; text-align: center;
+                            box-shadow: 0 8px 24px rgba(240,147,251,0.35);">
+                    <div style="font-size: 28px; font-weight: 900; margin-bottom: 5px;">
+                        {total_cases}
+                    </div>
+                    <div style="font-size: 11px; opacity: 0.95; font-weight: 600;">
+                        Total Cases
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col_m3:
+                st.markdown(f"""
+                <div style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); 
+                            padding: 20px; border-radius: 12px; color: white; text-align: center;
+                            box-shadow: 0 8px 24px rgba(79,172,254,0.35);">
+                    <div style="font-size: 28px; font-weight: 900; margin-bottom: 5px;">
+                        {total_agents}
+                    </div>
+                    <div style="font-size: 11px; opacity: 0.95; font-weight: 600;">
+                        Active Agents
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col_m4:
+                st.markdown(f"""
+                <div style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); 
+                            padding: 20px; border-radius: 12px; color: white; text-align: center;
+                            box-shadow: 0 8px 24px rgba(67,233,123,0.35);">
+                    <div style="font-size: 28px; font-weight: 900; margin-bottom: 5px;">
+                        {paid_off_count}
+                    </div>
+                    <div style="font-size: 11px; opacity: 0.95; font-weight: 600;">
+                        Paid Off Cases
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            st.markdown("<div style='margin-top: 30px;'></div>", unsafe_allow_html=True)
+            
+            # Filters
+            st.markdown("### 🔍 Filters")
+            col_f1, col_f2, col_f3, col_f4 = st.columns(4)
+            
+            with col_f1:
+                # Date range filter
+                if not recap_df['Date'].isna().all():
+                    min_date = pd.to_datetime(recap_df['Date'].min()).date()
+                    max_date = pd.to_datetime(recap_df['Date'].max()).date()
+                    date_range = st.date_input(
+                        "Date Range",
+                        value=(min_date, max_date),
+                        min_value=min_date,
+                        max_value=max_date,
+                        key="recap_date_range"
+                    )
+                else:
+                    date_range = None
+            
+            with col_f2:
+                # Agent filter
+                agents_list = ['All'] + sorted(recap_df['Agent'].dropna().unique().tolist())
+                selected_agent = st.selectbox("Agent", agents_list, key="recap_agent")
+            
+            with col_f3:
+                # Case ID search
+                search_case = st.text_input("Search Case ID", key="recap_case_search")
+            
+            with col_f4:
+                # Paid Off filter
+                paid_off_filter = st.selectbox(
+                    "Paid Off Status", 
+                    ['All', 'YES', 'NO'],
+                    key="recap_paid_off"
+                )
+            
+            # Apply filters
+            filtered_df = recap_df.copy()
+            
+            if date_range and len(date_range) == 2:
+                filtered_df['Date_parsed'] = pd.to_datetime(filtered_df['Date'])
+                filtered_df = filtered_df[
+                    (filtered_df['Date_parsed'].dt.date >= date_range[0]) &
+                    (filtered_df['Date_parsed'].dt.date <= date_range[1])
+                ]
+                filtered_df = filtered_df.drop(columns=['Date_parsed'])
+            
+            if selected_agent != 'All':
+                filtered_df = filtered_df[filtered_df['Agent'] == selected_agent]
+            
+            if search_case:
+                filtered_df = filtered_df[
+                    filtered_df['Case_ID'].str.contains(search_case, case=False, na=False)
+                ]
+            
+            if paid_off_filter != 'All':
+                filtered_df = filtered_df[filtered_df['PAID_OFF'] == paid_off_filter]
+            
+            st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
+            
+            # Add Compare Helper column if not exists
+            if 'Compare_Helper' not in filtered_df.columns:
+                filtered_df['Compare_Helper'] = 'NO'
+            
+            # Display data with editable Compare Helper
+            st.markdown(f"### 📋 Payment Records ({len(filtered_df)} records)")
+            
+            # Group by Case_ID and aggregate
+            if not filtered_df.empty:
+                agg_df = filtered_df.groupby('Case_ID').agg({
+                    'Product': 'first',
+                    'Date': 'max',
+                    'Customer_name': 'first',
+                    'Savings': 'sum',
+                    'Skema_Pelunasan': lambda x: ', '.join(x.dropna().unique()),
+                    'PAID_OFF': 'first',
+                    'Agent': 'first',
+                    'Month': 'first',
+                    'Case_Batch': 'first',
+                    'Compare_Helper': 'first'
+                }).reset_index()
+                
+                # Reorder columns
+                column_order = [
+                    'Case_ID', 'Product', 'Date', 'Customer_name', 
+                    'Savings', 'Skema_Pelunasan', 'PAID_OFF', 
+                    'Agent', 'Month', 'Case_Batch', 'Compare_Helper'
+                ]
+                agg_df = agg_df[column_order]
+                
+                # Format Savings column
+                agg_df['Savings'] = agg_df['Savings'].apply(lambda x: f"Rp {x:,.0f}")
+                
+                # Display dataframe
+                st.dataframe(
+                    agg_df,
+                    use_container_width=True,
+                    height=500
+                )
+                
+                # Export to Excel
+                st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
+                
+                # Convert to Excel
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    # Prepare export dataframe (remove formatting)
+                    export_df = filtered_df.copy()
+                    export_df = export_df.groupby('Case_ID').agg({
+                        'Product': 'first',
+                        'Date': 'max',
+                        'Customer_name': 'first',
+                        'Savings': 'sum',
+                        'Skema_Pelunasan': lambda x: ', '.join(x.dropna().unique()),
+                        'PAID_OFF': 'first',
+                        'Agent': 'first',
+                        'Month': 'first',
+                        'Case_Batch': 'first',
+                        'Compare_Helper': 'first'
+                    }).reset_index()
+                    export_df = export_df[column_order]
+                    export_df.to_excel(writer, index=False, sheet_name='Payment Recap')
+                output.seek(0)
+                
+                st.download_button(
+                    label="📥 Download Excel",
+                    data=output,
+                    file_name=f"payment_recap_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            else:
+                st.info("No payment records found with the selected filters.")
+        else:
+            st.info("No payment data available yet.")
+
+    # --- Input Tab ---
+    with tabs[2]:
         st.subheader("Upload Excel/CSV Supervisor Data")
         field_names = [
             "DT", "Lending_Entity", "Date", "Case_ID", "Task_ID", "Customer_name", "email", "Gender", "Customer_Occupation", "DPD", "Principle_Outstanding", "Principal_Overdue_CURR", "Interest_Overdue_CURR", "Last_Late_Fee", "Return_Date", "Detail", "Loan_Type", "Third_Uid", "Product", "Home_Address", "Province", "City", "Street", "RoomNumber", "Postcode", "Assignment_Date", "Withdrawal_Date", "Phone_Number_1", "Phone_Number_2", "Contact_Type_1", "Contact_Name_1", "Contact_Phone_1", "Contact_Type_2", "Contact_Name_2", "Contact_Phone_2", "Contact_Type_3", "Contact_Name_3", "Contact_Phone_3", "Contact_Type_4", "Contact_Name_4", "Contact_Phone_4", "Contact_Type_5", "Contact_Name_5", "Contact_Phone_5", "Contact_Type_6", "Contact_Name_6", "Contact_Phone_6", "Contact_Type_7", "Contact_Name_7", "Contact_Phone_7", "Contact_Type_8", "Contact_Name_8", "Contact_Phone_8", "Total_debt_in_third_party", "Repayment_on_third_Party", "Remaining_Loan_on_third_Party", "Virtual_Account_Number",
@@ -5296,7 +5530,7 @@ def page_supervisor():
         
 
     # --- Trace Assigning Tab ---
-    with tabs[2]:
+    with tabs[3]:
         st.subheader("Assign ke Tracer")
         q1, q2, q3, q4 = st.columns([1.2, 1.2, 1.2, 0.6])
         with q1:
@@ -5655,7 +5889,7 @@ def page_supervisor():
 
 
     # --- Agent Assigning Tab ---
-    with tabs[3]:
+    with tabs[4]:
         st.subheader("Assign ke Agent")
         # Filters similar to Trace Assigning
         q1, q2, q3, q4 = st.columns([1.2, 1.2, 1.2, 0.6])
@@ -5904,7 +6138,7 @@ def page_supervisor():
         
 
     # --- Freeze Manager Tab ---
-    with tabs[6]:
+    with tabs[7]:
         st.markdown("### 🔒 Freeze Manager - Entity Protection System")
         st.caption("Manajemen freeze/unfreeze untuk NIK dan Case ID. Data yang frozen tidak bisa di-assign dan ter-proteksi dari collection activity.")
         
@@ -6217,7 +6451,7 @@ def page_supervisor():
 
 
     # --- Trace Results Tab ---
-    with tabs[4]:
+    with tabs[5]:
         st.markdown("### 📝 Trace Results - Touch Activity Logs")
         st.caption("Record dan monitor semua aktivitas tracing. Real-time tracking untuk setiap interaksi dengan debitur.")
         
@@ -6456,7 +6690,7 @@ def page_supervisor():
 
 
     # --- Enriched & Lookup Tab ---
-    with tabs[5]:
+    with tabs[6]:
         st.markdown("### 🔍 Enriched Monitoring & Global Lookup")
         st.caption("360° view untuk setiap loan: tracking lengkap dari assignment hingga pembayaran")
         
