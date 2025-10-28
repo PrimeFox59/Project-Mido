@@ -32,6 +32,208 @@ ENABLE_TIMELINE_WEIGHTING = True
 _icon_arg = ICON_PATH if os.path.exists(ICON_PATH) else "icon.png"
 st.set_page_config(layout="wide", page_icon=_icon_arg, page_title="Minama Felonic Solutions")
 
+# ============================================
+# GLOBAL GLASSMORPHISM THEME INJECTION
+# Applied to all pages for consistent UI/UX
+# ============================================
+st.markdown("""
+    <style>
+    /* ============================================
+       GLOBAL APP BACKGROUND & THEME
+    ============================================ */
+    
+    /* Subtle gradient background for main app */
+    .stApp {
+        background: linear-gradient(135deg, 
+            #f5f7fa 0%, 
+            #e8eef5 50%, 
+            #f0f4f8 100%) !important;
+    }
+    
+    /* Main content area with subtle glass effect */
+    .main .block-container {
+        background: rgba(255, 255, 255, 0.3) !important;
+        backdrop-filter: blur(10px) !important;
+        border-radius: 20px !important;
+        padding: 2rem !important;
+    }
+    
+    /* ============================================
+       GLOBAL GLASSMORPHISM BUTTON STYLES
+    ============================================ */
+    
+    /* Primary Buttons - Glass Effect */
+    .stButton > button[kind="primary"] {
+        background: linear-gradient(135deg, 
+            rgba(99, 102, 241, 0.9) 0%, 
+            rgba(139, 92, 246, 0.9) 100%) !important;
+        backdrop-filter: blur(10px) saturate(150%) !important;
+        -webkit-backdrop-filter: blur(10px) saturate(150%) !important;
+        border: 1px solid rgba(255, 255, 255, 0.3) !important;
+        border-radius: 12px !important;
+        color: #FFFFFF !important;
+        font-weight: 600 !important;
+        padding: 10px 20px !important;
+        box-shadow: 0 4px 16px rgba(99, 102, 241, 0.25), 
+                    inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    }
+    
+    .stButton > button[kind="primary"]:hover {
+        background: linear-gradient(135deg, 
+            rgba(99, 102, 241, 1) 0%, 
+            rgba(139, 92, 246, 1) 100%) !important;
+        box-shadow: 0 6px 20px rgba(99, 102, 241, 0.35) !important;
+        transform: translateY(-2px) !important;
+    }
+    
+    /* Secondary Buttons - Subtle Glass */
+    .stButton > button[kind="secondary"] {
+        background: linear-gradient(135deg, 
+            rgba(255, 255, 255, 0.2) 0%, 
+            rgba(255, 255, 255, 0.1) 100%) !important;
+        backdrop-filter: blur(10px) !important;
+        border: 1px solid rgba(0, 0, 0, 0.1) !important;
+        border-radius: 12px !important;
+        color: #374151 !important;
+        font-weight: 600 !important;
+        padding: 10px 20px !important;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+        transition: all 0.3s ease !important;
+    }
+    
+    .stButton > button[kind="secondary"]:hover {
+        background: linear-gradient(135deg, 
+            rgba(255, 255, 255, 0.3) 0%, 
+            rgba(255, 255, 255, 0.15) 100%) !important;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12) !important;
+        transform: translateY(-2px) !important;
+    }
+    
+    /* Default Buttons - Enhanced Glass */
+    .stButton > button:not([kind]) {
+        background: linear-gradient(135deg, 
+            rgba(255, 255, 255, 0.25) 0%, 
+            rgba(255, 255, 255, 0.12) 100%) !important;
+        backdrop-filter: blur(10px) saturate(150%) !important;
+        border: 1px solid rgba(255, 255, 255, 0.3) !important;
+        border-radius: 12px !important;
+        color: #1F2937 !important;
+        font-weight: 600 !important;
+        padding: 10px 20px !important;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08), 
+                    inset 0 1px 0 rgba(255, 255, 255, 0.4) !important;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    }
+    
+    .stButton > button:not([kind]):hover {
+        background: linear-gradient(135deg, 
+            rgba(255, 255, 255, 0.35) 0%, 
+            rgba(255, 255, 255, 0.18) 100%) !important;
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12) !important;
+        transform: translateY(-2px) !important;
+    }
+    
+    /* Input Fields - Glass Effect */
+    .stTextInput input, .stTextArea textarea, .stSelectbox select,
+    .stNumberInput input, .stDateInput input, .stTimeInput input {
+        background: rgba(255, 255, 255, 0.6) !important;
+        backdrop-filter: blur(8px) !important;
+        border: 1px solid rgba(0, 0, 0, 0.1) !important;
+        border-radius: 10px !important;
+        padding: 10px 14px !important;
+        transition: all 0.3s ease !important;
+    }
+    
+    .stTextInput input:focus, .stTextArea textarea:focus, .stSelectbox select:focus {
+        background: rgba(255, 255, 255, 0.8) !important;
+        border-color: rgba(99, 102, 241, 0.5) !important;
+        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1) !important;
+    }
+    
+    /* Tabs - Modern Glass Design */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        background: rgba(255, 255, 255, 0.3) !important;
+        backdrop-filter: blur(10px) !important;
+        padding: 8px !important;
+        border-radius: 14px !important;
+        border: 1px solid rgba(255, 255, 255, 0.3) !important;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        background: transparent !important;
+        border-radius: 10px !important;
+        padding: 10px 20px !important;
+        font-weight: 600 !important;
+        color: #4B5563 !important;
+        transition: all 0.3s ease !important;
+    }
+    
+    .stTabs [aria-selected="true"] {
+        background: linear-gradient(135deg, 
+            rgba(255, 255, 255, 0.5) 0%, 
+            rgba(255, 255, 255, 0.3) 100%) !important;
+        backdrop-filter: blur(10px) !important;
+        border: 1px solid rgba(99, 102, 241, 0.3) !important;
+        color: #6366F1 !important;
+    }
+    
+    /* Expander - Glass Container */
+    .streamlit-expanderHeader {
+        background: linear-gradient(135deg, 
+            rgba(255, 255, 255, 0.5) 0%, 
+            rgba(255, 255, 255, 0.3) 100%) !important;
+        backdrop-filter: blur(10px) !important;
+        border: 1px solid rgba(255, 255, 255, 0.3) !important;
+        border-radius: 12px !important;
+        font-weight: 600 !important;
+        transition: all 0.3s ease !important;
+    }
+    
+    .streamlit-expanderHeader:hover {
+        background: linear-gradient(135deg, 
+            rgba(255, 255, 255, 0.6) 0%, 
+            rgba(255, 255, 255, 0.4) 100%) !important;
+    }
+    
+    /* Data Editor - Glass Table */
+    [data-testid="stDataFrame"] {
+        background: rgba(255, 255, 255, 0.5) !important;
+        backdrop-filter: blur(10px) !important;
+        border-radius: 12px !important;
+        border: 1px solid rgba(255, 255, 255, 0.3) !important;
+    }
+    
+    /* Success/Info/Warning/Error Messages - Glass Cards */
+    .stAlert {
+        backdrop-filter: blur(10px) !important;
+        border-radius: 12px !important;
+        border: 1px solid rgba(255, 255, 255, 0.3) !important;
+    }
+    
+    /* Metric Cards - Enhanced Glass */
+    [data-testid="stMetricValue"] {
+        font-weight: 700 !important;
+    }
+    
+    /* Download Button - Special Style */
+    .stDownloadButton > button {
+        background: linear-gradient(135deg, 
+            rgba(16, 185, 129, 0.9) 0%, 
+            rgba(5, 150, 105, 0.9) 100%) !important;
+        backdrop-filter: blur(10px) !important;
+        border: 1px solid rgba(255, 255, 255, 0.3) !important;
+        color: #FFFFFF !important;
+    }
+    
+    .stDownloadButton > button:hover {
+        box-shadow: 0 6px 20px rgba(16, 185, 129, 0.35) !important;
+        transform: translateY(-2px) !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 def get_db():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
     conn.row_factory = sqlite3.Row
@@ -1423,11 +1625,16 @@ def require_roles(allowed_roles):
 
 # ... (page_auth, page_dashboard, page_resume, page_reporting, page_admin_panel, page_user_guide and main function remain the same) ...
 def page_auth():
-    # Sembunyikan sidebar dan batasi lebar konten untuk halaman login
+    # Sembunyikan sidebar dan batasi lebar konten untuk halaman login dengan glassmorphism
     st.markdown("""
         <style>
         /* Hide sidebar on login page */
         [data-testid="stSidebar"] {display: none !important;}
+        
+        /* Background gradient for login page */
+        .stApp {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
         
         /* Limit content width to compact centered layout on login page */
         .main .block-container {
@@ -1442,6 +1649,49 @@ def page_auth():
             max-width: 100%;
             display: flex;
             justify-content: center;
+        }
+        
+        /* Glassmorphism card for login form */
+        [data-testid="stVerticalBlock"] {
+            background: rgba(255, 255, 255, 0.15) !important;
+            backdrop-filter: blur(20px) saturate(180%) !important;
+            -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+            border-radius: 24px !important;
+            border: 1px solid rgba(255, 255, 255, 0.2) !important;
+            padding: 32px !important;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15) !important;
+        }
+        
+        /* Glass buttons on login page */
+        .stButton > button {
+            background: linear-gradient(135deg, 
+                rgba(255, 255, 255, 0.25) 0%, 
+                rgba(255, 255, 255, 0.12) 100%) !important;
+            backdrop-filter: blur(10px) !important;
+            border: 1px solid rgba(255, 255, 255, 0.3) !important;
+            border-radius: 12px !important;
+            color: #1F2937 !important;
+            font-weight: 600 !important;
+            padding: 12px 24px !important;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1) !important;
+            transition: all 0.3s ease !important;
+        }
+        
+        .stButton > button:hover {
+            background: linear-gradient(135deg, 
+                rgba(255, 255, 255, 0.35) 0%, 
+                rgba(255, 255, 255, 0.18) 100%) !important;
+            transform: translateY(-2px) !important;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15) !important;
+        }
+        
+        /* Input fields glass effect */
+        .stTextInput input, .stSelectbox select {
+            background: rgba(255, 255, 255, 0.2) !important;
+            backdrop-filter: blur(5px) !important;
+            border: 1px solid rgba(255, 255, 255, 0.3) !important;
+            border-radius: 10px !important;
+            color: #1F2937 !important;
         }
         
         /* Responsive for mobile */
@@ -2243,37 +2493,183 @@ def main():
 
     user = current_user()
 
-    # Sidebar minimal: hanya autentikasi & G Drive
+    # Sidebar with Glassmorphism Design
     st.sidebar.image("logo.png", use_container_width=True)
     st.sidebar.title("Navigasi")
-    # Global sidebar button style: force white buttons for consistency
+    
+    # Glassmorphism Sidebar & Button Style inspired by modern UI/UX
     st.sidebar.markdown(
         """
         <style>
-        /* Base style: white buttons, uniform size */
-        div[data-testid="stSidebar"] .stButton { margin-bottom: 6px; }
+        /* ============================================
+           GLASSMORPHISM SIDEBAR THEME
+           Inspired by modern dashboard designs
+        ============================================ */
+        
+        /* Sidebar Background - Glass Effect */
+        [data-testid="stSidebar"] {
+            background: linear-gradient(135deg, 
+                rgba(255, 255, 255, 0.15) 0%, 
+                rgba(255, 255, 255, 0.08) 100%) !important;
+            backdrop-filter: blur(20px) saturate(180%) !important;
+            -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+            border-right: 1px solid rgba(255, 255, 255, 0.18) !important;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12) !important;
+        }
+        
+        /* Sidebar Content - Enhanced Typography */
+        [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] {
+            color: #1F2937 !important;
+        }
+        
+        /* Logo Container - Soft Shadow */
+        [data-testid="stSidebar"] img {
+            border-radius: 16px !important;
+            padding: 8px !important;
+            background: rgba(255, 255, 255, 0.5) !important;
+            backdrop-filter: blur(10px) !important;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08) !important;
+            margin-bottom: 16px !important;
+        }
+        
+        /* Navigation Buttons - Glassmorphism Cards */
+        div[data-testid="stSidebar"] .stButton { 
+            margin-bottom: 8px; 
+        }
+        
         div[data-testid="stSidebar"] .stButton > button {
-            background-color: #ffffff !important;
-            color: #111111 !important;
-            border: 1px solid #E0E0E0 !important;
-            border-radius: 8px !important;
-            padding: 8px 12px !important;
-            min-height: 40px !important;
+            /* Glass morphism effect */
+            background: linear-gradient(135deg, 
+                rgba(255, 255, 255, 0.25) 0%, 
+                rgba(255, 255, 255, 0.12) 100%) !important;
+            backdrop-filter: blur(10px) saturate(150%) !important;
+            -webkit-backdrop-filter: blur(10px) saturate(150%) !important;
+            
+            /* Border & Shadow */
+            border: 1px solid rgba(255, 255, 255, 0.3) !important;
+            border-radius: 14px !important;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06), 
+                        inset 0 1px 0 rgba(255, 255, 255, 0.5) !important;
+            
+            /* Typography */
+            color: #1F2937 !important;
+            font-weight: 600 !important;
+            font-size: 14px !important;
+            letter-spacing: 0.3px !important;
+            
+            /* Spacing */
+            padding: 12px 16px !important;
+            min-height: 44px !important;
             width: 100% !important;
-            box-shadow: none !important;
             text-align: left !important;
+            
+            /* Transition */
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+            position: relative !important;
+            overflow: hidden !important;
         }
-        /* Hover */
+        
+        /* Button Hover - Glow Effect */
         div[data-testid="stSidebar"] .stButton > button:hover {
-            border-color: #BDBDBD !important;
-            background-color: #FAFAFA !important;
+            background: linear-gradient(135deg, 
+                rgba(255, 255, 255, 0.35) 0%, 
+                rgba(255, 255, 255, 0.18) 100%) !important;
+            border-color: rgba(255, 255, 255, 0.5) !important;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), 
+                        inset 0 1px 0 rgba(255, 255, 255, 0.6),
+                        0 0 20px rgba(99, 102, 241, 0.15) !important;
+            transform: translateY(-2px) !important;
+            color: #111827 !important;
         }
-        /* Active (use disabled button as current-page highlight) */
+        
+        /* Active Button - Gradient Highlight */
         div[data-testid="stSidebar"] .stButton > button:disabled {
-            background-color: #E8F0FE !important; /* light blue */
-            border-color: #1A73E8 !important;
-            color: #1A73E8 !important;
-            opacity: 1 !important; /* keep readable */
+            background: linear-gradient(135deg, 
+                rgba(99, 102, 241, 0.85) 0%, 
+                rgba(139, 92, 246, 0.85) 100%) !important;
+            backdrop-filter: blur(10px) !important;
+            border: 1px solid rgba(255, 255, 255, 0.4) !important;
+            box-shadow: 0 8px 24px rgba(99, 102, 241, 0.3), 
+                        inset 0 1px 0 rgba(255, 255, 255, 0.4) !important;
+            color: #FFFFFF !important;
+            opacity: 1 !important;
+            font-weight: 700 !important;
+            transform: scale(1.02) !important;
+        }
+        
+        /* Button Ripple Effect (Shimmer) */
+        div[data-testid="stSidebar"] .stButton > button::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, 
+                transparent, 
+                rgba(255, 255, 255, 0.3), 
+                transparent);
+            transition: left 0.5s;
+        }
+        
+        div[data-testid="stSidebar"] .stButton > button:hover::before {
+            left: 100%;
+        }
+        
+        /* Logout Button - Special Accent */
+        div[data-testid="stSidebar"] .stButton:last-of-type > button {
+            background: linear-gradient(135deg, 
+                rgba(239, 68, 68, 0.15) 0%, 
+                rgba(220, 38, 38, 0.10) 100%) !important;
+            border-color: rgba(239, 68, 68, 0.3) !important;
+            color: #DC2626 !important;
+        }
+        
+        div[data-testid="stSidebar"] .stButton:last-of-type > button:hover {
+            background: linear-gradient(135deg, 
+                rgba(239, 68, 68, 0.25) 0%, 
+                rgba(220, 38, 38, 0.18) 100%) !important;
+            border-color: rgba(239, 68, 68, 0.5) !important;
+            color: #B91C1C !important;
+            box-shadow: 0 8px 24px rgba(239, 68, 68, 0.2) !important;
+        }
+        
+        /* Divider Lines - Subtle Glass Effect */
+        [data-testid="stSidebar"] hr {
+            border: none !important;
+            height: 1px !important;
+            background: linear-gradient(90deg, 
+                transparent, 
+                rgba(255, 255, 255, 0.3), 
+                transparent) !important;
+            margin: 16px 0 !important;
+        }
+        
+        /* User Info Card - Glass Container */
+        [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] strong {
+            display: inline-block;
+            padding: 6px 12px;
+            background: rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(5px);
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            margin: 2px 0;
+        }
+        
+        /* Caption Text - Enhanced Readability */
+        [data-testid="stSidebar"] .stCaption {
+            color: #6B7280 !important;
+            font-size: 12px !important;
+            font-weight: 500 !important;
+        }
+        
+        /* Responsive Mobile Adjustments */
+        @media (max-width: 768px) {
+            div[data-testid="stSidebar"] .stButton > button {
+                font-size: 13px !important;
+                padding: 10px 14px !important;
+                min-height: 40px !important;
+            }
         }
         </style>
         """,
