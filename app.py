@@ -651,38 +651,45 @@ def perform_backup(service, folder_id=FOLDER_ID_DEFAULT):
     """Create a timestamped backup of the SQLite DB to Google Drive and record in backup_log.
 
     Returns (success: bool, info_message: str)
+    
+    CRITICAL SAFEGUARDS:
+    1. NEVER backup fresh/seed DB (prevent overwriting real data)
+    2. NEVER backup within 15 minutes after restore (prevent backup loop)
+    3. Check capacity before uploading
     """
     if not os.path.exists(DB_PATH):
-        return False, f"Database '{DB_PATH}' tidak ditemukan." 
+        return False, f"❌ Database '{DB_PATH}' tidak ditemukan." 
     
-    # PENTING: Jangan backup jika DB masih fresh (hanya seed users, belum ada data real)
-    # Ini mencegah overwrite backup lama dengan DB kosong saat autosleep
+    # ========================================================================
+    # SAFEGUARD #1: BLOKIR backup jika DB masih fresh (hanya seed data)
+    # ========================================================================
     try:
         if _is_probably_fresh_seed_db():
-            # Cek apakah baru saja di-restore (dalam 10 menit terakhir)
-            last_restore_time = get_setting('auto_restore_last_time')
-            is_post_restore = False
-            if last_restore_time:
-                try:
-                    from dateutil import parser
-                    restore_dt = parser.isoparse(last_restore_time)
-                    now_dt = datetime.utcnow()
-                    minutes_since = (now_dt - restore_dt).total_seconds() / 60
-                    if minutes_since < 10:
-                        is_post_restore = True
-                except Exception:
-                    pass
-            
-            # Jika fresh dan BUKAN post-restore, skip backup
-            if not is_post_restore:
-                return False, "Backup dilewati: DB masih fresh (hanya seed data). Backup hanya dilakukan setelah ada data real."
+            return False, "🚫 Backup DITOLAK: DB masih fresh (hanya seed data). Tidak akan overwrite backup lama di Drive."
+    except Exception as e:
+        # Jika error saat cek, TOLAK backup untuk keamanan
+        return False, f"🚫 Backup DITOLAK: Gagal cek fresh DB ({e}). Untuk keamanan, backup dibatalkan."
+    
+    # ========================================================================
+    # SAFEGUARD #2: BLOKIR backup jika baru saja restore (< 15 menit)
+    # ========================================================================
+    try:
+        last_restore_time = get_setting('auto_restore_last_time')
+        if last_restore_time:
+            from dateutil import parser
+            restore_dt = parser.isoparse(last_restore_time)
+            now_dt = datetime.utcnow()
+            minutes_since_restore = (now_dt - restore_dt).total_seconds() / 60
+            if minutes_since_restore < 15:  # Grace period 15 menit
+                return False, f"⏸️ Backup DITUNDA: Baru restore {int(minutes_since_restore)} menit lalu. Tunggu 15 menit untuk stabilisasi."
     except Exception:
-        # Jika error saat cek, lanjutkan backup (safe fallback)
+        # Jika error parsing, abaikan safeguard ini (tapi safeguard #1 tetap aktif)
         pass
     
-    # Nama file backup auto (overwrite, bukan timestamp) agar tidak menumpuk
+    # ========================================================================
+    # SAFEGUARD #3: Cek kapasitas Drive sebelum upload
+    # ========================================================================
     base_name = get_setting('auto_backup_filename', 'auto_backup.sqlite') or 'auto_backup.sqlite'
-    # Cek kapasitas: jika file belum ada, menambah ukuran; jika sudah ada, overwrite diperbolehkan
     try:
         db_size = os.path.getsize(DB_PATH)
     except Exception:
@@ -693,6 +700,7 @@ def perform_backup(service, folder_id=FOLDER_ID_DEFAULT):
     except Exception:
         used_bytes_now = 0
     capacity = get_project_capacity_bytes()
+    
     # Cek apakah file dengan nama yang sama sudah ada (overwrite diperbolehkan meski full)
     try:
         exists_query = f"name='{base_name}' and '{folder_id}' in parents and trashed=false"
@@ -700,12 +708,17 @@ def perform_backup(service, folder_id=FOLDER_ID_DEFAULT):
         existing_files = exists_resp.get('files', [])
     except Exception:
         existing_files = []
+    
     if not existing_files:
         # First time create -> akan menambah ukuran
         if used_bytes_now >= capacity:
-            return False, "Gagal backup: kapasitas maksimum tercapai (exceed/max capacity)."
+            return False, "❌ Backup GAGAL: Kapasitas Drive sudah penuh."
         if used_bytes_now + db_size > capacity:
-            return False, "Gagal backup: ukuran backup akan melebihi kapasitas maksimum (exceed)."
+            return False, f"❌ Backup GAGAL: Ukuran backup ({db_size} bytes) akan melebihi kapasitas."
+    
+    # ========================================================================
+    # Eksekusi Backup (semua safeguard passed)
+    # ========================================================================
     try:
         with open(DB_PATH, 'rb') as f:
             data = f.read()
@@ -713,15 +726,17 @@ def perform_backup(service, folder_id=FOLDER_ID_DEFAULT):
         if fid:
             execute("INSERT INTO backup_log (file_name, drive_file_id, status, message) VALUES (?,?,?,?)",
                     (base_name, fid, 'SUCCESS', 'overwrite' if existing_files else 'created'))
-            return True, f"Backup sukses: {base_name} (ID: {fid})"
+            # Update timestamp backup terakhir
+            set_setting('last_backup_time', datetime.utcnow().isoformat())
+            return True, f"✅ Backup sukses: {base_name} ({len(data)} bytes)"
         else:
             execute("INSERT INTO backup_log (file_name, drive_file_id, status, message) VALUES (?,?,?,?)",
-                    (base_name, None, 'FAILED', 'Upload gagal'))
-            return False, "Upload Drive gagal." 
+                    (base_name, None, 'FAILED', 'Upload gagal (no file ID returned)'))
+            return False, "❌ Upload Drive gagal: Tidak ada file ID." 
     except Exception as e:
         execute("INSERT INTO backup_log (file_name, drive_file_id, status, message) VALUES (?,?,?,?)",
                 (base_name, None, 'FAILED', str(e)))
-        return False, f"Gagal backup: {e}" 
+        return False, f"❌ Backup gagal: {e}" 
 
 def auto_daily_backup(service, folder_id=FOLDER_ID_DEFAULT):
     """Run once per session start (post-login). If last SUCCESS backup is not today -> perform one."""
@@ -807,26 +822,53 @@ def check_scheduled_backup(service, folder_id=FOLDER_ID_DEFAULT):
       scheduled_backup_enabled: 'true'/'false'
       scheduled_backup_filename: base file name (default 'scheduled_backup.sqlite')
       scheduled_backup_last_slot: last slot string done
+    
+    SAFEGUARDS: Sama seperti perform_backup - cek fresh DB dan grace period setelah restore
     """
     enabled = get_setting('scheduled_backup_enabled', 'false') == 'true'
     if not enabled:
-        return False, 'Scheduled backup disabled'
+        return False, '⏭️ Scheduled backup tidak aktif'
+    
+    # ========================================================================
+    # SAFEGUARD #1: BLOKIR jika DB masih fresh
+    # ========================================================================
+    try:
+        if _is_probably_fresh_seed_db():
+            return False, "🚫 Scheduled backup DITOLAK: DB masih fresh (seed data only)."
+    except Exception as e:
+        return False, f"🚫 Scheduled backup DITOLAK: Gagal cek fresh DB ({e})."
+    
+    # ========================================================================
+    # SAFEGUARD #2: BLOKIR jika baru restore (< 15 menit)
+    # ========================================================================
+    try:
+        last_restore_time = get_setting('auto_restore_last_time')
+        if last_restore_time:
+            from dateutil import parser
+            restore_dt = parser.isoparse(last_restore_time)
+            now_dt = datetime.utcnow()
+            minutes_since_restore = (now_dt - restore_dt).total_seconds() / 60
+            if minutes_since_restore < 15:
+                return False, f"⏸️ Scheduled backup DITUNDA: Baru restore {int(minutes_since_restore)} menit lalu."
+    except Exception:
+        pass
+    
     base_name = get_setting('scheduled_backup_filename', 'scheduled_backup.sqlite') or 'scheduled_backup.sqlite'
     # Determine local time (assume server already GMT+7 or adjust here if needed)
     now_local = now_wib()  # Use WIB regardless of server timezone
     slot = determine_slot(now_local)
     if slot == 'slot_unknown':
-        return False, 'Outside defined slots'
+        return False, '⏭️ Di luar slot waktu yang didefinisikan'
     last_slot_done = get_setting('scheduled_backup_last_slot')
     today_tag = today_wib().isoformat()
     last_slot_date = get_setting('scheduled_backup_last_date')
     composite_last = f"{last_slot_date}:{last_slot_done}" if last_slot_done and last_slot_date else None
     composite_now = f"{today_tag}:{slot}"
     if composite_last == composite_now:
-        return False, 'Slot already backed up'
+        return False, f'✅ Slot {slot} sudah di-backup hari ini'
     # Do backup overwrite single file
     if not os.path.exists(DB_PATH):
-        return False, 'DB missing'
+        return False, '❌ Database tidak ditemukan'
     try:
         with open(DB_PATH,'rb') as f:
             data = f.read()
@@ -845,9 +887,9 @@ def check_scheduled_backup(service, folder_id=FOLDER_ID_DEFAULT):
         if not existing_files:
             # First time create -> akan menambah ukuran
             if used_bytes_now >= capacity:
-                return False, 'Scheduled backup dibatalkan: kapasitas maksimum tercapai.'
+                return False, '❌ Scheduled backup dibatalkan: Kapasitas Drive penuh.'
             if used_bytes_now + len(data) > capacity:
-                return False, 'Scheduled backup dibatalkan: ukuran backup melebihi kapasitas.'
+                return False, '❌ Scheduled backup dibatalkan: Ukuran melebihi kapasitas.'
         fid = upload_or_replace(service, folder_id, base_name, data, mimetype='application/x-sqlite3')
         if fid:
             set_setting('scheduled_backup_last_slot', slot)
@@ -946,29 +988,75 @@ def _pick_latest_drive_backup_file(service, folder_id):
         return candidates[0] if candidates else None
 
 def attempt_auto_restore_if_seed(service, folder_id=FOLDER_ID_DEFAULT):
-    """Jika diaktifkan & terdeteksi DB fresh, restore otomatis dari backup Drive terbaru sekali per sesi."""
-    if get_setting('auto_restore_enabled', 'true') != 'true':
-        return False, 'Auto-restore disabled'
+    """WAJIB restore dari backup Drive jika terdeteksi DB fresh.
+    
+    IMPORTANT: Fungsi ini diabaikan flag 'auto_restore_enabled' untuk keamanan data.
+    Setiap kali DB terdeteksi fresh (reboot/autosleep), WAJIB restore dari Drive
+    untuk mencegah kehilangan data.
+    
+    Returns: (success: bool, message: str)
+    """
+    # Hapus pengecekan setting - restore WAJIB untuk DB fresh
+    # if get_setting('auto_restore_enabled', 'true') != 'true':
+    #     return False, 'Auto-restore disabled'
+    
     if st.session_state.get('auto_restore_attempted'):
-        return False, 'Already attempted'
+        return False, '⏭️ Restore sudah dicoba sebelumnya di sesi ini.'
+    
     st.session_state['auto_restore_attempted'] = True
+    
     if not _is_probably_fresh_seed_db():
-        return False, 'DB not fresh'
+        return False, '✅ DB tidak fresh, tidak perlu restore.'
+    
+    # Cari backup terbaru di Drive
     latest = _pick_latest_drive_backup_file(service, folder_id)
     if not latest:
-        return False, 'No backup found'
-    fid = latest.get('id'); fname = latest.get('name')
+        return False, '⚠️ Tidak ada backup ditemukan di Drive.'
+    
+    fid = latest.get('id')
+    fname = latest.get('name')
+    fsize = latest.get('size', 0)
+    
     try:
+        # Download dan validasi
         data = download_file_bytes(service, fid)
+        
+        # Validasi: harus SQLite format
         if not data.startswith(b'SQLite format 3\x00'):
-            return False, 'Invalid sqlite header'
+            return False, f'❌ File {fname} bukan SQLite valid.'
+        
+        # Validasi: ukuran harus masuk akal (> 50KB untuk DB dengan data)
+        if len(data) < 50000:
+            return False, f'⚠️ File {fname} terlalu kecil ({len(data)} bytes), mungkin DB kosong.'
+        
+        # Backup DB lama sebelum overwrite (safety)
+        try:
+            if os.path.exists(DB_PATH):
+                backup_old = DB_PATH + '.before_restore.bak'
+                import shutil
+                shutil.copy2(DB_PATH, backup_old)
+        except Exception:
+            pass  # Tidak kritis jika backup lokal gagal
+        
+        # Tulis DB baru
         with open(DB_PATH, 'wb') as f:
             f.write(data)
+        
+        # Catat restore berhasil
         set_setting('auto_restore_last_file', fname)
         set_setting('auto_restore_last_time', datetime.utcnow().isoformat())
-        return True, f'Restored from {fname}'
+        
+        # Log ke backup_log untuk audit
+        try:
+            execute("INSERT INTO backup_log (file_name, drive_file_id, status, message) VALUES (?,?,?,?)",
+                    (fname, fid, 'RESTORED', f'Auto-restore berhasil ({len(data)} bytes)'))
+        except Exception:
+            pass  # Tidak kritis jika logging gagal
+        
+        return True, f'✅ Restore berhasil dari {fname} ({len(data):,} bytes)'
+        
     except Exception as e:
-        return False, f'Restore failed: {e}'
+        return False, f'❌ Restore gagal: {e}'
 
 # -------------------------
 # Google Drive Helper Functions
@@ -1284,56 +1372,9 @@ def page_auth():
                         execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (row['id'], "LOGIN", f"User {detail_id} login."))
                     except Exception:
                         pass
-                    # Backup on successful login (best-effort)
-                    # PENTING: Skip backup jika DB masih fresh/baru di-restore untuk mencegah overwrite backup lama
-                    try:
-                        if "service_account" in st.secrets:
-                            # Cek apakah DB baru saja di-restore (dalam 5 menit terakhir)
-                            just_restored = False
-                            try:
-                                last_restore_time = get_setting('auto_restore_last_time')
-                                if last_restore_time:
-                                    from dateutil import parser
-                                    restore_dt = parser.isoparse(last_restore_time)
-                                    now_dt = datetime.utcnow()
-                                    minutes_since_restore = (now_dt - restore_dt).total_seconds() / 60
-                                    if minutes_since_restore < 5:  # Dalam 5 menit terakhir
-                                        just_restored = True
-                            except Exception:
-                                pass
-                            
-                            # Cek apakah DB masih fresh (belum ada data real)
-                            is_fresh = _is_probably_fresh_seed_db()
-                            
-                            # Hanya backup jika DB tidak fresh DAN tidak baru di-restore
-                            if not is_fresh and not just_restored:
-                                service_b, _ = build_drive_service()
-                                ok_b, msg_b = perform_backup(service_b, FOLDER_ID_DEFAULT)
-                                st.session_state['last_login_backup'] = {
-                                    'ok': ok_b,
-                                    'msg': msg_b,
-                                    'time': datetime.utcnow().isoformat()
-                                }
-                                # Tampilkan info singkat tanpa menghalangi redirect
-                                if ok_b:
-                                    st.toast("Backup otomatis saat login berhasil.")
-                                else:
-                                    st.toast("Backup saat login gagal atau dibatalkan.")
-                            else:
-                                # Skip backup untuk DB fresh atau baru di-restore
-                                skip_reason = "baru di-restore" if just_restored else "DB masih fresh"
-                                st.session_state['last_login_backup'] = {
-                                    'ok': False,
-                                    'msg': f'Backup dilewati: {skip_reason}',
-                                    'time': datetime.utcnow().isoformat()
-                                }
-                                st.toast(f"⏭️ Backup dilewati ({skip_reason})")
-                    except Exception as e:
-                        st.session_state['last_login_backup'] = {
-                            'ok': False,
-                            'msg': f'Backup saat login error: {e}',
-                            'time': datetime.utcnow().isoformat()
-                        }
+                    # BACKUP DIHAPUS DARI LOGIN
+                    # Backup hanya dilakukan saat logout untuk mengurangi beban sistem
+                    # dan memastikan hanya backup data terakhir setelah user selesai bekerja
                     st.session_state.login_status_message = {"type": "success", "text": "Login berhasil. Mengalihkan..."}
                     st.session_state.page = "Dashboard"
                     st.rerun()
@@ -2017,39 +2058,63 @@ def page_gdrive():
 def main():
     init_db()
 
-    # Pre-login auto-restore attempt (hanya sekali per sesi sebelum login)
+    # ========================================================================
+    # CRITICAL: PRE-LOGIN AUTO-RESTORE (WAJIB sync dari Drive sebelum backup!)
+    # ========================================================================
+    # Ini adalah safeguard utama untuk mencegah overwrite backup lama saat reboot/autosleep
+    # Flow: Deteksi DB fresh → Restore dari Drive → Baru boleh backup
     if "prelogin_auto_restore_done" not in st.session_state:
-        # Hanya coba bila auto-restore diaktifkan & DB terindikasi fresh
-        if get_setting('auto_restore_enabled', 'true') == 'true' and _is_probably_fresh_seed_db():
+        is_fresh = _is_probably_fresh_seed_db()
+        
+        if is_fresh:
+            # DB FRESH terdeteksi! WAJIB restore dari Drive terlebih dahulu
             try:
-                service_pre, _ = build_drive_service()
-                ok_pre, msg_pre = attempt_auto_restore_if_seed(service_pre, FOLDER_ID_DEFAULT)
-                st.session_state['prelogin_auto_restore_result'] = {
-                    'success': ok_pre,
-                    'message': msg_pre,
-                    'time': datetime.utcnow().isoformat()
-                }
-                # Sinkronkan flag lama agar blok admin tidak mencoba ulang
-                st.session_state['auto_restore_checked'] = 'restored' if ok_pre else 'checked'
+                if "service_account" not in st.secrets:
+                    st.session_state['prelogin_auto_restore_result'] = {
+                        'success': False,
+                        'message': '⚠️ DB fresh terdeteksi, tapi service_account tidak tersedia untuk restore.',
+                        'time': datetime.utcnow().isoformat()
+                    }
+                else:
+                    service_pre = build_drive_service()
+                    # Force restore (ignore auto_restore_enabled setting untuk keamanan data)
+                    ok_pre, msg_pre = attempt_auto_restore_if_seed(service_pre, FOLDER_ID_DEFAULT)
+                    st.session_state['prelogin_auto_restore_result'] = {
+                        'success': ok_pre,
+                        'message': msg_pre,
+                        'time': datetime.utcnow().isoformat()
+                    }
+                    # Sinkronkan flag untuk mencegah backup langsung setelah restore
+                    st.session_state['auto_restore_checked'] = 'restored' if ok_pre else 'checked'
+                    
+                    # Re-init DB setelah restore untuk memuat data fresh
+                    if ok_pre:
+                        init_db()
+                        # Set flag agar tidak backup dalam 10 menit ke depan
+                        set_setting('auto_restore_last_time', datetime.utcnow().isoformat())
             except Exception as e:
                 st.session_state['prelogin_auto_restore_result'] = {
                     'success': False,
-                    'message': f'Auto-Restore error: {e}',
+                    'message': f'❌ Auto-Restore error: {e}',
                     'time': datetime.utcnow().isoformat()
                 }
         else:
+            # DB tidak fresh, lanjutkan normal
             st.session_state['prelogin_auto_restore_result'] = {
-                'success': False,
-                'message': 'Lewati auto-restore (tidak diaktifkan atau DB tidak fresh)',
+                'success': True,
+                'message': '✅ DB sudah berisi data, tidak perlu restore.',
                 'time': datetime.utcnow().isoformat()
             }
+        
         st.session_state['prelogin_auto_restore_done'] = True
-        # Jika benar-benar ada proses restore (berhasil / gagal) tampilkan halaman status.
-        # Jika hanya skip (Lewati auto-restore...) langsung ke halaman login.
+        
+        # Tentukan halaman tujuan
         msg_prelogin = st.session_state['prelogin_auto_restore_result'].get('message','')
-        if msg_prelogin.startswith('Lewati auto-restore'):
+        if msg_prelogin.startswith('✅ DB sudah berisi'):
+            # Skip restore status page, langsung ke login
             st.session_state.page = 'Authentication'
         else:
+            # Tampilkan status restore (berhasil/gagal)
             st.session_state.page = 'RestoreStatus'
     
     # Reset flags lama jika user kembali ke halaman login setelah selesai
@@ -5656,10 +5721,52 @@ def page_guide():
 
     st.header("5) Backup & Auto-Restore")
     st.markdown("""
-    - Semua aktivitas penting dicatat di `audit_logs`.
-    - Backup otomatis ke Google Drive lewat fungsi `perform_backup()` dan log di `backup_log`.
-    - Jika aplikasi restart dan DB terdeteksi fresh (kosong), fungsi `attempt_auto_restore_if_seed()` mencoba restore dari backup Drive terbaru.
-    - Pastikan `service_account` disimpan di `st.secrets` untuk mengaktifkan Drive integration.
+    **🔒 SISTEM KEAMANAN DATA (Anti-Overwrite Protection)**
+    
+    Aplikasi ini memiliki mekanisme backup/restore otomatis yang **sangat aman** untuk mencegah kehilangan data:
+    
+    **A) Auto-Restore (Saat Reboot/Autosleep):**
+    - ✅ **WAJIB:** Setiap kali aplikasi terdeteksi fresh (reboot/autosleep), sistem **WAJIB restore dari Google Drive** sebelum melakukan apapun
+    - ✅ **Validasi:** File backup divalidasi (format SQLite, ukuran > 50KB)
+    - ✅ **Backup Lokal:** Sebelum overwrite, DB lama di-backup lokal (`.before_restore.bak`)
+    - ✅ **Grace Period:** Setelah restore, backup diblokir selama 15 menit untuk stabilisasi
+    
+    **B) Backup Protection (3 Lapis Safeguard):**
+    
+    **Safeguard #1 - Fresh DB Check:**
+    - 🚫 TIDAK AKAN backup jika DB masih fresh (hanya seed users, < 3 data)
+    - 🚫 TIDAK AKAN overwrite backup lama dengan DB kosong saat autosleep
+    - ✅ Backup hanya dilakukan jika sudah ada data real
+    
+    **Safeguard #2 - Grace Period:**
+    - ⏸️ TIDAK AKAN backup dalam 15 menit pertama setelah restore
+    - ⏸️ Mencegah backup loop dan memberikan waktu stabilisasi DB
+    
+    **Safeguard #3 - Capacity Check:**
+    - 📦 Cek ukuran Drive sebelum upload
+    - 📦 Tidak akan backup jika melebihi kapasitas (default 2GB)
+    
+    **C) Kapan Backup Terjadi?**
+    - ✅ Saat **Logout** (UTAMA - backup data terakhir setelah user selesai bekerja)
+    - ✅ **Daily Backup** (1x per hari, jika belum backup hari ini) - DISABLED by default
+    - ✅ **Scheduled Backup** (per slot waktu, jika diaktifkan) - DISABLED by default
+    - ✅ **Manual Backup** via menu G Drive
+    - ❌ **TIDAK saat Login** (untuk mengurangi beban sistem dan mencegah backup prematur)
+    
+    **D) Log & Audit:**
+    - 📝 Semua aktivitas dicatat di `backup_log` dengan status SUCCESS/FAILED/RESTORED
+    - 📝 Audit trail lengkap di `audit_logs`
+    - 📝 Setting `auto_restore_last_time` untuk tracking grace period
+    
+    **E) File Backup:**
+    - 📄 **auto_backup.sqlite** - Backup otomatis (overwrite, 1 file)
+    - 📄 **scheduled_backup.sqlite** - Backup terjadwal (overwrite, 1 file)
+    - 📁 Lokasi: Google Drive folder ID `FOLDER_ID_DEFAULT`
+    
+    **⚠️ PENTING:**
+    - Pastikan `service_account` tersedia di `st.secrets`
+    - Jangan hapus file backup di Drive secara manual
+    - Monitoring rutin via menu **G Drive → Audit Log**
     """, unsafe_allow_html=True)
 
     st.header("6) Kontrol Peran & Keamanan")
