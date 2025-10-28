@@ -5775,8 +5775,6 @@ def page_supervisor():
             if btn_single:
                 if not len(selected_rows):
                     st.warning("Pilih minimal satu baris dahulu.")
-                elif not sel_agent or sel_agent == "-":
-                    st.warning("Pilih agent terlebih dahulu.")
                 else:
                     try:
                         u = current_user() or {}
