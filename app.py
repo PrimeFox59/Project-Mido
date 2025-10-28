@@ -3044,7 +3044,7 @@ def page_agent():
                 aa.Agreement_No AS Case_ID, 
                 aa.Agent_Assigned_To, 
                 aa.assigned_at,
-                COALESCE(sd.Principle_Outstanding, 'N/A') AS Principle_Outstanding,
+                CAST(COALESCE(sd.Principle_Outstanding, '0') AS REAL) AS Principle_Outstanding,
                 (
                     COALESCE(
                         (SELECT SUM(paid_amount) 
@@ -3156,7 +3156,11 @@ def page_agent():
         
         if user_role in ("Superuser", "Supervisor"):
             col_config["Agent"] = st.column_config.TextColumn("Agent")
-            col_config["Principle_Outstanding"] = st.column_config.TextColumn("Principle Outstanding")
+            col_config["Principle_Outstanding"] = st.column_config.NumberColumn(
+                "Principle Outstanding",
+                help="Sisa pokok pinjaman yang belum dibayar",
+                format="Rp %.0f"
+            )
             col_config["Total_Approved_Payment"] = st.column_config.NumberColumn(
                 "Total Approved Payment",
                 help="Total pembayaran cicilan yang sudah di-approve",
