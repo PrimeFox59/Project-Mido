@@ -974,30 +974,45 @@ def _is_probably_fresh_seed_db():
         return False
 
 def _pick_latest_drive_backup_file(service, folder_id):
-    """Pilih backup terbaru dari Google Drive, tapi hindari backup yang terlalu baru 
-    (< 2 menit) karena mungkin backup fresh DB yang dibuat saat autosleep.
+    """Pilih backup terbaru dari Google Drive.
+    Filter: hindari backup yang terlalu baru (< 1 menit) untuk keamanan.
+    Prioritas: ambil file .sqlite atau .db terbaru yang aman.
     """
     try:
         files = list_files_in_folder(service, folder_id)
-    except Exception:
+    except Exception as e:
+        st.session_state['restore_debug'] = f"Error list files: {e}"
         return None
+    
     if not files:
+        st.session_state['restore_debug'] = "Folder kosong"
         return None
+    
+    # Filter hanya file SQLite/DB
     candidates = [f for f in files if f.get('name','').endswith('.sqlite') or f.get('name','').endswith('.db')]
+    
     if not candidates:
+        st.session_state['restore_debug'] = f"Tidak ada file .sqlite/.db (total {len(files)} files)"
         return None
+    
+    # Sort by modified time (terbaru dulu)
     try:
         candidates.sort(key=lambda x: x.get('modifiedTime',''), reverse=True)
     except Exception:
         pass
     
-    # Filter: hindari backup yang terlalu baru (< 2 menit), ambil yang lebih lama
+    # Filter: hindari backup yang terlalu baru (< 1 menit)
     # Ini mencegah restore dari backup fresh yang baru dibuat saat autosleep
     try:
         now_utc = datetime.utcnow()
         safe_candidates = []
+        too_new_candidates = []
+        
         for f in candidates:
+            fname = f.get('name', '?')
+            fsize = f.get('size', 0)
             mod_time_str = f.get('modifiedTime')
+            
             if mod_time_str:
                 try:
                     from dateutil import parser
@@ -1006,25 +1021,50 @@ def _pick_latest_drive_backup_file(service, folder_id):
                     mod_dt_naive = mod_dt.replace(tzinfo=None)
                     minutes_old = (now_utc - mod_dt_naive).total_seconds() / 60
                     
-                    # Ambil backup yang umurnya >= 2 menit
-                    if minutes_old >= 2:
+                    # Ambil backup yang umurnya >= 1 menit (lebih longgar dari 2 menit)
+                    if minutes_old >= 1:
                         safe_candidates.append(f)
-                except Exception:
-                    # Jika gagal parse, anggap aman
+                    else:
+                        too_new_candidates.append(f)
+                except Exception as parse_err:
+                    # Jika gagal parse waktu, anggap aman (include dalam safe list)
                     safe_candidates.append(f)
             else:
+                # Jika tidak ada modifiedTime, anggap aman
                 safe_candidates.append(f)
+        
+        # Debug info
+        st.session_state['restore_debug'] = f"Found {len(candidates)} backups, {len(safe_candidates)} safe, {len(too_new_candidates)} too new"
         
         # Jika ada safe candidates, gunakan yang paling baru dari safe list
         if safe_candidates:
-            return safe_candidates[0]
+            picked = safe_candidates[0]
+            st.session_state['restore_picked'] = f"{picked.get('name')} ({picked.get('size',0)} bytes)"
+            return picked
         
-        # Fallback: jika semua terlalu baru, gunakan yang paling baru (better than nothing)
-        # Tapi ini jarang terjadi kecuali user baru pertama kali backup
-        return candidates[0] if candidates else None
-    except Exception:
-        # Fallback to first candidate if filtering fails
-        return candidates[0] if candidates else None
+        # Fallback: jika semua terlalu baru, gunakan yang paling baru
+        # (better restore fresh backup than lose all data)
+        if too_new_candidates:
+            picked = too_new_candidates[0]
+            st.session_state['restore_picked'] = f"{picked.get('name')} ({picked.get('size',0)} bytes) [FALLBACK-TOO NEW]"
+            return picked
+        
+        # Fallback final: ambil candidate pertama
+        if candidates:
+            picked = candidates[0]
+            st.session_state['restore_picked'] = f"{picked.get('name')} ({picked.get('size',0)} bytes) [FALLBACK-NO FILTER]"
+            return picked
+        
+        return None
+        
+    except Exception as filter_err:
+        # Jika filtering gagal, fallback ke candidate pertama (paling baru)
+        st.session_state['restore_debug'] = f"Filter error: {filter_err}, using first candidate"
+        if candidates:
+            picked = candidates[0]
+            st.session_state['restore_picked'] = f"{picked.get('name')} ({picked.get('size',0)} bytes) [FALLBACK-ERROR]"
+            return picked
+        return None
 
 def attempt_auto_restore_if_seed(service, folder_id=FOLDER_ID_DEFAULT):
     """WAJIB restore dari backup Drive jika terdeteksi DB fresh.
@@ -1048,21 +1088,34 @@ def attempt_auto_restore_if_seed(service, folder_id=FOLDER_ID_DEFAULT):
         return False, '✅ DB tidak fresh, tidak perlu restore.'
     
     # Cari backup terbaru di Drive
-    latest = _pick_latest_drive_backup_file(service, folder_id)
+    try:
+        latest = _pick_latest_drive_backup_file(service, folder_id)
+    except Exception as e:
+        debug_info = st.session_state.get('restore_debug', 'No debug info')
+        return False, f'❌ Error saat mencari backup: {e}\nDebug: {debug_info}'
+    
     if not latest:
-        return False, '⚠️ Tidak ada backup ditemukan di Drive.'
+        debug_info = st.session_state.get('restore_debug', 'No debug info')
+        return False, f'⚠️ Tidak ada backup ditemukan di Drive.\nDebug: {debug_info}'
     
     fid = latest.get('id')
     fname = latest.get('name')
     fsize = latest.get('size', 0)
     
+    # Log info untuk debugging
+    st.session_state['restore_attempt_file'] = fname
+    st.session_state['restore_attempt_size'] = fsize
+    
     try:
         # Download dan validasi
         data = download_file_bytes(service, fid)
         
+        if not data:
+            return False, f'❌ File {fname} gagal didownload (data kosong).'
+        
         # Validasi: harus SQLite format
         if not data.startswith(b'SQLite format 3\x00'):
-            return False, f'❌ File {fname} bukan SQLite valid.'
+            return False, f'❌ File {fname} bukan SQLite valid (magic header tidak cocok).'
         
         # Validasi: ukuran harus masuk akal (> 50KB untuk DB dengan data)
         if len(data) < 50000:
@@ -1074,8 +1127,10 @@ def attempt_auto_restore_if_seed(service, folder_id=FOLDER_ID_DEFAULT):
                 backup_old = DB_PATH + '.before_restore.bak'
                 import shutil
                 shutil.copy2(DB_PATH, backup_old)
-        except Exception:
-            pass  # Tidak kritis jika backup lokal gagal
+                st.session_state['restore_old_backup'] = backup_old
+        except Exception as backup_err:
+            # Tidak kritis jika backup lokal gagal, lanjutkan restore
+            st.session_state['restore_old_backup_error'] = str(backup_err)
         
         # Tulis DB baru
         with open(DB_PATH, 'wb') as f:
@@ -1095,7 +1150,8 @@ def attempt_auto_restore_if_seed(service, folder_id=FOLDER_ID_DEFAULT):
         return True, f'✅ Restore berhasil dari {fname} ({len(data):,} bytes)'
         
     except Exception as e:
-        return False, f'❌ Restore gagal: {e}'
+        error_detail = str(e)
+        return False, f'❌ Restore gagal: {error_detail}\nFile: {fname} ({fsize} bytes)\nDebug: {st.session_state.get("restore_debug", "N/A")}'
 
 # -------------------------
 # Google Drive Helper Functions
@@ -2305,10 +2361,12 @@ def main():
         st.info("💡 Sistem mendeteksi database masih kosong atau baru di-reset. Silakan restore dari backup Google Drive untuk memulihkan data.")
         
         st.markdown("### 📦 Status Database")
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("User Terdaftar", "≤ 2 (Seed)")
+            st.metric("User Terdaftar", "4 (Seed)")
         with col2:
+            st.metric("Total Data", "0")
+        with col3:
             st.metric("Backup Log", "Kosong")
         
         st.markdown("---")
@@ -2320,6 +2378,13 @@ def main():
         4. Data dari backup akan dipulihkan ke database utama
         5. Setelah berhasil, Anda akan diarahkan ke halaman login
         """)
+        
+        # Show debug info if available
+        if st.session_state.get('restore_debug'):
+            with st.expander("🔧 Debug Info"):
+                st.code(st.session_state.get('restore_debug'))
+                if st.session_state.get('restore_picked'):
+                    st.info(f"File terpilih: {st.session_state.get('restore_picked')}")
         
         st.markdown("---")
         
@@ -2434,13 +2499,48 @@ def main():
             st.warning(res.get('message','Tidak ada informasi restore.'))
             st.caption(f"⏰ Waktu: {res.get('time','-')}")
             
+            # Debug info untuk troubleshooting
+            with st.expander("🔍 Detail Error & Debug Info", expanded=True):
+                st.markdown("**Error Message:**")
+                st.code(res.get('message', 'No message'))
+                
+                if st.session_state.get('restore_debug'):
+                    st.markdown("**Pencarian File:**")
+                    st.code(st.session_state.get('restore_debug'))
+                
+                if st.session_state.get('restore_picked'):
+                    st.markdown("**File yang Dipilih:**")
+                    st.info(st.session_state.get('restore_picked'))
+                
+                if st.session_state.get('restore_attempt_file'):
+                    st.markdown("**Attempt Info:**")
+                    st.write(f"- File: {st.session_state.get('restore_attempt_file')}")
+                    st.write(f"- Size: {st.session_state.get('restore_attempt_size', 0)} bytes")
+            
             st.markdown("---")
             st.markdown("### 🔧 Langkah Selanjutnya")
             st.markdown("""
-            - Periksa koneksi Google Drive
-            - Pastikan file backup tersedia di Drive
-            - Hubungi administrator jika masalah berlanjut
+            1. **Periksa koneksi Google Drive** - Pastikan service account memiliki akses
+            2. **Pastikan file backup tersedia** di Drive folder
+            3. **Cek ukuran file** - File backup harus > 50KB
+            4. **Format file** - Harus .sqlite atau .db format
+            5. **Hubungi administrator** jika masalah berlanjut
             """)
+            
+            # Retry button
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button('🔄 Coba Restore Lagi', type='primary', use_container_width=True):
+                    # Reset flags
+                    if 'auto_restore_attempted' in st.session_state:
+                        del st.session_state['auto_restore_attempted']
+                    if 'prelogin_auto_restore_done' in st.session_state:
+                        del st.session_state['prelogin_auto_restore_done']
+                    st.rerun()
+            with col2:
+                if st.button('⏭️ Skip ke Login', use_container_width=True):
+                    st.session_state.page = 'Authentication'
+                    st.rerun()
         
         st.markdown("---")
         if st.button('🔐 Lanjut ke Login »', type='primary', use_container_width=True):
