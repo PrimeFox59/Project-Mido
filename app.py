@@ -3036,12 +3036,20 @@ def page_agent():
     if user_role in ("Superuser", "Supervisor"):
         st.caption(f"Mode: **{user_role}** — Melihat semua assignment agent")
         # JOIN dengan supervisor_data untuk mendapatkan Principle_Outstanding
+        # dan hitung total pembayaran yang sudah di-approve
         rows = fetchall("""
             SELECT 
                 aa.Agreement_No AS Case_ID, 
                 aa.Agent_Assigned_To, 
                 aa.assigned_at,
-                COALESCE(sd.Principle_Outstanding, 'N/A') AS Principle_Outstanding
+                COALESCE(sd.Principle_Outstanding, 'N/A') AS Principle_Outstanding,
+                COALESCE(
+                    (SELECT SUM(agent_ptp_amount) 
+                     FROM agent_results ar 
+                     WHERE ar.Agreement_No = aa.Agreement_No 
+                     AND ar.approval_status = 'approved'),
+                    0
+                ) AS Total_Approved_Payment
             FROM agent_assignments aa
             LEFT JOIN supervisor_data sd 
                 ON sd.Case_ID = aa.Agreement_No 
@@ -3097,6 +3105,7 @@ def page_agent():
                 "Case_ID": r.get("Case_ID"),
                 "Agent": r.get("Agent_Assigned_To"),
                 "Principle_Outstanding": r.get("Principle_Outstanding") if user_role in ("Superuser", "Supervisor") else None,
+                "Total_Approved_Payment": r.get("Total_Approved_Payment") if user_role in ("Superuser", "Supervisor") else None,
                 "assigned_at": r.get("assigned_at"),
             }
             for r in filtered
@@ -3106,6 +3115,8 @@ def page_agent():
             for d in data:
                 if "Principle_Outstanding" in d:
                     del d["Principle_Outstanding"]
+                if "Total_Approved_Payment" in d:
+                    del d["Total_Approved_Payment"]
         
         df = pd.DataFrame(data)
         prev_selected = set(st.session_state.get("agent_selected_list", []) or [])
@@ -3136,7 +3147,12 @@ def page_agent():
         if user_role in ("Superuser", "Supervisor"):
             col_config["Agent"] = st.column_config.TextColumn("Agent")
             col_config["Principle_Outstanding"] = st.column_config.TextColumn("Principle Outstanding")
-            disabled_cols.extend(["Agent", "Principle_Outstanding"])
+            col_config["Total_Approved_Payment"] = st.column_config.NumberColumn(
+                "Total Approved Payment",
+                help="Total pembayaran cicilan yang sudah di-approve",
+                format="Rp %.0f"
+            )
+            disabled_cols.extend(["Agent", "Principle_Outstanding", "Total_Approved_Payment"])
 
         edited = st.data_editor(
             df,
