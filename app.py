@@ -5770,7 +5770,7 @@ def page_supervisor():
         c1, c2 = st.columns(2)
         with c1:
             st.markdown("#### Assign ke satu Agent")
-            sel_agent = st.selectbox("Pilih agent", options=["-"] + agents, index=0, key="aa_single_agent")
+            sel_agent = st.selectbox("Pilih agent", options= agents, index=0, key="aa_single_agent")
             btn_single = st.button("Assign ke agent ini", type="primary", key="aa_btn_single")
             if btn_single:
                 if not len(selected_rows):
