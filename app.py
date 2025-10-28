@@ -975,8 +975,11 @@ def _is_probably_fresh_seed_db():
 
 def _pick_latest_drive_backup_file(service, folder_id):
     """Pilih backup terbaru dari Google Drive.
+    Prioritas: 
+    1. File auto_backup.sqlite (file utama yang selalu dibackup)
+    2. File .sqlite atau .db lainnya (jika ada)
+    
     Filter: hindari backup yang terlalu baru (< 1 menit) untuk keamanan.
-    Prioritas: ambil file .sqlite atau .db terbaru yang aman.
     """
     try:
         files = list_files_in_folder(service, folder_id)
@@ -995,6 +998,20 @@ def _pick_latest_drive_backup_file(service, folder_id):
         st.session_state['restore_debug'] = f"Tidak ada file .sqlite/.db (total {len(files)} files)"
         return None
     
+    # PRIORITAS: Cari file auto_backup.sqlite terlebih dahulu
+    auto_backup_file = None
+    for f in candidates:
+        if f.get('name') == 'auto_backup.sqlite':
+            auto_backup_file = f
+            break
+    
+    # Jika auto_backup.sqlite ditemukan, gunakan file tersebut
+    if auto_backup_file:
+        st.session_state['restore_debug'] = f"Found auto_backup.sqlite (prioritas utama)"
+        st.session_state['restore_picked'] = f"auto_backup.sqlite ({auto_backup_file.get('size', 0)} bytes) [PRIORITY]"
+        return auto_backup_file
+    
+    # Jika tidak ada auto_backup.sqlite, lanjutkan dengan logic normal
     # Sort by modified time (terbaru dulu)
     try:
         candidates.sort(key=lambda x: x.get('modifiedTime',''), reverse=True)
@@ -1002,7 +1019,6 @@ def _pick_latest_drive_backup_file(service, folder_id):
         pass
     
     # Filter: hindari backup yang terlalu baru (< 1 menit)
-    # Ini mencegah restore dari backup fresh yang baru dibuat saat autosleep
     try:
         now_utc = datetime.utcnow()
         safe_candidates = []
@@ -1034,7 +1050,7 @@ def _pick_latest_drive_backup_file(service, folder_id):
                 safe_candidates.append(f)
         
         # Debug info
-        st.session_state['restore_debug'] = f"Found {len(candidates)} backups, {len(safe_candidates)} safe, {len(too_new_candidates)} too new"
+        st.session_state['restore_debug'] = f"Found {len(candidates)} backups, {len(safe_candidates)} safe, {len(too_new_candidates)} too new (no auto_backup.sqlite found)"
         
         # Jika ada safe candidates, gunakan yang paling baru dari safe list
         if safe_candidates:
@@ -1460,7 +1476,7 @@ def page_auth():
             with col1:
                 if st.button("🔄 Force Restore System"):
                     try:
-                        service_pre = build_drive_service()
+                        service_pre, _ = build_drive_service()
                         st.session_state['restore_service'] = service_pre
                         st.session_state['restore_folder_id'] = FOLDER_ID_DEFAULT
                         st.session_state.page = 'RestoreSystem'
@@ -2232,7 +2248,7 @@ def main():
                     }
                     st.session_state.page = 'RestoreStatus'
                 else:
-                    service_pre = build_drive_service()
+                    service_pre, _ = build_drive_service()
                     st.session_state['restore_service'] = service_pre
                     st.session_state['restore_folder_id'] = FOLDER_ID_DEFAULT
                     st.session_state.page = 'RestoreSystem'
@@ -2947,7 +2963,7 @@ def page_agent():
                             proof_filename = None
                             if uploaded_proof is not None:
                                 try:
-                                    service = build_drive_service()
+                                    service, _ = build_drive_service()
                                     # Generate filename dengan timestamp dan case_id
                                     timestamp = now_wib().strftime("%Y%m%d_%H%M%S")
                                     original_filename = uploaded_proof.name
@@ -3916,7 +3932,7 @@ def page_user_setting():
             with col1:
                 # Download button
                 try:
-                    service = build_drive_service()
+                    service, _ = build_drive_service()
                     cert_bytes = download_file_bytes(service, user_row.get('sertifikasi_drive_id'))
                     st.download_button(
                         label="📥 Download Certificate",
@@ -3951,7 +3967,7 @@ def page_user_setting():
         if uploaded_cert is not None:
             if st.button("Upload Certificate to Google Drive"):
                 try:
-                    service = build_drive_service()
+                    service, _ = build_drive_service()
                     timestamp = now_wib().strftime("%Y%m%d_%H%M%S")
                     original_filename = uploaded_cert.name
                     ext = original_filename.split('.')[-1] if '.' in original_filename else 'pdf'
@@ -4511,7 +4527,7 @@ def page_supervisor():
                         st.caption(f"Filename: {p_row.get('proof_image_filename', 'N/A')}")
                         
                         try:
-                            service = build_drive_service()
+                            service, _ = build_drive_service()
                             # Download gambar dari Drive
                             img_bytes = download_file_bytes(service, p_row['proof_image_drive_id'])
                             
