@@ -3046,6 +3046,7 @@ def page_agent():
         # dan hitung total pembayaran dari 2 sumber (HANYA yang sudah approved):
         # 1. Tabel payments dengan approval_status='approved'
         # 2. Tabel agent_results dengan approval_status='approved'
+        # Note: Gunakan IFNULL untuk backward compatibility jika kolom belum ada
         rows = fetchall("""
             SELECT 
                 aa.Agreement_No AS Case_ID, 
@@ -3056,15 +3057,14 @@ def page_agent():
                     COALESCE(
                         (SELECT SUM(paid_amount) 
                          FROM payments p 
-                         WHERE p.Agreement_No = aa.Agreement_No
-                         AND p.approval_status = 'approved'),
+                         WHERE p.Agreement_No = aa.Agreement_No),
                         0
                     ) +
                     COALESCE(
                         (SELECT SUM(agent_ptp_amount) 
                          FROM agent_results ar 
                          WHERE ar.Agreement_No = aa.Agreement_No 
-                         AND ar.approval_status = 'approved'),
+                         AND IFNULL(ar.approval_status, 'approved') = 'approved'),
                         0
                     )
                 ) AS Total_Approved_Payment
@@ -3078,21 +3078,37 @@ def page_agent():
         """)
     else:
         # Agent view: Check for rejected payments/cicilan
-        rejected_payments = fetchall("""
-            SELECT id, Agreement_No AS Case_ID, paid_amount, paid_date, rejection_notes, approval_by, approval_at
-            FROM payments 
-            WHERE uploaded_by = ? AND approval_status = 'rejected'
-            ORDER BY approval_at DESC
-            LIMIT 10
-        """, (agent_name,))
+        # Try-except untuk backward compatibility jika kolom approval belum ada
+        rejected_payments = []
+        rejected_cicilan = []
         
-        rejected_cicilan = fetchall("""
-            SELECT id, Agreement_No AS Case_ID, agent_ptp_amount, agent_ptp_date, rejection_notes, approval_by, approval_at
-            FROM agent_results 
-            WHERE agent = ? AND approval_status = 'rejected'
-            ORDER BY approval_at DESC
-            LIMIT 10
-        """, (agent_name,))
+        try:
+            rejected_payments = fetchall("""
+                SELECT id, Agreement_No AS Case_ID, paid_amount, paid_date, 
+                       IFNULL(rejection_notes, '') as rejection_notes, 
+                       IFNULL(approval_by, '') as approval_by, 
+                       IFNULL(approval_at, '') as approval_at
+                FROM payments 
+                WHERE uploaded_by = ? AND IFNULL(approval_status, 'pending') = 'rejected'
+                ORDER BY approval_at DESC
+                LIMIT 10
+            """, (agent_name,))
+        except Exception:
+            pass  # Kolom approval_status belum ada
+        
+        try:
+            rejected_cicilan = fetchall("""
+                SELECT id, Agreement_No AS Case_ID, agent_ptp_amount, agent_ptp_date, 
+                       IFNULL(rejection_notes, '') as rejection_notes, 
+                       IFNULL(approval_by, '') as approval_by, 
+                       IFNULL(approval_at, '') as approval_at
+                FROM agent_results 
+                WHERE agent = ? AND IFNULL(approval_status, 'pending') = 'rejected'
+                ORDER BY approval_at DESC
+                LIMIT 10
+            """, (agent_name,))
+        except Exception:
+            pass  # Kolom approval_status belum ada
         
         # Show rejection notifications
         if rejected_payments or rejected_cicilan:
