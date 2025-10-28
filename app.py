@@ -5166,6 +5166,294 @@ def page_supervisor():
             
             st.markdown("<div style='margin-top: 30px;'></div>", unsafe_allow_html=True)
             
+            # ========== PAYMENT RECAP RESUME (MINIMALIST & MODERN) ==========
+            st.markdown("### 📈 Payment Recap Resume")
+            
+            # Prepare data for resume
+            recap_df['Date_parsed'] = pd.to_datetime(recap_df['Date'], errors='coerce')
+            recap_df_sorted = recap_df.dropna(subset=['Date_parsed']).sort_values('Date_parsed', ascending=False)
+            
+            # Container for resume sections
+            resume_col1, resume_col2 = st.columns([1, 1])
+            
+            with resume_col1:
+                # --- Last Payment Recorded ---
+                st.markdown("""
+                <div style="background: linear-gradient(135deg, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0.3) 100%);
+                            backdrop-filter: blur(15px); border: 1px solid rgba(255,255,255,0.3);
+                            border-radius: 14px; padding: 18px; margin-bottom: 16px;
+                            box-shadow: 0 4px 16px rgba(0,0,0,0.08);">
+                    <div style="font-size: 13px; font-weight: 700; color: #6366F1; margin-bottom: 12px; 
+                                display: flex; align-items: center;">
+                        <span style="font-size: 18px; margin-right: 8px;">📅</span>
+                        Last Payment Recorded
+                    </div>
+                """, unsafe_allow_html=True)
+                
+                if not recap_df_sorted.empty:
+                    last_payment = recap_df_sorted.iloc[0]
+                    last_date = last_payment['Date_parsed'].strftime('%b %d, %Y')
+                    last_amount = last_payment['Savings']
+                    
+                    # Compare To (previous month)
+                    current_month = recap_df_sorted.iloc[0]['Date_parsed'].to_period('M')
+                    prev_month = current_month - 1
+                    
+                    current_month_data = recap_df_sorted[recap_df_sorted['Date_parsed'].dt.to_period('M') == current_month]
+                    prev_month_data = recap_df_sorted[recap_df_sorted['Date_parsed'].dt.to_period('M') == prev_month]
+                    
+                    current_total = current_month_data['Savings'].sum()
+                    prev_total = prev_month_data['Savings'].sum() if not prev_month_data.empty else 0
+                    
+                    trend = "BETTER" if current_total > prev_total else "LOWER"
+                    trend_color = "#10B981" if trend == "BETTER" else "#EF4444"
+                    trend_icon = "📈" if trend == "BETTER" else "📉"
+                    
+                    st.markdown(f"""
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <div style="font-size: 11px; color: #6B7280; font-weight: 600;">Date</div>
+                        <div style="font-size: 13px; color: #1F2937; font-weight: 700;">{last_date}</div>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <div style="font-size: 11px; color: #6B7280; font-weight: 600;">SUM of Amount</div>
+                        <div style="font-size: 14px; color: #1F2937; font-weight: 800;">Rp {last_amount:,.0f}</div>
+                    </div>
+                    <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(0,0,0,0.08);">
+                        <div style="font-size: 11px; color: #6B7280; font-weight: 600; margin-bottom: 6px;">Compare To</div>
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div style="font-size: 12px; color: #4B5563;">{prev_month.strftime('%b, %Y')}</div>
+                            <div style="font-size: 12px; font-weight: 700; color: {trend_color}; 
+                                        background: rgba({trend_color[1:]}, 0.1); padding: 4px 10px; 
+                                        border-radius: 6px;">{trend_icon} {trend}</div>
+                        </div>
+                        <div style="font-size: 13px; color: #1F2937; font-weight: 700; margin-top: 6px; text-align: right;">
+                            Rp {current_total:,.0f}
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.markdown("""
+                    <div style="text-align: center; color: #9CA3AF; font-size: 12px; padding: 20px;">
+                        No payment data available
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                st.markdown("</div>", unsafe_allow_html=True)
+                
+                # --- Product Summary (Cases & Savings per Product) ---
+                st.markdown("""
+                <div style="background: linear-gradient(135deg, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0.3) 100%);
+                            backdrop-filter: blur(15px); border: 1px solid rgba(255,255,255,0.3);
+                            border-radius: 14px; padding: 18px; margin-bottom: 16px;
+                            box-shadow: 0 4px 16px rgba(0,0,0,0.08);">
+                    <div style="font-size: 13px; font-weight: 700; color: #6366F1; margin-bottom: 12px;
+                                display: flex; align-items: center;">
+                        <span style="font-size: 18px; margin-right: 8px;">📦</span>
+                        Product Summary
+                    </div>
+                """, unsafe_allow_html=True)
+                
+                product_summary = recap_df.groupby('Product').agg({
+                    'Case_ID': 'nunique',
+                    'Savings': 'sum'
+                }).reset_index()
+                product_summary.columns = ['Product', 'Cases', 'Savings']
+                product_summary = product_summary.sort_values('Savings', ascending=False).head(5)
+                
+                if not product_summary.empty:
+                    for idx, row in product_summary.iterrows():
+                        product_name = row['Product'] if pd.notna(row['Product']) else 'Unknown'
+                        cases_count = int(row['Cases'])
+                        savings_amount = row['Savings']
+                        
+                        st.markdown(f"""
+                        <div style="display: flex; justify-content: space-between; align-items: center; 
+                                    padding: 8px 0; border-bottom: 1px solid rgba(0,0,0,0.05);">
+                            <div>
+                                <div style="font-size: 12px; color: #1F2937; font-weight: 700;">{product_name}</div>
+                                <div style="font-size: 10px; color: #9CA3AF;">{cases_count} cases</div>
+                            </div>
+                            <div style="font-size: 12px; color: #1F2937; font-weight: 700; text-align: right;">
+                                Rp {savings_amount:,.0f}
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    # Grand Total
+                    grand_total = product_summary['Savings'].sum()
+                    total_cases = product_summary['Cases'].sum()
+                    st.markdown(f"""
+                    <div style="margin-top: 12px; padding-top: 12px; border-top: 2px solid rgba(99,102,241,0.3);">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <div style="font-size: 13px; color: #6366F1; font-weight: 800;">Grand Total</div>
+                                <div style="font-size: 10px; color: #9CA3AF;">{total_cases} cases</div>
+                            </div>
+                            <div style="font-size: 14px; color: #6366F1; font-weight: 900;">
+                                Rp {grand_total:,.0f}
+                            </div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.markdown("""
+                    <div style="text-align: center; color: #9CA3AF; font-size: 12px; padding: 20px;">
+                        No product data
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                st.markdown("</div>", unsafe_allow_html=True)
+            
+            with resume_col2:
+                # --- Month Summary (Date & SUM of Amount by Month) ---
+                st.markdown("""
+                <div style="background: linear-gradient(135deg, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0.3) 100%);
+                            backdrop-filter: blur(15px); border: 1px solid rgba(255,255,255,0.3);
+                            border-radius: 14px; padding: 18px; margin-bottom: 16px;
+                            box-shadow: 0 4px 16px rgba(0,0,0,0.08);">
+                    <div style="font-size: 13px; font-weight: 700; color: #6366F1; margin-bottom: 12px;
+                                display: flex; align-items: center;">
+                        <span style="font-size: 18px; margin-right: 8px;">📊</span>
+                        Month Summary
+                    </div>
+                """, unsafe_allow_html=True)
+                
+                month_summary = recap_df.groupby('Month').agg({
+                    'Savings': 'sum'
+                }).reset_index()
+                month_summary.columns = ['Month', 'Amount']
+                # Sort by date (convert Month back to datetime for sorting)
+                month_summary['Sort_Date'] = pd.to_datetime(month_summary['Month'], format='%b, %Y', errors='coerce')
+                month_summary = month_summary.sort_values('Sort_Date', ascending=False).head(10)
+                
+                if not month_summary.empty:
+                    for idx, row in month_summary.iterrows():
+                        month_name = row['Month']
+                        amount = row['Amount']
+                        
+                        st.markdown(f"""
+                        <div style="display: flex; justify-content: space-between; align-items: center;
+                                    padding: 8px 0; border-bottom: 1px solid rgba(0,0,0,0.05);">
+                            <div style="font-size: 12px; color: #4B5563; font-weight: 600;">{month_name}</div>
+                            <div style="font-size: 12px; color: #1F2937; font-weight: 700;">Rp {amount:,.0f}</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    # Grand Total
+                    grand_total_month = month_summary['Amount'].sum()
+                    st.markdown(f"""
+                    <div style="margin-top: 12px; padding-top: 12px; border-top: 2px solid rgba(99,102,241,0.3);">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div style="font-size: 13px; color: #6366F1; font-weight: 800;">Grand Total</div>
+                            <div style="font-size: 14px; color: #6366F1; font-weight: 900;">Rp {grand_total_month:,.0f}</div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.markdown("""
+                    <div style="text-align: center; color: #9CA3AF; font-size: 12px; padding: 20px;">
+                        No monthly data
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                st.markdown("</div>", unsafe_allow_html=True)
+                
+                # --- Team Averages (Agent Performance Ranking) ---
+                st.markdown("""
+                <div style="background: linear-gradient(135deg, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0.3) 100%);
+                            backdrop-filter: blur(15px); border: 1px solid rgba(255,255,255,0.3);
+                            border-radius: 14px; padding: 18px; margin-bottom: 16px;
+                            box-shadow: 0 4px 16px rgba(0,0,0,0.08);">
+                    <div style="font-size: 13px; font-weight: 700; color: #6366F1; margin-bottom: 12px;
+                                display: flex; align-items: center;">
+                        <span style="font-size: 18px; margin-right: 8px;">👥</span>
+                        Team Averages
+                    </div>
+                """, unsafe_allow_html=True)
+                
+                agent_summary = recap_df.groupby('Agent').agg({
+                    'Savings': 'sum',
+                    'Case_ID': 'nunique'
+                }).reset_index()
+                agent_summary.columns = ['Agent', 'Total_Savings', 'Paid_Cases']
+                agent_summary = agent_summary.sort_values('Total_Savings', ascending=False).head(10)
+                
+                if not agent_summary.empty:
+                    team_avg = agent_summary['Total_Savings'].mean()
+                    
+                    st.markdown(f"""
+                    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                                padding: 12px; border-radius: 10px; margin-bottom: 12px; text-align: center;">
+                        <div style="font-size: 11px; color: rgba(255,255,255,0.9); font-weight: 600;">Team Average</div>
+                        <div style="font-size: 18px; color: white; font-weight: 900;">Rp {team_avg:,.0f}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Top Agents
+                    for idx, row in agent_summary.head(5).iterrows():
+                        agent_name = row['Agent'] if pd.notna(row['Agent']) else 'Unknown'
+                        total_savings = row['Total_Savings']
+                        paid_cases = int(row['Paid_Cases'])
+                        
+                        # Color coding for top performers
+                        if idx == 0:
+                            bg_color = "linear-gradient(135deg, rgba(255,215,0,0.15) 0%, rgba(255,215,0,0.05) 100%)"
+                            rank_icon = "🥇"
+                        elif idx == 1:
+                            bg_color = "linear-gradient(135deg, rgba(192,192,192,0.15) 0%, rgba(192,192,192,0.05) 100%)"
+                            rank_icon = "🥈"
+                        elif idx == 2:
+                            bg_color = "linear-gradient(135deg, rgba(205,127,50,0.15) 0%, rgba(205,127,50,0.05) 100%)"
+                            rank_icon = "🥉"
+                        else:
+                            bg_color = "rgba(0,0,0,0.02)"
+                            rank_icon = "•"
+                        
+                        st.markdown(f"""
+                        <div style="background: {bg_color}; padding: 10px; border-radius: 8px; margin-bottom: 8px;
+                                    border: 1px solid rgba(0,0,0,0.05);">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <span style="font-size: 16px;">{rank_icon}</span>
+                                    <div>
+                                        <div style="font-size: 12px; color: #1F2937; font-weight: 700;">{agent_name}</div>
+                                        <div style="font-size: 10px; color: #9CA3AF;">{paid_cases} paid cases</div>
+                                    </div>
+                                </div>
+                                <div style="font-size: 12px; color: #1F2937; font-weight: 800;">
+                                    Rp {total_savings:,.0f}
+                                </div>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    # Grand Total
+                    grand_total_agent = agent_summary['Total_Savings'].sum()
+                    total_paid_cases = agent_summary['Paid_Cases'].sum()
+                    st.markdown(f"""
+                    <div style="margin-top: 12px; padding-top: 12px; border-top: 2px solid rgba(99,102,241,0.3);">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <div style="font-size: 13px; color: #6366F1; font-weight: 800;">Grand Total</div>
+                                <div style="font-size: 10px; color: #9CA3AF;">{total_paid_cases} cases</div>
+                            </div>
+                            <div style="font-size: 14px; color: #6366F1; font-weight: 900;">
+                                Rp {grand_total_agent:,.0f}
+                            </div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.markdown("""
+                    <div style="text-align: center; color: #9CA3AF; font-size: 12px; padding: 20px;">
+                        No agent data
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                st.markdown("</div>", unsafe_allow_html=True)
+            
+            st.markdown("<div style='margin-top: 30px;'></div>", unsafe_allow_html=True)
+            
             # Filters
             st.markdown("### 🔍 Filters")
             col_f1, col_f2, col_f3, col_f4 = st.columns(4)
