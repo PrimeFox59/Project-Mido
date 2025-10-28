@@ -3558,102 +3558,147 @@ def page_dashboard():
     
     forecast_closing = running_month_saving + ptp_this_month
 
-    # -------- Enhanced KPI cards (Financial Dashboard) --------
+    # -------- Enhanced KPI cards (Modern Gradient Dashboard) --------
     st.markdown(
         """
         <style>
-        /* Enhanced KPI cards with modern financial dashboard aesthetic */
-        .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin: 16px 0 8px 0; }
-        @media (max-width: 1200px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); gap: 14px; } }
+        /* Modern gradient KPI cards inspired by professional dashboards */
+        .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin: 20px 0 12px 0; }
+        @media (max-width: 1200px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); gap: 16px; } }
         @media (max-width: 700px) { .kpi-grid { grid-template-columns: 1fr; } }
         
-        /* Financial KPI card with gradient background */
+        /* Modern gradient card with animated background */
         .kpi-card { 
             position: relative; 
             overflow: hidden; 
-            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
-            border: 1px solid #E5E7EB; 
-            border-radius: 20px; 
-            padding: 24px 20px; 
-            box-shadow: 0 4px 12px rgba(16,24,40,0.08), 0 1px 3px rgba(16,24,40,0.05);
-            transition: all 0.3s ease;
-        }
-        .kpi-card:hover {
-            box-shadow: 0 8px 24px rgba(16,24,40,0.12), 0 2px 6px rgba(16,24,40,0.08);
-            transform: translateY(-2px);
+            background: var(--card-gradient);
+            border: none;
+            border-radius: 24px; 
+            padding: 28px 24px; 
+            box-shadow: 0 8px 24px rgba(0,0,0,0.12), 0 2px 6px rgba(0,0,0,0.04);
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            min-height: 160px;
         }
         
-        /* Accent circle (decorative element) */
+        .kpi-card:hover {
+            box-shadow: 0 16px 48px rgba(0,0,0,0.18), 0 4px 12px rgba(0,0,0,0.08);
+            transform: translateY(-4px) scale(1.02);
+        }
+        
+        /* Decorative gradient overlay */
+        .kpi-card::before { 
+            content: ""; 
+            position: absolute; 
+            top: 0; 
+            left: 0; 
+            right: 0; 
+            bottom: 0; 
+            background: linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0) 100%);
+            z-index: 1;
+        }
+        
+        /* Animated circle decoration */
         .kpi-card::after { 
             content:""; 
             position:absolute; 
-            right:-40px; 
-            top:-50px; 
-            width:200px; 
-            height:200px; 
+            right:-60px; 
+            top:-60px; 
+            width:240px; 
+            height:240px; 
             border-radius: 50%; 
-            background: radial-gradient(circle at center, var(--accent-light, #EEF4FF), rgba(255,255,255,0) 60%); 
-            opacity:.5;
-            z-index: 0;
+            background: radial-gradient(circle, rgba(255,255,255,0.25) 0%, rgba(255,255,255,0) 70%); 
+            z-index: 1;
+            animation: pulse 3s ease-in-out infinite;
         }
         
-        /* Content layer above decoration */
-        .kpi-card > * { position: relative; z-index: 1; }
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 0.6; }
+            50% { transform: scale(1.1); opacity: 0.8; }
+        }
         
-        /* Title with icon support */
-        .kpi-title { 
-            display: flex;
+        /* Content layer above decorations */
+        .kpi-card > * { position: relative; z-index: 2; }
+        
+        /* Icon badge at top */
+        .kpi-icon {
+            display: inline-flex;
             align-items: center;
-            gap: 8px;
-            letter-spacing: .5px; 
+            justify-content: center;
+            width: 48px;
+            height: 48px;
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.25);
+            font-size: 24px;
+            margin-bottom: 14px;
+            backdrop-filter: blur(10px);
+        }
+        
+        /* Title with better contrast */
+        .kpi-title { 
+            display: block;
+            letter-spacing: 0.8px; 
             text-transform: uppercase; 
-            font-size: 11px; 
+            font-size: 12px; 
             font-weight: 700;
-            color: #6B7280; 
-            margin-bottom: 12px;
+            color: rgba(255, 255, 255, 0.85);
+            margin-bottom: 10px;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.1);
         }
         
-        /* Large value with currency formatting */
+        /* Large white value */
         .kpi-value { 
-            font-size: 32px; 
-            font-weight: 800; 
-            color: var(--accent, #111827); 
-            line-height: 1.1;
-            margin-bottom: 8px;
-            letter-spacing: -0.5px;
+            font-size: 36px; 
+            font-weight: 900; 
+            color: #FFFFFF;
+            line-height: 1;
+            margin-bottom: 10px;
+            letter-spacing: -1px;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.15);
         }
         
-        /* Subtitle with trend indicators */
+        /* Subtitle with better contrast */
         .kpi-sub { 
             font-size: 13px; 
-            color: #9CA3AF; 
-            margin-top: 4px;
+            color: rgba(255, 255, 255, 0.75);
+            line-height: 1.4;
             display: flex;
             align-items: center;
             gap: 6px;
         }
         
-        /* Trend badge */
+        /* Trend badge on white cards */
         .trend-badge {
             display: inline-flex;
             align-items: center;
             gap: 4px;
-            padding: 3px 8px;
+            padding: 4px 10px;
             border-radius: 12px;
             font-size: 12px;
-            font-weight: 600;
+            font-weight: 700;
+            backdrop-filter: blur(10px);
         }
-        .trend-up { background: #ECFDF3; color: #047857; }
-        .trend-down { background: #FEF2F2; color: #DC2626; }
+        .trend-up { background: rgba(255, 255, 255, 0.3); color: #FFFFFF; }
+        .trend-down { background: rgba(255, 255, 255, 0.3); color: #FFFFFF; }
         
-        /* Color variants for different metrics */
-        .accent-teal { --accent: #0D9488; --accent-light: #CCFBF1; }
-        .accent-emerald { --accent: #059669; --accent-light: #D1FAE5; }
-        .accent-amber { --accent: #F59E0B; --accent-light: #FEF3C7; }
-        .accent-violet { --accent: #7C3AED; --accent-light: #EDE9FE; }
+        /* Gradient variants - vibrant & modern */
+        .accent-purple { --card-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .accent-pink { --card-gradient: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
+        .accent-blue { --card-gradient: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
+        .accent-green { --card-gradient: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); }
+        .accent-orange { --card-gradient: linear-gradient(135deg, #fa709a 0%, #fee140 100%); }
+        .accent-teal { --card-gradient: linear-gradient(135deg, #0ba360 0%, #3cba92 100%); }
+        
+        /* Approval banner with subtle gradient */
+        .approval-banner {
+            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+            border: 1px solid #e5e7eb;
+            border-radius: 16px;
+            padding: 16px 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+        }
         
         /* Pills (approval banner) */
-        .pill { display:inline-flex; align-items:center; gap:6px; padding:3px 10px; border-radius: 999px; font-size:12px; font-weight: 600; }
+        .pill { display:inline-flex; align-items:center; gap:6px; padding:4px 12px; border-radius: 999px; font-size:13px; font-weight: 700; }
         .pill-warning { background:#FFF7ED; color:#C2410C; }
         .pill-success { background:#ECFDF3; color:#027A48; }
         .pill-info { background:#EEF4FF; color:#3538CD; }
@@ -3662,14 +3707,15 @@ def page_dashboard():
         unsafe_allow_html=True,
     )
 
-    # Render enhanced financial KPI cards
+    # Render modern gradient KPI cards with icons
     kpi_cols = st.columns(4)
     
     with kpi_cols[0]:
         st.markdown(
             f"""
-            <div class='kpi-card accent-teal'>
-                <div class='kpi-title'>💰 Running Month Saving</div>
+            <div class='kpi-card accent-purple'>
+                <div class='kpi-icon'>💰</div>
+                <div class='kpi-title'>Running Month Saving</div>
                 <div class='kpi-value'>Rp {running_month_saving:,.0f}</div>
                 <div class='kpi-sub'>Total pembayaran bulan ini</div>
             </div>
@@ -3678,19 +3724,18 @@ def page_dashboard():
         )
     
     with kpi_cols[1]:
-        trend_color = "#059669" if saving_trend == "up" else "#DC2626"
-        trend_icon = "↗" if saving_trend == "up" else "↘"
-        trend_class = "trend-up" if saving_trend == "up" else "trend-down"
+        trend_icon = "📈" if saving_trend == "up" else "📉"
+        trend_text = f"{trend_icon} {abs(saving_pct):.1f}%"
+        comparison_text = "Lebih tinggi dari bulan lalu" if saving_trend == "up" else "Lebih rendah dari bulan lalu"
         st.markdown(
             f"""
-            <div class='kpi-card accent-emerald'>
-                <div class='kpi-title'>📊 Last Month</div>
+            <div class='kpi-card accent-pink'>
+                <div class='kpi-icon'>📊</div>
+                <div class='kpi-title'>Last Month Saving</div>
                 <div class='kpi-value'>Rp {last_month_saving:,.0f}</div>
                 <div class='kpi-sub'>
-                    <span class='trend-badge {trend_class}'>{trend_icon} {abs(saving_pct):.1f}%</span>
-                    <span style='color: {trend_color}; font-weight: 600;'>
-                        {"Lebih tinggi" if saving_trend == "up" else "Lebih rendah"}
-                    </span>
+                    <span class='trend-badge'>{trend_text}</span>
+                    {comparison_text}
                 </div>
             </div>
             """,
@@ -3700,8 +3745,9 @@ def page_dashboard():
     with kpi_cols[2]:
         st.markdown(
             f"""
-            <div class='kpi-card accent-amber'>
-                <div class='kpi-title'>🎯 Stock PTP</div>
+            <div class='kpi-card accent-blue'>
+                <div class='kpi-icon'>🎯</div>
+                <div class='kpi-title'>Stock PTP</div>
                 <div class='kpi-value'>Rp {stock_ptp:,.0f}</div>
                 <div class='kpi-sub'>Total janji bayar aktif</div>
             </div>
@@ -3712,10 +3758,11 @@ def page_dashboard():
     with kpi_cols[3]:
         st.markdown(
             f"""
-            <div class='kpi-card accent-violet'>
-                <div class='kpi-title'>🚀 Forecast Closing</div>
+            <div class='kpi-card accent-green'>
+                <div class='kpi-icon'>🚀</div>
+                <div class='kpi-title'>Forecast Closing</div>
                 <div class='kpi-value'>Rp {forecast_closing:,.0f}</div>
-                <div class='kpi-sub'>Saving + Prospect bulan ini</div>
+                <div class='kpi-sub'>Saving + PTP bulan ini</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -3723,20 +3770,27 @@ def page_dashboard():
 
     # -------- Pending approvals banner --------
     pending_approvals = get_pending_users_count()
-    with st.container():
-        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+    if pending_approvals > 0:
+        st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
         st.markdown(
             f"""
-            <div class='kpi-card' style='padding:14px;'>
-              <div class='kpi-title' style='margin-bottom:2px'>📝 Pending User Approvals</div>
-              <div style='display:flex; align-items:center; gap:12px;'>
-                <div class='pill pill-info'><strong>{pending_approvals}</strong></div>
-                <div class='kpi-sub'>Number of newly registered accounts waiting for admin approval.</div>
+            <div class='approval-banner'>
+              <div style='display:flex; align-items:center; gap:16px;'>
+                <div style='font-size:32px;'>📝</div>
+                <div style='flex:1;'>
+                  <div style='font-weight:700; font-size:15px; color:#111827; margin-bottom:4px;'>Pending User Approvals</div>
+                  <div style='font-size:13px; color:#6B7280;'>
+                    <span class='pill pill-warning'><strong>{pending_approvals}</strong> users</span>
+                    waiting for admin approval to access the system.
+                  </div>
+                </div>
               </div>
             </div>
             """,
             unsafe_allow_html=True,
         )
+    else:
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
     st.markdown("---")
 
