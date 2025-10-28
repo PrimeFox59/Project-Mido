@@ -1927,21 +1927,49 @@ def page_gdrive():
     with tabs[6]:
         st.subheader('📝 Record Catatan Manual')
         user = current_user()
+        
+        # Tampilkan notifikasi jika ada
+        if "record_note_notification" in st.session_state:
+            notif = st.session_state.record_note_notification
+            if notif["type"] == "success":
+                st.success(notif["message"])
+            elif notif["type"] == "error":
+                st.error(notif["message"])
+            elif notif["type"] == "warning":
+                st.warning(notif["message"])
+            del st.session_state.record_note_notification
+        
+        # Form counter untuk reset
+        if "record_note_form_counter" not in st.session_state:
+            st.session_state.record_note_form_counter = 0
+        
         # Add new note
-        with st.form('add_note_form'):
-            new_note = st.text_input('Catatan baru', key='new_note_input')
+        with st.form(f'add_note_form_{st.session_state.record_note_form_counter}'):
+            new_note = st.text_input('Catatan baru')
             submitted = st.form_submit_button('Tambah Catatan')
             if submitted:
                 if not new_note.strip():
-                    st.toast("⚠️ Catatan tidak boleh kosong!", icon="⚠️")
+                    st.session_state.record_note_notification = {
+                        "type": "warning",
+                        "message": "⚠️ Catatan tidak boleh kosong!"
+                    }
+                    st.rerun()
                 else:
                     try:
                         creator = (user.get('login_id') or user.get('email') or '-') if user else '-'
                         execute("INSERT INTO record_notes (note, created_by) VALUES (?, ?)", (new_note.strip(), creator))
-                        st.toast("✅ Catatan berhasil ditambahkan!", icon="✅")
+                        st.session_state.record_note_notification = {
+                            "type": "success",
+                            "message": "✅ Catatan berhasil ditambahkan!"
+                        }
+                        st.session_state.record_note_form_counter += 1
                         st.rerun()
                     except Exception as e:
-                        st.toast(f"❌ Gagal menambahkan catatan: {e}", icon="❌")
+                        st.session_state.record_note_notification = {
+                            "type": "error",
+                            "message": f"❌ Gagal menambahkan catatan: {e}"
+                        }
+                        st.rerun()
         # List notes
         notes = fetchall("SELECT * FROM record_notes ORDER BY id DESC LIMIT 50")
         if not notes:
@@ -3253,10 +3281,26 @@ def page_agent():
         # --- Report Payment/PTP sub-tab (hanya tampil jika STATUS = PTP) ---
         if current_status == "PTP":
             with sub_tabs[1]:
+                # Tampilkan notifikasi jika ada di session state
+                if "payment_notification" in st.session_state:
+                    notif = st.session_state.payment_notification
+                    if notif["type"] == "success":
+                        st.success(notif["message"])
+                    elif notif["type"] == "error":
+                        st.error(notif["message"])
+                    elif notif["type"] == "warning":
+                        st.warning(notif["message"])
+                    # Hapus notifikasi setelah ditampilkan
+                    del st.session_state.payment_notification
+                
                 if not sel:
                     st.info("Pilih Case ID pada tabel di atas terlebih dahulu.")
                 else:
                     st.subheader("Report Payment/PTP")
+                    
+                    # Form counter untuk reset form setelah submit berhasil
+                    if "payment_form_counter" not in st.session_state:
+                        st.session_state.payment_form_counter = 0
                     
                     # Pre-form: pilih skema dulu untuk menentukan apakah perlu input cicilan
                     scheme = st.selectbox(
@@ -3270,7 +3314,7 @@ def page_agent():
                             "CICIL POKOK",
                         ],
                         index=0,
-                        key="payment_scheme_select"
+                        key=f"payment_scheme_select_{st.session_state.payment_form_counter}"
                     )
                     
                     cicil_schemes = {"CICIL OS", "CICIL LUNDIS", "CICIL POKOK"}
@@ -3289,25 +3333,25 @@ def page_agent():
                             value=2,
                             step=1,
                             help="Jumlah rencana cicilan yang akan dibuat sebagai PTP.",
-                            key="payment_plan_count"
+                            key=f"payment_plan_count_{st.session_state.payment_form_counter}"
                         )
                         plan_amount = st.number_input(
                             "Nominal tiap cicilan (opsional)",
                             min_value=0.0,
                             step=10000.0,
                             help="Bila diisi 0, PTP akan direkam tanpa nominal.",
-                            key="payment_plan_amount"
+                            key=f"payment_plan_amount_{st.session_state.payment_form_counter}"
                         )
                         # Dynamic date inputs for each planned installment
                         for i in range(int(plan_count)):
                             default_dt = today_wib() + relativedelta(months=i+1)
-                            d = st.date_input(f"Tanggal cicilan {i+1}", value=default_dt, key=f"ptp_plan_date_{i}")
+                            d = st.date_input(f"Tanggal cicilan {i+1}", value=default_dt, key=f"ptp_plan_date_{i}_{st.session_state.payment_form_counter}")
                             plan_dates.append(d)
                     
                     st.markdown("---")
                     
                     # Now the form with the rest of the payment info
-                    with st.form("agent_report_payment_ptp"):
+                    with st.form(f"agent_report_payment_ptp_{st.session_state.payment_form_counter}"):
                         c1, c2 = st.columns(2)
                         with c1:
                             paid_date = st.date_input("Tanggal Pembayaran", value=today_wib())
@@ -3321,7 +3365,7 @@ def page_agent():
                             "Upload gambar bukti (WhatsApp chat, transfer, dll)",
                             type=["png", "jpg", "jpeg", "pdf"],
                             help="Gambar akan disimpan di Google Drive untuk review Supervisor",
-                            key="payment_proof_upload"
+                            key=f"payment_proof_upload_{st.session_state.payment_form_counter}"
                         )
             
                         st.markdown("---")
@@ -3355,16 +3399,29 @@ def page_agent():
                         submit = st.form_submit_button("Simpan")
                     if submit:
                         if paid_amount is None or float(paid_amount) <= 0:
-                            st.toast("⚠️ Nominal Pembayaran harus lebih dari 0!", icon="⚠️")
+                            st.session_state.payment_notification = {
+                                "type": "warning",
+                                "message": "⚠️ Nominal Pembayaran harus lebih dari 0!"
+                            }
+                            st.rerun()
                         elif not paid_date:
-                            st.toast("⚠️ Tanggal Pembayaran wajib diisi!", icon="⚠️")
+                            st.session_state.payment_notification = {
+                                "type": "warning",
+                                "message": "⚠️ Tanggal Pembayaran wajib diisi!"
+                            }
+                            st.rerun()
                         elif is_cicil and (not plan_dates or any(d is None for d in plan_dates)):
-                            st.toast("⚠️ Untuk skema CICIL, isi semua tanggal rencana!", icon="⚠️")
+                            st.session_state.payment_notification = {
+                                "type": "warning",
+                                "message": "⚠️ Untuk skema CICIL, isi semua tanggal rencana!"
+                            }
+                            st.rerun()
                         else:
                             try:
                                 # Upload bukti gambar ke Google Drive jika ada
                                 proof_drive_id = None
                                 proof_filename = None
+                                upload_message = ""
                                 if uploaded_proof is not None:
                                     try:
                                         service, _ = build_drive_service()
@@ -3379,9 +3436,9 @@ def page_agent():
                                         mimetype = uploaded_proof.type or "image/jpeg"
                                         proof_drive_id = upload_bytes(service, FOLDER_ID_DEFAULT, proof_filename, proof_bytes, mimetype)
                                         
-                                        st.toast(f"✅ Bukti gambar berhasil diupload: {proof_filename}", icon="✅")
+                                        upload_message = f" Bukti gambar tersimpan: {proof_filename}"
                                     except Exception as e:
-                                        st.toast(f"⚠️ Gagal upload gambar: {e}. Payment tetap disimpan.", icon="⚠️")
+                                        upload_message = f" (Catatan: Gagal upload gambar - {str(e)[:50]})"
                                 
                                 # 1) Simpan pembayaran dengan info bukti gambar
                                 execute(
@@ -3451,6 +3508,7 @@ def page_agent():
                                     pass
 
                                 # 2) Jika cicil, buat jadwal PTP sesuai rencana
+                                cicilan_info = ""
                                 if is_cicil and plan_dates:
                                     try:
                                         for idx, d in enumerate(plan_dates, start=1):
@@ -3469,17 +3527,39 @@ def page_agent():
                                                 )
                                             except Exception:
                                                 pass
+                                        cicilan_info = f" + {int(plan_count)} rencana PTP cicilan"
                                     except Exception as e:
-                                        st.toast(f"⚠️ Gagal menyimpan rencana PTP: {e}", icon="⚠️")
+                                        cicilan_info = f" (Gagal simpan rencana PTP: {str(e)[:30]})"
 
-                                st.toast("✅ Laporan pembayaran berhasil disimpan!", icon="✅")
+                                # Simpan notifikasi sukses ke session state
+                                st.session_state.payment_notification = {
+                                    "type": "success",
+                                    "message": f"✅ Laporan pembayaran berhasil disimpan!{upload_message}{cicilan_info}"
+                                }
+                                # Increment form counter untuk reset form
+                                st.session_state.payment_form_counter += 1
                                 st.rerun()
                             except Exception as e:
-                                st.toast(f"❌ Gagal menyimpan laporan: {e}", icon="❌")
+                                st.session_state.payment_notification = {
+                                    "type": "error",
+                                    "message": f"❌ Gagal menyimpan laporan: {e}"
+                                }
+                                st.rerun()
 
         # --- Internal Memo sub-tab (index dinamis: 2 jika ada PTP, 1 jika tidak ada PTP) ---
         memo_tab_index = 2 if current_status == "PTP" else 1
         with sub_tabs[memo_tab_index]:
+            # Tampilkan notifikasi memo jika ada
+            if "memo_notification" in st.session_state:
+                notif = st.session_state.memo_notification
+                if notif["type"] == "success":
+                    st.success(notif["message"])
+                elif notif["type"] == "error":
+                    st.error(notif["message"])
+                elif notif["type"] == "warning":
+                    st.warning(notif["message"])
+                del st.session_state.memo_notification
+            
             if not sel:
                 st.info("Pilih Case ID pada tabel di atas terlebih dahulu.")
             else:
@@ -3582,8 +3662,12 @@ def page_agent():
                     send_as_role = "Agent"
                     target_role = "Supervisor"
 
+                # Form counter untuk reset
+                if "memo_form_counter" not in st.session_state:
+                    st.session_state.memo_form_counter = 0
+
                 # Input send box with better UX
-                with st.form("agent_internal_memo_chat"):
+                with st.form(f"agent_internal_memo_chat_{st.session_state.memo_form_counter}"):
                     msg = st.text_area(
                         form_label,
                         value="",
@@ -3594,17 +3678,29 @@ def page_agent():
                     send = st.form_submit_button("📤 Kirim", use_container_width=True)
                     if send:
                         if not msg or not msg.strip():
-                            st.toast("⚠️ Pesan tidak boleh kosong!", icon="⚠️")
+                            st.session_state.memo_notification = {
+                                "type": "warning",
+                                "message": "⚠️ Pesan tidak boleh kosong!"
+                            }
+                            st.rerun()
                         else:
                             try:
                                 execute(
                                     "INSERT INTO memos (Agreement_No, author_role, author_name, target_role, message) VALUES (?,?,?,?,?)",
                                     (sel, send_as_role, agent_name, target_role, msg.strip())
                                 )
-                                st.toast("✅ Memo berhasil dikirim!", icon="✅")
+                                st.session_state.memo_notification = {
+                                    "type": "success",
+                                    "message": "✅ Memo berhasil dikirim!"
+                                }
+                                st.session_state.memo_form_counter += 1
                                 st.rerun()
                             except Exception as e:
-                                st.toast(f"❌ Gagal mengirim memo: {e}", icon="❌")
+                                st.session_state.memo_notification = {
+                                    "type": "error",
+                                    "message": f"❌ Gagal mengirim memo: {e}"
+                                }
+                                st.rerun()
 
     # --- Cicilan Approval tab (sejajar dengan Cases, hanya untuk Supervisor) ---
     if user_role in ('Supervisor', 'Superuser'):
