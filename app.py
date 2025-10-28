@@ -587,6 +587,11 @@ def init_db():
         # Add new columns for proof images if not exists
         c.execute("ALTER TABLE payments ADD COLUMN proof_image_drive_id TEXT")
         c.execute("ALTER TABLE payments ADD COLUMN proof_image_filename TEXT")
+        # Add approval workflow columns
+        c.execute("ALTER TABLE payments ADD COLUMN approval_status TEXT DEFAULT 'pending'")
+        c.execute("ALTER TABLE payments ADD COLUMN approval_by TEXT")
+        c.execute("ALTER TABLE payments ADD COLUMN approval_at TEXT")
+        c.execute("ALTER TABLE payments ADD COLUMN rejection_notes TEXT")
     except Exception:
         pass
     # 5) Agent results (handling outcome fields)
@@ -666,6 +671,8 @@ def init_db():
             c.execute("ALTER TABLE agent_results ADD COLUMN approval_by TEXT")
         if 'approval_at' not in cols:
             c.execute("ALTER TABLE agent_results ADD COLUMN approval_at TEXT")
+        if 'rejection_notes' not in cols:
+            c.execute("ALTER TABLE agent_results ADD COLUMN rejection_notes TEXT")
     except Exception:
         pass
     
@@ -3036,9 +3043,9 @@ def page_agent():
     if user_role in ("Superuser", "Supervisor"):
         st.caption(f"Mode: **{user_role}** — Melihat semua assignment agent")
         # JOIN dengan supervisor_data untuk mendapatkan Principle_Outstanding
-        # dan hitung total pembayaran dari 2 sumber:
-        # 1. Tabel payments (laporan pembayaran agent)
-        # 2. Tabel agent_results yang sudah di-approve (cicilan)
+        # dan hitung total pembayaran dari 2 sumber (HANYA yang sudah approved):
+        # 1. Tabel payments dengan approval_status='approved'
+        # 2. Tabel agent_results dengan approval_status='approved'
         rows = fetchall("""
             SELECT 
                 aa.Agreement_No AS Case_ID, 
@@ -3049,7 +3056,8 @@ def page_agent():
                     COALESCE(
                         (SELECT SUM(paid_amount) 
                          FROM payments p 
-                         WHERE p.Agreement_No = aa.Agreement_No),
+                         WHERE p.Agreement_No = aa.Agreement_No
+                         AND p.approval_status = 'approved'),
                         0
                     ) +
                     COALESCE(
@@ -3069,6 +3077,54 @@ def page_agent():
             LIMIT 500
         """)
     else:
+        # Agent view: Check for rejected payments/cicilan
+        rejected_payments = fetchall("""
+            SELECT id, Agreement_No AS Case_ID, paid_amount, paid_date, rejection_notes, approval_by, approval_at
+            FROM payments 
+            WHERE uploaded_by = ? AND approval_status = 'rejected'
+            ORDER BY approval_at DESC
+            LIMIT 10
+        """, (agent_name,))
+        
+        rejected_cicilan = fetchall("""
+            SELECT id, Agreement_No AS Case_ID, agent_ptp_amount, agent_ptp_date, rejection_notes, approval_by, approval_at
+            FROM agent_results 
+            WHERE agent = ? AND approval_status = 'rejected'
+            ORDER BY approval_at DESC
+            LIMIT 10
+        """, (agent_name,))
+        
+        # Show rejection notifications
+        if rejected_payments or rejected_cicilan:
+            st.error("⚠️ **PERHATIAN: Ada laporan yang ditolak oleh Supervisor!**")
+            
+            if rejected_payments:
+                with st.expander(f"❌ {len(rejected_payments)} Payment Report Ditolak - Klik untuk detail", expanded=True):
+                    for rp in rejected_payments:
+                        st.markdown(f"""
+                        **Case ID:** {rp['Case_ID']}  
+                        **Jumlah:** Rp {rp['paid_amount']:,.0f}  
+                        **Tanggal:** {rp['paid_date']}  
+                        **Ditolak oleh:** {rp['approval_by']} pada {rp['approval_at']}  
+                        **Alasan:** {rp['rejection_notes']}
+                        """)
+                        st.markdown("---")
+            
+            if rejected_cicilan:
+                with st.expander(f"❌ {len(rejected_cicilan)} Cicilan Ditolak - Klik untuk detail", expanded=True):
+                    for rc in rejected_cicilan:
+                        st.markdown(f"""
+                        **Case ID:** {rc['Case_ID']}  
+                        **Jumlah Cicilan:** Rp {rc['agent_ptp_amount']:,.0f}  
+                        **Tanggal:** {rc['agent_ptp_date']}  
+                        **Ditolak oleh:** {rc['approval_by']} pada {rc['approval_at']}  
+                        **Alasan:** {rc['rejection_notes']}
+                        """)
+                        st.markdown("---")
+            
+            st.info("💡 Silakan perbaiki dan submit ulang laporan sesuai catatan Supervisor")
+            st.markdown("---")
+        
         # Simple PTP notif today
         today_str = today_wib().isoformat()
         ptp_today = fetchone("SELECT COUNT(*) c FROM agent_results WHERE agent=? AND DATE(agent_ptp_date)=?", (agent_name, today_str))
@@ -3084,11 +3140,11 @@ def page_agent():
         return
 
     # Tabs layout to tidy up Agent Menu
-    # Tambahkan tab Cicilan Approval untuk Supervisor
+    # Supervisor memiliki tab Payment & Cicilan Approval
     if user_role in ("Superuser", "Supervisor"):
         tabs = st.tabs([
             "Cases",
-            "Cicilan Approval",
+            "Payment & Cicilan Approval",
             "My PTP",
             "Monthly Payment Recap",
             "All-time Payment Recap",
@@ -3470,10 +3526,10 @@ def page_agent():
                                     except Exception as e:
                                         upload_message = f" (Catatan: Gagal upload gambar - {str(e)[:50]})"
                                 
-                                # 1) Simpan pembayaran dengan info bukti gambar
+                                # 1) Simpan pembayaran dengan info bukti gambar dan approval_status='pending'
                                 execute(
-                                    "INSERT OR REPLACE INTO payments (Agreement_No, paid_amount, paid_date, status, source_file, uploaded_by, proof_image_drive_id, proof_image_filename) VALUES (?,?,?,?,?,?,?,?)",
-                                    (sel, float(paid_amount or 0), (paid_date.isoformat() if paid_date else None), scheme, None, agent_name, proof_drive_id, proof_filename)
+                                    "INSERT INTO payments (Agreement_No, paid_amount, paid_date, status, source_file, uploaded_by, proof_image_drive_id, proof_image_filename, approval_status) VALUES (?,?,?,?,?,?,?,?,?)",
+                                    (sel, float(paid_amount or 0), (paid_date.isoformat() if paid_date else None), scheme, None, agent_name, proof_drive_id, proof_filename, 'pending')
                                 )
                                 # Audit log pembayaran
                                 try:
@@ -3732,9 +3788,585 @@ def page_agent():
                                 }
                                 st.rerun()
 
-    # --- Cicilan Approval tab (sejajar dengan Cases, hanya untuk Supervisor) ---
+    # --- Payment & Cicilan Approval tab (sejajar dengan Cases, hanya untuk Supervisor) ---
     if user_role in ('Supervisor', 'Superuser'):
         with tabs[1]:
+            st.subheader("💰 Payment & Cicilan Approval")
+            st.caption("Review dan approve/reject semua laporan pembayaran dan cicilan dari Agent")
+            
+            # Sub-tabs untuk memisahkan Payment Reports dan Cicilan
+            approval_subtabs = st.tabs(["💵 Payment Reports", "📋 Cicilan Installments"])
+            
+            # ===== SUB-TAB 1: PAYMENT REPORTS =====
+            with approval_subtabs[0]:
+                st.markdown("### 💵 Payment Reports dengan Bukti")
+                st.caption("Review laporan pembayaran dari Agent beserta bukti gambar yang dilampirkan")
+                
+                # Filter payment reports
+                pcol1, pcol2, pcol3, pcol4 = st.columns(4)
+                with pcol1:
+                    p_case_filter = st.text_input("Filter Case ID", key="payment_case_filter")
+                with pcol2:
+                    p_agent_filter = st.text_input("Filter Agent", key="payment_agent_filter")
+                with pcol3:
+                    p_with_proof = st.selectbox("Bukti Gambar", ["All", "With Proof", "No Proof"], key="payment_proof_filter")
+                with pcol4:
+                    p_status_filter = st.multiselect(
+                        "Status Approval",
+                        options=['pending', 'approved', 'rejected'],
+                        default=['pending'],
+                        key="payment_status_filter"
+                    )
+                
+                # Query payments dengan bukti gambar
+                p_query = """
+                    SELECT p.id, p.Agreement_No AS Case_ID, p.paid_amount, p.paid_date, 
+                           p.status, p.uploaded_by, p.uploaded_at,
+                           p.proof_image_drive_id, p.proof_image_filename,
+                           IFNULL(p.approval_status, 'pending') as approval_status,
+                           p.approval_by, p.approval_at, p.rejection_notes,
+                           sd.Customer_name, sd.Principle_Outstanding
+                    FROM payments p
+                    LEFT JOIN supervisor_data sd ON sd.Case_ID = p.Agreement_No 
+                        OR sd.Virtual_Account_Number = p.Agreement_No
+                        OR sd.Third_Uid = p.Agreement_No
+                    WHERE 1=1
+                """
+                p_params = []
+                
+                if p_case_filter:
+                    p_query += " AND p.Agreement_No LIKE ?"
+                    p_params.append(f"%{p_case_filter}%")
+                if p_agent_filter:
+                    p_query += " AND p.uploaded_by LIKE ?"
+                    p_params.append(f"%{p_agent_filter}%")
+                if p_with_proof == "With Proof":
+                    p_query += " AND p.proof_image_drive_id IS NOT NULL"
+                elif p_with_proof == "No Proof":
+                    p_query += " AND p.proof_image_drive_id IS NULL"
+                
+                # Filter by approval status
+                if p_status_filter:
+                    placeholders = ','.join(['?'] * len(p_status_filter))
+                    p_query += f" AND IFNULL(p.approval_status, 'pending') IN ({placeholders})"
+                    p_params.extend(p_status_filter)
+                
+                p_query += " ORDER BY p.paid_date DESC, p.uploaded_at DESC LIMIT 100"
+                
+                payment_rows = fetchall(p_query, tuple(p_params))
+                
+                # Summary metrics untuk payment
+                if payment_rows:
+                    df_payments = pd.DataFrame(payment_rows)
+                    pcol1, pcol2, pcol3, pcol4 = st.columns(4)
+                    with pcol1:
+                        pending_pay = len(df_payments[df_payments['approval_status'] == 'pending'])
+                        st.metric("⏳ Menunggu Approval", pending_pay)
+                    with pcol2:
+                        approved_pay = len(df_payments[df_payments['approval_status'] == 'approved'])
+                        st.metric("✅ Sudah Disetujui", approved_pay)
+                    with pcol3:
+                        rejected_pay = len(df_payments[df_payments['approval_status'] == 'rejected'])
+                        st.metric("❌ Ditolak", rejected_pay)
+                    with pcol4:
+                        total_pending_amount = df_payments[df_payments['approval_status'] == 'pending']['paid_amount'].sum()
+                        st.metric("💰 Total Pending", f"Rp {total_pending_amount:,.0f}")
+                    
+                    st.divider()
+                
+                if not payment_rows:
+                    st.info("✅ Tidak ada payment report ditemukan sesuai filter.")
+                else:
+                    st.caption(f"Menampilkan {len(payment_rows)} payment reports")
+                    
+                    for p_row in payment_rows:
+                        # Icon berdasarkan status
+                        if p_row['approval_status'] == 'pending':
+                            icon = "⏳"
+                        elif p_row['approval_status'] == 'approved':
+                            icon = "✅"
+                        else:
+                            icon = "❌"
+                        
+                        proof_icon = '📎' if p_row.get('proof_image_drive_id') else '📄'
+                        
+                        with st.expander(
+                            f"{icon} {proof_icon} "
+                            f"{p_row['Case_ID']} - {p_row.get('Customer_name', 'N/A')} - "
+                            f"Rp {p_row['paid_amount']:,.0f} ({p_row['paid_date']})"
+                        ):
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.write(f"**Case ID:** {p_row['Case_ID']}")
+                                st.write(f"**Customer:** {p_row.get('Customer_name', 'N/A')}")
+                                st.write(f"**Jumlah Bayar:** Rp {p_row['paid_amount']:,.0f}")
+                                st.write(f"**Tanggal Bayar:** {p_row['paid_date']}")
+                                st.write(f"**Status Laporan:** {p_row['status']}")
+                            with col2:
+                                try:
+                                    outstanding = float(p_row.get('Principle_Outstanding') or 0)
+                                    st.write(f"**Outstanding:** Rp {outstanding:,.0f}")
+                                    
+                                    # Hitung sisa outstanding jika payment di-approve
+                                    if p_row['approval_status'] == 'pending':
+                                        try:
+                                            paid = float(p_row['paid_amount'])
+                                            sisa_outstanding = max(0, outstanding - paid)
+                                            st.caption(f"💡 Sisa setelah approve: Rp {sisa_outstanding:,.0f}")
+                                            # Tambahkan indikator jika akan menjadi Paid Off
+                                            if sisa_outstanding == 0:
+                                                st.success("🎉 Status akan berubah menjadi **PAID OFF** setelah approve!")
+                                        except:
+                                            pass
+                                    elif p_row['approval_status'] == 'approved':
+                                        st.caption(f"✅ Outstanding telah dikurangi")
+                                except:
+                                    st.write(f"**Outstanding:** {p_row.get('Principle_Outstanding', 'N/A')}")
+                                
+                                st.write(f"**Uploaded by:** {p_row['uploaded_by']}")
+                                st.write(f"**Uploaded at:** {p_row['uploaded_at']}")
+                            
+                            st.write(f"**Status Approval:** {p_row['approval_status'].upper()}")
+                            
+                            # Tampilkan info approval/rejection
+                            if p_row['approval_status'] == 'approved' and p_row.get('approval_by'):
+                                st.success(f"✅ Disetujui oleh {p_row['approval_by']} pada {p_row['approval_at']}")
+                            elif p_row['approval_status'] == 'rejected' and p_row.get('approval_by'):
+                                st.error(f"❌ Ditolak oleh {p_row['approval_by']} pada {p_row['approval_at']}")
+                                if p_row.get('rejection_notes'):
+                                    st.warning(f"**Alasan:** {p_row['rejection_notes']}")
+                            
+                            # Tampilkan bukti gambar jika ada
+                            if p_row.get('proof_image_drive_id'):
+                                st.markdown("#### 📎 Bukti Pembayaran / Percakapan")
+                                st.caption(f"Filename: {p_row.get('proof_image_filename', 'N/A')}")
+                                
+                                try:
+                                    service, _ = build_drive_service()
+                                    # Download gambar dari Drive
+                                    img_bytes = download_file_bytes(service, p_row['proof_image_drive_id'])
+                                    
+                                    # Tampilkan gambar jika format image
+                                    if p_row.get('proof_image_filename', '').lower().endswith(('.png', '.jpg', '.jpeg')):
+                                        st.image(img_bytes, caption=p_row.get('proof_image_filename'), use_container_width=True)
+                                    else:
+                                        # Untuk PDF atau format lain, tampilkan download button
+                                        st.download_button(
+                                            label=f"📥 Download {p_row.get('proof_image_filename')}",
+                                            data=img_bytes,
+                                            file_name=p_row.get('proof_image_filename', 'proof.pdf'),
+                                            mime="application/octet-stream",
+                                            key=f"dl_proof_{p_row['id']}"
+                                        )
+                                except Exception as e:
+                                    st.error(f"❌ Gagal load bukti gambar dari Drive: {e}")
+                                    st.caption(f"Drive ID: {p_row['proof_image_drive_id']}")
+                            else:
+                                st.info("Tidak ada bukti gambar dilampirkan untuk payment ini.")
+                            
+                            # Approval/Rejection buttons (hanya untuk pending)
+                            if p_row['approval_status'] == 'pending':
+                                st.markdown("---")
+                                col1, col2, col3 = st.columns([1, 1, 2])
+                                
+                                with col1:
+                                    if st.button("✅ APPROVE", key=f"approve_pay_{p_row['id']}", type="primary", use_container_width=True):
+                                        try:
+                                            # Update approval status
+                                            execute("""
+                                                UPDATE payments 
+                                                SET approval_status = 'approved',
+                                                    approval_by = ?,
+                                                    approval_at = CURRENT_TIMESTAMP
+                                                WHERE id = ?
+                                            """, (agent_name, p_row['id']))
+                                            
+                                            # PENTING: Kurangi Principle_Outstanding di supervisor_data
+                                            paid_amt = p_row.get('paid_amount', 0) or 0
+                                            try:
+                                                paid_amt = float(paid_amt)
+                                            except (ValueError, TypeError):
+                                                paid_amt = 0
+                                            
+                                            if paid_amt > 0:
+                                                # Kurangi Principle_Outstanding
+                                                execute("""
+                                                    UPDATE supervisor_data
+                                                    SET Principle_Outstanding = CAST(
+                                                        CASE 
+                                                            WHEN CAST(IFNULL(Principle_Outstanding, '0') AS REAL) - ? < 0 
+                                                            THEN 0 
+                                                            ELSE CAST(IFNULL(Principle_Outstanding, '0') AS REAL) - ?
+                                                        END AS TEXT
+                                                    )
+                                                    WHERE Case_ID = ?
+                                                """, (paid_amt, paid_amt, p_row['Case_ID']))
+                                                
+                                                # Cek apakah Outstanding sudah mencapai nol, jika ya set Paid_Off = Yes
+                                                check_outstanding = fetchone("""
+                                                    SELECT CAST(IFNULL(Principle_Outstanding, '0') AS REAL) as outstanding
+                                                    FROM supervisor_data
+                                                    WHERE Case_ID = ?
+                                                """, (p_row['Case_ID'],))
+                                                
+                                                if check_outstanding and check_outstanding.get('outstanding', 0) == 0:
+                                                    # Outstanding sudah nol, set Paid_Off = Yes
+                                                    execute("""
+                                                        UPDATE supervisor_data
+                                                        SET Paid_Off = 'Yes'
+                                                        WHERE Case_ID = ?
+                                                    """, (p_row['Case_ID'],))
+                                                    
+                                                    # Log status paid off
+                                                    execute("""
+                                                        INSERT INTO audit_logs (user_id, action, details)
+                                                        VALUES (?, 'SET_PAID_OFF', ?)
+                                                    """, (u.get('id'), 
+                                                          f"Set Paid_Off=Yes for {p_row['Case_ID']} (Outstanding reached 0 via payment approval)"))
+                                                
+                                                # Log perubahan Principle_Outstanding
+                                                execute("""
+                                                    INSERT INTO audit_logs (user_id, action, details)
+                                                    VALUES (?, 'REDUCE_OUTSTANDING', ?)
+                                                """, (u.get('id'), 
+                                                      f"Reduced Principle_Outstanding for {p_row['Case_ID']} by {paid_amt:,.0f} (payment approval)"))
+                                            
+                                            # Log audit approval
+                                            execute("""
+                                                INSERT INTO audit_logs (user_id, action, details)
+                                                VALUES (?, 'APPROVE_PAYMENT', ?)
+                                            """, (u.get('id'), f"Approved payment {p_row['Case_ID']} - Amount: Rp {paid_amt:,.0f}"))
+                                            
+                                            # Cek apakah case sudah Paid Off untuk pesan yang lebih informatif
+                                            paid_off_check = fetchone("SELECT Paid_Off FROM supervisor_data WHERE Case_ID = ?", (p_row['Case_ID'],))
+                                            if paid_off_check and paid_off_check.get('Paid_Off', '').upper() == 'YES':
+                                                st.toast(f"✅ Payment di-approve! 🎉 Status PAID OFF!", icon="✅")
+                                            else:
+                                                st.toast(f"✅ Payment di-approve! Outstanding dikurangi: Rp {paid_amt:,.0f}", icon="✅")
+                                            st.rerun()
+                                        except Exception as e:
+                                            st.toast(f"❌ Gagal approve: {e}", icon="❌")
+                                
+                                with col2:
+                                    if st.button("❌ REJECT", key=f"reject_pay_{p_row['id']}", type="secondary", use_container_width=True):
+                                        st.session_state[f"show_reject_form_{p_row['id']}"] = True
+                                        st.rerun()
+                                
+                                with col3:
+                                    st.caption("Klik APPROVE untuk menyetujui atau REJECT untuk menolak")
+                                
+                                # Form untuk reject dengan notes
+                                if st.session_state.get(f"show_reject_form_{p_row['id']}", False):
+                                    with st.form(f"reject_form_{p_row['id']}"):
+                                        st.warning("⚠️ Anda akan menolak payment report ini")
+                                        rejection_notes = st.text_area(
+                                            "Alasan Penolakan (wajib)",
+                                            placeholder="Jelaskan mengapa payment ditolak, agar Agent dapat memperbaiki...",
+                                            key=f"reject_notes_{p_row['id']}"
+                                        )
+                                        
+                                        col_submit, col_cancel = st.columns(2)
+                                        with col_submit:
+                                            submit_reject = st.form_submit_button("🚫 Confirm Reject", type="primary", use_container_width=True)
+                                        with col_cancel:
+                                            cancel_reject = st.form_submit_button("↩️ Cancel", use_container_width=True)
+                                        
+                                        if submit_reject:
+                                            if not rejection_notes or not rejection_notes.strip():
+                                                st.error("❌ Alasan penolakan wajib diisi!")
+                                            else:
+                                                try:
+                                                    execute("""
+                                                        UPDATE payments 
+                                                        SET approval_status = 'rejected',
+                                                            approval_by = ?,
+                                                            approval_at = CURRENT_TIMESTAMP,
+                                                            rejection_notes = ?
+                                                        WHERE id = ?
+                                                    """, (agent_name, rejection_notes.strip(), p_row['id']))
+                                                    
+                                                    # Log audit
+                                                    execute("""
+                                                        INSERT INTO audit_logs (user_id, action, details)
+                                                        VALUES (?, 'REJECT_PAYMENT', ?)
+                                                    """, (u.get('id'), f"Rejected payment {p_row['Case_ID']} - Reason: {rejection_notes.strip()}"))
+                                                    
+                                                    # Hapus flag show reject form
+                                                    if f"show_reject_form_{p_row['id']}" in st.session_state:
+                                                        del st.session_state[f"show_reject_form_{p_row['id']}"]
+                                                    
+                                                    st.toast("⚠️ Payment berhasil di-reject! Agent akan diberitahu.", icon="⚠️")
+                                                    st.rerun()
+                                                except Exception as e:
+                                                    st.toast(f"❌ Gagal reject: {e}", icon="❌")
+                                        
+                                        if cancel_reject:
+                                            if f"show_reject_form_{p_row['id']}" in st.session_state:
+                                                del st.session_state[f"show_reject_form_{p_row['id']}"]
+                                            st.rerun()
+            
+            # ===== SUB-TAB 2: CICILAN INSTALLMENTS =====
+            with approval_subtabs[1]:
+                st.markdown("### 📋 Cicilan Installments")
+                st.caption("Daftar pengajuan cicilan yang menunggu persetujuan dari Supervisor")
+                
+                # Query untuk mendapatkan case dengan status cicilan
+                cicilan_cases = fetchall("""
+                    SELECT 
+                        ar.id as result_id,
+                        ar.Agreement_No AS Case_ID,
+                        ar.agent as Agent,
+                        ar.agent_status as Status_Cicilan,
+                        ar.agent_ptp_amount as Jumlah_Cicilan,
+                        ar.agent_ptp_date as Tanggal_Cicilan,
+                        ar.updated_at as Tanggal_Pengajuan,
+                        IFNULL(ar.approval_status, 'pending') as Approval_Status,
+                        ar.approval_by as Approved_By,
+                        ar.approval_at as Approval_Date,
+                        ar.rejection_notes,
+                        sd.Customer_name,
+                        sd.Principle_Outstanding
+                    FROM agent_results ar
+                    LEFT JOIN supervisor_data sd ON sd.Case_ID = ar.Agreement_No 
+                        OR sd.Virtual_Account_Number = ar.Agreement_No 
+                        OR sd.Third_Uid = ar.Agreement_No
+                    WHERE ar.agent_status IN ('CICIL OS', 'CICIL LUNDIS', 'CICIL POKOK')
+                    ORDER BY 
+                        CASE WHEN IFNULL(ar.approval_status, 'pending') = 'pending' THEN 0 ELSE 1 END,
+                        ar.updated_at DESC
+                    LIMIT 200
+                """)
+                
+                # Summary metrics
+                if cicilan_cases:
+                    df_cicilan = pd.DataFrame(cicilan_cases)
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        pending_count = len(df_cicilan[df_cicilan['Approval_Status'] == 'pending'])
+                        st.metric("⏳ Menunggu Approval", pending_count)
+                    with col2:
+                        approved_count = len(df_cicilan[df_cicilan['Approval_Status'] == 'approved'])
+                        st.metric("✅ Sudah Disetujui", approved_count)
+                    with col3:
+                        rejected_count = len(df_cicilan[df_cicilan['Approval_Status'] == 'rejected'])
+                        st.metric("❌ Ditolak", rejected_count)
+                    with col4:
+                        total_pending_cicilan = df_cicilan[df_cicilan['Approval_Status'] == 'pending']['Jumlah_Cicilan'].sum()
+                        st.metric("💰 Total Pending", f"Rp {total_pending_cicilan:,.0f}")
+                    
+                    st.divider()
+                    
+                    # Filter by status
+                    status_filter = st.multiselect(
+                        "Filter Status Approval",
+                        options=['pending', 'approved', 'rejected'],
+                        default=['pending'],
+                        key="cicilan_status_filter"
+                    )
+                    
+                    if status_filter:
+                        df_filtered = df_cicilan[df_cicilan['Approval_Status'].isin(status_filter)]
+                    else:
+                        df_filtered = df_cicilan
+                    
+                    # Display table with approval actions
+                    st.markdown("#### 📊 Daftar Pengajuan Cicilan")
+                    
+                    for idx, row in df_filtered.iterrows():
+                        # Icon berdasarkan status
+                        if row['Approval_Status'] == 'pending':
+                            icon = "⏳"
+                        elif row['Approval_Status'] == 'approved':
+                            icon = "✅"
+                        else:
+                            icon = "❌"
+                        
+                        with st.expander(
+                            f"{icon} {row['Case_ID']} - {row['Customer_name']} - {row['Status_Cicilan']}"
+                        ):
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.write(f"**Case ID:** {row['Case_ID']}")
+                                st.write(f"**Customer:** {row['Customer_name']}")
+                                st.write(f"**Agent:** {row['Agent']}")
+                                st.write(f"**Status Cicilan:** {row['Status_Cicilan']}")
+                            with col2:
+                                try:
+                                    outstanding = float(row['Principle_Outstanding'] or 0)
+                                    st.write(f"**Outstanding:** Rp {outstanding:,.0f}")
+                                    
+                                    # Hitung sisa outstanding jika cicilan di-approve
+                                    if row.get('Jumlah_Cicilan') and row['Approval_Status'] == 'pending':
+                                        try:
+                                            cicilan = float(row['Jumlah_Cicilan'])
+                                            sisa_outstanding = max(0, outstanding - cicilan)
+                                            st.caption(f"💡 Sisa setelah approve: Rp {sisa_outstanding:,.0f}")
+                                            # Tambahkan indikator jika akan menjadi Paid Off
+                                            if sisa_outstanding == 0:
+                                                st.success("🎉 Status akan berubah menjadi **PAID OFF** setelah approve!")
+                                        except:
+                                            pass
+                                    elif row['Approval_Status'] == 'approved':
+                                        st.caption(f"✅ Outstanding telah dikurangi")
+                                except:
+                                    st.write(f"**Outstanding:** {row['Principle_Outstanding']}")
+                                
+                                if row.get('Jumlah_Cicilan'):
+                                    st.write(f"**Jumlah Cicilan:** Rp {row['Jumlah_Cicilan']:,.0f}")
+                                if row.get('Tanggal_Cicilan'):
+                                    st.write(f"**Tanggal Jatuh Tempo:** {row['Tanggal_Cicilan']}")
+                                st.write(f"**Tanggal Pengajuan:** {row['Tanggal_Pengajuan']}")
+                            
+                            st.write(f"**Status:** {row['Approval_Status'].upper()}")
+                            
+                            if row['Approval_Status'] == 'approved' and row.get('Approved_By'):
+                                st.success(f"✅ Disetujui oleh {row['Approved_By']} pada {row['Approval_Date']}")
+                            elif row['Approval_Status'] == 'rejected' and row.get('Approved_By'):
+                                st.error(f"❌ Ditolak oleh {row['Approved_By']} pada {row['Approval_Date']}")
+                                if row.get('rejection_notes'):
+                                    st.warning(f"**Alasan:** {row['rejection_notes']}")
+                            elif row['Approval_Status'] == 'pending':
+                                # Approval buttons
+                                st.markdown("---")
+                                col1, col2, col3 = st.columns([1, 1, 2])
+                                with col1:
+                                    if st.button("✅ APPROVE", key=f"approve_cicil_{row['result_id']}", type="primary", use_container_width=True):
+                                        try:
+                                            # Update approval status
+                                            execute("""
+                                                UPDATE agent_results 
+                                                SET approval_status = 'approved',
+                                                    approval_by = ?,
+                                                    approval_at = CURRENT_TIMESTAMP
+                                                WHERE id = ?
+                                            """, (agent_name, row['result_id']))
+                                            
+                                            # PENTING: Kurangi Principle_Outstanding di supervisor_data
+                                            # Ambil jumlah pembayaran yang di-approve
+                                            ptp_amount = row.get('Jumlah_Cicilan', 0) or 0
+                                            try:
+                                                ptp_amount = float(ptp_amount)
+                                            except (ValueError, TypeError):
+                                                ptp_amount = 0
+                                            
+                                            if ptp_amount > 0:
+                                                # Kurangi Principle_Outstanding
+                                                execute("""
+                                                    UPDATE supervisor_data
+                                                    SET Principle_Outstanding = CAST(
+                                                        CASE 
+                                                            WHEN CAST(IFNULL(Principle_Outstanding, '0') AS REAL) - ? < 0 
+                                                            THEN 0 
+                                                            ELSE CAST(IFNULL(Principle_Outstanding, '0') AS REAL) - ?
+                                                        END AS TEXT
+                                                    )
+                                                    WHERE Case_ID = ?
+                                                """, (ptp_amount, ptp_amount, row['Case_ID']))
+                                                
+                                                # Cek apakah Outstanding sudah mencapai nol, jika ya set Paid_Off = Yes
+                                                check_outstanding = fetchone("""
+                                                    SELECT CAST(IFNULL(Principle_Outstanding, '0') AS REAL) as outstanding
+                                                    FROM supervisor_data
+                                                    WHERE Case_ID = ?
+                                                """, (row['Case_ID'],))
+                                                
+                                                if check_outstanding and check_outstanding.get('outstanding', 0) == 0:
+                                                    # Outstanding sudah nol, set Paid_Off = Yes
+                                                    execute("""
+                                                        UPDATE supervisor_data
+                                                        SET Paid_Off = 'Yes'
+                                                        WHERE Case_ID = ?
+                                                    """, (row['Case_ID'],))
+                                                    
+                                                    # Log status paid off
+                                                    execute("""
+                                                        INSERT INTO audit_logs (user_id, action, details)
+                                                        VALUES (?, 'SET_PAID_OFF', ?)
+                                                    """, (u.get('id'), 
+                                                          f"Set Paid_Off=Yes for {row['Case_ID']} (Outstanding reached 0 via cicilan approval)"))
+                                                
+                                                # Log perubahan Principle_Outstanding
+                                                execute("""
+                                                    INSERT INTO audit_logs (user_id, action, details)
+                                                    VALUES (?, 'REDUCE_OUTSTANDING', ?)
+                                                """, (u.get('id'), 
+                                                      f"Reduced Principle_Outstanding for {row['Case_ID']} by {ptp_amount:,.0f} (cicilan approval)"))
+                                            
+                                            # Log audit approval
+                                            execute("""
+                                                INSERT INTO audit_logs (user_id, action, details)
+                                                VALUES (?, 'APPROVE_CICILAN', ?)
+                                            """, (u.get('id'), f"Approved {row['Case_ID']} - {row['Status_Cicilan']} - Amount: {ptp_amount:,.0f}"))
+                                            
+                                            # Cek apakah case sudah Paid Off untuk pesan yang lebih informatif
+                                            paid_off_check = fetchone("SELECT Paid_Off FROM supervisor_data WHERE Case_ID = ?", (row['Case_ID'],))
+                                            if paid_off_check and paid_off_check.get('Paid_Off', '').upper() == 'YES':
+                                                st.toast(f"✅ Cicilan di-approve! 🎉 Status PAID OFF!", icon="✅")
+                                            else:
+                                                st.toast(f"✅ Cicilan di-approve! Outstanding dikurangi: Rp {ptp_amount:,.0f}", icon="✅")
+                                            st.rerun()
+                                        except Exception as e:
+                                            st.toast(f"❌ Gagal approve: {e}", icon="❌")
+                                
+                                with col2:
+                                    if st.button("❌ REJECT", key=f"reject_cicil_{row['result_id']}", type="secondary", use_container_width=True):
+                                        st.session_state[f"show_reject_cicilan_form_{row['result_id']}"] = True
+                                        st.rerun()
+                                
+                                with col3:
+                                    st.caption("Klik APPROVE untuk menyetujui atau REJECT untuk menolak")
+                                
+                                # Form untuk reject dengan notes
+                                if st.session_state.get(f"show_reject_cicilan_form_{row['result_id']}", False):
+                                    with st.form(f"reject_cicilan_form_{row['result_id']}"):
+                                        st.warning("⚠️ Anda akan menolak pengajuan cicilan ini")
+                                        rejection_notes = st.text_area(
+                                            "Alasan Penolakan (wajib)",
+                                            placeholder="Jelaskan mengapa cicilan ditolak, agar Agent dapat memperbaiki...",
+                                            key=f"reject_cicilan_notes_{row['result_id']}"
+                                        )
+                                        
+                                        col_submit, col_cancel = st.columns(2)
+                                        with col_submit:
+                                            submit_reject = st.form_submit_button("🚫 Confirm Reject", type="primary", use_container_width=True)
+                                        with col_cancel:
+                                            cancel_reject = st.form_submit_button("↩️ Cancel", use_container_width=True)
+                                        
+                                        if submit_reject:
+                                            if not rejection_notes or not rejection_notes.strip():
+                                                st.error("❌ Alasan penolakan wajib diisi!")
+                                            else:
+                                                try:
+                                                    execute("""
+                                                        UPDATE agent_results 
+                                                        SET approval_status = 'rejected',
+                                                            approval_by = ?,
+                                                            approval_at = CURRENT_TIMESTAMP,
+                                                            rejection_notes = ?
+                                                        WHERE id = ?
+                                                    """, (agent_name, rejection_notes.strip(), row['result_id']))
+                                                    
+                                                    # Log audit
+                                                    execute("""
+                                                        INSERT INTO audit_logs (user_id, action, details)
+                                                        VALUES (?, 'REJECT_CICILAN', ?)
+                                                    """, (u.get('id'), f"Rejected {row['Case_ID']} - {row['Status_Cicilan']} - Reason: {rejection_notes.strip()}"))
+                                                    
+                                                    # Hapus flag show reject form
+                                                    if f"show_reject_cicilan_form_{row['result_id']}" in st.session_state:
+                                                        del st.session_state[f"show_reject_cicilan_form_{row['result_id']}"]
+                                                    
+                                                    st.toast("⚠️ Cicilan berhasil di-reject! Agent akan diberitahu.", icon="⚠️")
+                                                    st.rerun()
+                                                except Exception as e:
+                                                    st.toast(f"❌ Gagal reject: {e}", icon="❌")
+                                        
+                                        if cancel_reject:
+                                            if f"show_reject_cicilan_form_{row['result_id']}" in st.session_state:
+                                                del st.session_state[f"show_reject_cicilan_form_{row['result_id']}"]
+                                            st.rerun()
+                else:
+                    st.info("✅ Tidak ada pengajuan cicilan yang perlu di-review")
             st.subheader("📋 Cicilan Approval")
             st.caption("Daftar pengajuan cicilan yang menunggu persetujuan dari Supervisor")
             
@@ -5146,98 +5778,6 @@ def page_supervisor():
                         except Exception as e:
                             st.error(f"Gagal menghapus semua data: {e}")
         
-        # --- Payment Reports dengan Bukti Gambar ---
-        st.markdown("---")
-        st.markdown("### 💰 Payment Reports dengan Bukti")
-        st.caption("Review laporan pembayaran dari Agent beserta bukti gambar yang dilampirkan")
-        
-        # Filter payment reports
-        pcol1, pcol2, pcol3 = st.columns(3)
-        with pcol1:
-            p_case_filter = st.text_input("Filter Case ID", key="payment_case_filter")
-        with pcol2:
-            p_agent_filter = st.text_input("Filter Agent", key="payment_agent_filter")
-        with pcol3:
-            p_with_proof = st.selectbox("Bukti Gambar", ["All", "With Proof", "No Proof"], key="payment_proof_filter")
-        
-        # Query payments dengan bukti gambar
-        p_query = """
-            SELECT p.id, p.Agreement_No AS Case_ID, p.paid_amount, p.paid_date, 
-                   p.status, p.uploaded_by, p.uploaded_at,
-                   p.proof_image_drive_id, p.proof_image_filename,
-                   sd.Customer_name
-            FROM payments p
-            LEFT JOIN supervisor_data sd ON sd.Case_ID = p.Agreement_No 
-                OR sd.Virtual_Account_Number = p.Agreement_No
-                OR sd.Third_Uid = p.Agreement_No
-            WHERE 1=1
-        """
-        p_params = []
-        
-        if p_case_filter:
-            p_query += " AND p.Agreement_No LIKE ?"
-            p_params.append(f"%{p_case_filter}%")
-        if p_agent_filter:
-            p_query += " AND p.uploaded_by LIKE ?"
-            p_params.append(f"%{p_agent_filter}%")
-        if p_with_proof == "With Proof":
-            p_query += " AND p.proof_image_drive_id IS NOT NULL"
-        elif p_with_proof == "No Proof":
-            p_query += " AND p.proof_image_drive_id IS NULL"
-        
-        p_query += " ORDER BY p.paid_date DESC, p.uploaded_at DESC LIMIT 100"
-        
-        payment_rows = fetchall(p_query, tuple(p_params))
-        
-        if not payment_rows:
-            st.info("Tidak ada payment report ditemukan sesuai filter.")
-        else:
-            st.caption(f"Menampilkan {len(payment_rows)} payment reports")
-            
-            for p_row in payment_rows:
-                with st.expander(
-                    f"{'📎' if p_row.get('proof_image_drive_id') else '📄'} "
-                    f"{p_row['Case_ID']} - {p_row.get('Customer_name', 'N/A')} - "
-                    f"Rp {p_row['paid_amount']:,.0f} ({p_row['paid_date']})"
-                ):
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.write(f"**Case ID:** {p_row['Case_ID']}")
-                        st.write(f"**Customer:** {p_row.get('Customer_name', 'N/A')}")
-                        st.write(f"**Jumlah:** Rp {p_row['paid_amount']:,.0f}")
-                        st.write(f"**Tanggal:** {p_row['paid_date']}")
-                    with col2:
-                        st.write(f"**Status:** {p_row['status']}")
-                        st.write(f"**Uploaded by:** {p_row['uploaded_by']}")
-                        st.write(f"**Uploaded at:** {p_row['uploaded_at']}")
-                    
-                    # Tampilkan bukti gambar jika ada
-                    if p_row.get('proof_image_drive_id'):
-                        st.markdown("#### 📎 Bukti Pembayaran / Percakapan")
-                        st.caption(f"Filename: {p_row.get('proof_image_filename', 'N/A')}")
-                        
-                        try:
-                            service, _ = build_drive_service()
-                            # Download gambar dari Drive
-                            img_bytes = download_file_bytes(service, p_row['proof_image_drive_id'])
-                            
-                            # Tampilkan gambar jika format image
-                            if p_row.get('proof_image_filename', '').lower().endswith(('.png', '.jpg', '.jpeg')):
-                                st.image(img_bytes, caption=p_row.get('proof_image_filename'), use_container_width=True)
-                            else:
-                                # Untuk PDF atau format lain, tampilkan download button
-                                st.download_button(
-                                    label=f"📥 Download {p_row.get('proof_image_filename')}",
-                                    data=img_bytes,
-                                    file_name=p_row.get('proof_image_filename', 'proof.pdf'),
-                                    mime="application/octet-stream"
-                                )
-                        except Exception as e:
-                            st.error(f"❌ Gagal load bukti gambar dari Drive: {e}")
-                            st.caption(f"Drive ID: {p_row['proof_image_drive_id']}")
-                    else:
-                        st.info("Tidak ada bukti gambar dilampirkan untuk payment ini.")
-
         # Enriched Monitoring & Lookup NIK dipindahkan ke tab khusus "Enriched & Lookup"
 
     # --- Payment Recap Tab ---
