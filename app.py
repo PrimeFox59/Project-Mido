@@ -665,7 +665,7 @@ def perform_backup(service, folder_id=FOLDER_ID_DEFAULT):
     # ========================================================================
     try:
         if _is_probably_fresh_seed_db():
-            return False, "🚫 Backup DITOLAK: DB masih fresh (hanya seed data). Tidak akan overwrite backup lama di Drive."
+            return False, "🚫 Backup DITOLAK: DB masih fresh (user=4 seed, total data=0). Tidak akan overwrite backup lama di Drive."
     except Exception as e:
         # Jika error saat cek, TOLAK backup untuk keamanan
         return False, f"🚫 Backup DITOLAK: Gagal cek fresh DB ({e}). Untuk keamanan, backup dibatalkan."
@@ -834,7 +834,7 @@ def check_scheduled_backup(service, folder_id=FOLDER_ID_DEFAULT):
     # ========================================================================
     try:
         if _is_probably_fresh_seed_db():
-            return False, "🚫 Scheduled backup DITOLAK: DB masih fresh (seed data only)."
+            return False, "🚫 Scheduled backup DITOLAK: DB masih fresh (user=4 seed, total data=0)."
     except Exception as e:
         return False, f"🚫 Scheduled backup DITOLAK: Gagal cek fresh DB ({e})."
     
@@ -911,27 +911,66 @@ def check_scheduled_backup(service, folder_id=FOLDER_ID_DEFAULT):
 # -------------------------
 def _is_probably_fresh_seed_db():
     """Heuristik baru: anggap DB fresh bila:
-    - Jumlah user <= 2 (seed default)
+    - Jumlah user = 4 (seed default: admin, supervisor, tracer, agent)
+    - Total data di sistem = 0 (tidak ada supervisor_data, agent_assignments, payments, dll)
     - backup_log kosong
-    - record_notes kosong (opsional penanda manual)
-    Tidak lagi bergantung pada tabel 'projects' yang sudah dihapus.
+    
+    Logika: DB fresh = seed users only + no real data + no backup history
     """
     try:
+        # Cek 1: User count harus tepat 4 (seed users)
         user_cnt = fetchone("SELECT COUNT(*) c FROM users")['c']
-        if user_cnt > 2:
-            return False
+        if user_cnt != 4:
+            return False  # Jika > 4 berarti ada user baru, jika < 4 berarti ada yang dihapus
+        
+        # Cek 2: Backup log harus kosong (belum pernah backup)
         bkup_cnt = fetchone("SELECT COUNT(*) c FROM backup_log")['c']
         if bkup_cnt > 0:
             return False
+        
+        # Cek 3: Total data di sistem harus 0
+        # Hitung dari tabel-tabel utama yang menyimpan data operasional
+        total_data = 0
+        
+        # Data supervisor (input kasus)
+        total_data += fetchone("SELECT COUNT(*) c FROM supervisor_data")['c']
+        
+        # Assignment tracer
+        total_data += fetchone("SELECT COUNT(*) c FROM assign_tracer")['c']
+        
+        # Assignment agent
+        total_data += fetchone("SELECT COUNT(*) c FROM agent_assignments")['c']
+        
+        # Hasil trace
+        total_data += fetchone("SELECT COUNT(*) c FROM trace_results")['c']
+        
+        # Hasil agent
+        total_data += fetchone("SELECT COUNT(*) c FROM agent_results")['c']
+        
+        # Payments
+        total_data += fetchone("SELECT COUNT(*) c FROM payments")['c']
+        
+        # Memos
+        total_data += fetchone("SELECT COUNT(*) c FROM memos")['c']
+        
+        # Frozen entities
+        total_data += fetchone("SELECT COUNT(*) c FROM frozen_entities WHERE active=1")['c']
+        
+        # Record notes (catatan manual)
         try:
-            notes_cnt = fetchone("SELECT COUNT(*) c FROM record_notes")['c']
-            if notes_cnt > 0:
-                return False
+            total_data += fetchone("SELECT COUNT(*) c FROM record_notes")['c']
         except Exception:
-            # Jika tabel belum ada, abaikan
-            pass
+            pass  # Jika tabel belum ada, abaikan
+        
+        # Jika total data > 0, berarti sudah ada data real
+        if total_data > 0:
+            return False
+        
+        # Semua kondisi terpenuhi: user=4, no backup, no data -> DB FRESH
         return True
+        
     except Exception:
+        # Jika error saat pengecekan, anggap tidak fresh (safe default)
         return False
 
 def _pick_latest_drive_backup_file(service, folder_id):
@@ -1342,6 +1381,41 @@ def page_auth():
     st.image("logo.png", width=180)
     st.title("Authentication")
     st.markdown("---")
+    
+    # Debug info (hapus setelah testing)
+    if st.session_state.get('debug_is_fresh') is not None:
+        with st.expander("🔧 Debug Info (Developer Only)"):
+            st.write("**Fresh DB Detection:**")
+            st.write(f"- Is Fresh: {st.session_state.get('debug_is_fresh')}")
+            st.write(f"- User Count: {st.session_state.get('debug_user_count')} (Expected: 4 for fresh)")
+            st.write(f"- Backup Count: {st.session_state.get('debug_backup_count')} (Expected: 0 for fresh)")
+            st.write(f"- Total Data di Sistem: {st.session_state.get('debug_total_data')} (Expected: 0 for fresh)")
+            st.write(f"- Current Page: {st.session_state.get('page')}")
+            st.write(f"- Prelogin Done: {st.session_state.get('prelogin_auto_restore_done')}")
+            
+            st.markdown("---")
+            st.caption("**Kriteria Fresh DB:**")
+            st.caption("✓ User Count = 4 (seed: admin, supervisor, tracer, agent)")
+            st.caption("✓ Backup Count = 0 (belum pernah backup)")
+            st.caption("✓ Total Data = 0 (tidak ada data operasional)")
+            
+            # Tombol untuk force test restore system
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("🔄 Force Restore System"):
+                    try:
+                        service_pre = build_drive_service()
+                        st.session_state['restore_service'] = service_pre
+                        st.session_state['restore_folder_id'] = FOLDER_ID_DEFAULT
+                        st.session_state.page = 'RestoreSystem'
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+            with col2:
+                if st.button("🔄 Reset Prelogin Flag"):
+                    del st.session_state['prelogin_auto_restore_done']
+                    st.rerun()
+    
     tab = st.tabs(["Login", "Register"])
     
     if "login_status_message" not in st.session_state:
@@ -2063,8 +2137,33 @@ def main():
     # ========================================================================
     # Ini adalah safeguard utama untuk mencegah overwrite backup lama saat reboot/autosleep
     # Flow: Deteksi DB fresh → Tampilkan halaman Restore System → Manual restore
+    
+    # Initialize page first if not exists
+    if "page" not in st.session_state:
+        st.session_state.page = "Authentication"
+    if "user" not in st.session_state:
+        st.session_state.user = None
+    
     if "prelogin_auto_restore_done" not in st.session_state:
         is_fresh = _is_probably_fresh_seed_db()
+        
+        # Debug info - hapus setelah testing
+        st.session_state['debug_is_fresh'] = is_fresh
+        st.session_state['debug_user_count'] = fetchone("SELECT COUNT(*) c FROM users").get('c', 0)
+        st.session_state['debug_backup_count'] = fetchone("SELECT COUNT(*) c FROM backup_log").get('c', 0)
+        
+        # Hitung total data di sistem untuk debug
+        try:
+            total_sys_data = 0
+            total_sys_data += fetchone("SELECT COUNT(*) c FROM supervisor_data").get('c', 0)
+            total_sys_data += fetchone("SELECT COUNT(*) c FROM assign_tracer").get('c', 0)
+            total_sys_data += fetchone("SELECT COUNT(*) c FROM agent_assignments").get('c', 0)
+            total_sys_data += fetchone("SELECT COUNT(*) c FROM trace_results").get('c', 0)
+            total_sys_data += fetchone("SELECT COUNT(*) c FROM agent_results").get('c', 0)
+            total_sys_data += fetchone("SELECT COUNT(*) c FROM payments").get('c', 0)
+            st.session_state['debug_total_data'] = total_sys_data
+        except Exception:
+            st.session_state['debug_total_data'] = 'Error'
         
         if is_fresh:
             # DB FRESH terdeteksi! Redirect ke halaman Restore System
@@ -2095,15 +2194,9 @@ def main():
                 'message': '✅ DB sudah berisi data, tidak perlu restore.',
                 'time': datetime.utcnow().isoformat()
             }
-            st.session_state.page = 'Authentication'
+            # Page sudah di-set ke Authentication di atas, tidak perlu set lagi
         
         st.session_state['prelogin_auto_restore_done'] = True
-    
-    # Reset flags lama jika user kembali ke halaman login setelah selesai
-    if "page" not in st.session_state:
-        st.session_state.page = "Authentication"
-    if "user" not in st.session_state:
-        st.session_state.user = None
 
 
     user = current_user()
@@ -2165,16 +2258,11 @@ def main():
                 st.rerun()
         st.sidebar.button("Logout", on_click=logout_user, use_container_width=True)
         st.sidebar.markdown("---")
-    elif st.session_state.page != 'RestoreStatus':
+    elif st.session_state.page not in ['RestoreStatus', 'RestoreSystem']:
+        # Hanya tampilkan tombol login jika bukan di halaman restore
         if st.sidebar.button("🔐 Login / Register", use_container_width=True):
             st.session_state.page = "Authentication"
-
-
-        # --- Improved: Guarantee Auto-Restore before Auto-Backup ---
-        # Saat belum login tidak perlu menjalankan logic auto-backup / auto-restore tambahan
-        # dan tidak menampilkan tombol G Drive / Logout yang membingungkan.
-        # Logic auto restore awal sudah dilakukan sebelum halaman login (RestoreStatus page).
-        pass
+            st.rerun()
     
     # Halaman Restore System (saat DB fresh, sebelum login)
     if st.session_state.page == 'RestoreSystem' and not user:
