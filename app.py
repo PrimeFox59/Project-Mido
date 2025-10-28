@@ -3036,19 +3036,29 @@ def page_agent():
     if user_role in ("Superuser", "Supervisor"):
         st.caption(f"Mode: **{user_role}** — Melihat semua assignment agent")
         # JOIN dengan supervisor_data untuk mendapatkan Principle_Outstanding
-        # dan hitung total pembayaran yang sudah di-approve
+        # dan hitung total pembayaran dari 2 sumber:
+        # 1. Tabel payments (laporan pembayaran agent)
+        # 2. Tabel agent_results yang sudah di-approve (cicilan)
         rows = fetchall("""
             SELECT 
                 aa.Agreement_No AS Case_ID, 
                 aa.Agent_Assigned_To, 
                 aa.assigned_at,
                 COALESCE(sd.Principle_Outstanding, 'N/A') AS Principle_Outstanding,
-                COALESCE(
-                    (SELECT SUM(agent_ptp_amount) 
-                     FROM agent_results ar 
-                     WHERE ar.Agreement_No = aa.Agreement_No 
-                     AND ar.approval_status = 'approved'),
-                    0
+                (
+                    COALESCE(
+                        (SELECT SUM(paid_amount) 
+                         FROM payments p 
+                         WHERE p.Agreement_No = aa.Agreement_No),
+                        0
+                    ) +
+                    COALESCE(
+                        (SELECT SUM(agent_ptp_amount) 
+                         FROM agent_results ar 
+                         WHERE ar.Agreement_No = aa.Agreement_No 
+                         AND ar.approval_status = 'approved'),
+                        0
+                    )
                 ) AS Total_Approved_Payment
             FROM agent_assignments aa
             LEFT JOIN supervisor_data sd 
