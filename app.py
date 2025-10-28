@@ -3001,7 +3001,21 @@ def page_agent():
     # Jika Agent: hanya tampilkan assignment untuk dirinya sendiri
     if user_role in ("Superuser", "Supervisor"):
         st.caption(f"Mode: **{user_role}** — Melihat semua assignment agent")
-        rows = fetchall("SELECT Agreement_No AS Case_ID, Agent_Assigned_To, assigned_at FROM agent_assignments ORDER BY assigned_at DESC LIMIT 500")
+        # JOIN dengan supervisor_data untuk mendapatkan Principle_Outstanding
+        rows = fetchall("""
+            SELECT 
+                aa.Agreement_No AS Case_ID, 
+                aa.Agent_Assigned_To, 
+                aa.assigned_at,
+                COALESCE(sd.Principle_Outstanding, 'N/A') AS Principle_Outstanding
+            FROM agent_assignments aa
+            LEFT JOIN supervisor_data sd 
+                ON sd.Case_ID = aa.Agreement_No 
+                OR sd.Virtual_Account_Number = aa.Agreement_No
+                OR sd.Third_Uid = aa.Agreement_No
+            ORDER BY aa.assigned_at DESC 
+            LIMIT 500
+        """)
     else:
         # Simple PTP notif today
         today_str = today_wib().isoformat()
@@ -3048,10 +3062,17 @@ def page_agent():
             {
                 "Case_ID": r.get("Case_ID"),
                 "Agent": r.get("Agent_Assigned_To"),
+                "Principle_Outstanding": r.get("Principle_Outstanding") if user_role in ("Superuser", "Supervisor") else None,
                 "assigned_at": r.get("assigned_at"),
             }
             for r in filtered
         ]
+        # Remove None values for Agent view
+        if user_role not in ("Superuser", "Supervisor"):
+            for d in data:
+                if "Principle_Outstanding" in d:
+                    del d["Principle_Outstanding"]
+        
         df = pd.DataFrame(data)
         prev_selected = set(st.session_state.get("agent_selected_list", []) or [])
         # Select-all / clear options
@@ -3080,7 +3101,8 @@ def page_agent():
         
         if user_role in ("Superuser", "Supervisor"):
             col_config["Agent"] = st.column_config.TextColumn("Agent")
-            disabled_cols.append("Agent")
+            col_config["Principle_Outstanding"] = st.column_config.TextColumn("Principle Outstanding")
+            disabled_cols.extend(["Agent", "Principle_Outstanding"])
 
         edited = st.data_editor(
             df,
@@ -3107,16 +3129,28 @@ def page_agent():
             st.markdown("---")
             st.subheader(f"Case Details: {sel}")
             info = fetchone("SELECT Debtor_Name, NIK_KTP FROM assign_tracer WHERE Agreement_No=?", (sel,)) or {}
-            c1, c2, c3 = st.columns(3)
+            
+            # Ambil data dari supervisor_data untuk Principle_Outstanding
+            sup_data = fetchone("""
+                SELECT Phone_Number_1, Principle_Outstanding 
+                FROM supervisor_data 
+                WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=? 
+                LIMIT 1
+            """, (sel, sel, sel)) or {}
+            
+            c1, c2, c3, c4 = st.columns(4)
             with c1:
-                st.text_input("Debtor Name", value=info.get('Debtor_Name',''), disabled=True)
+                st.text_input("Debtor Name", value=info.get('Debtor_Name',''), disabled=True, key=f"debtor_name_{sel}")
             with c2:
-                st.text_input("NIK", value=info.get('NIK_KTP',''), disabled=True)
+                st.text_input("NIK", value=info.get('NIK_KTP',''), disabled=True, key=f"nik_{sel}")
             with c3:
-                sup = fetchone("SELECT Phone_Number_1 FROM supervisor_data WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=? LIMIT 1", (sel, sel, sel))
-                phone = (sup.get('Phone_Number_1') if sup else '') or ''
-                st.text_input("Phone", value=phone, disabled=True)
-            if (locals().get('phone')):
+                phone = sup_data.get('Phone_Number_1', '') or ''
+                st.text_input("Phone", value=phone, disabled=True, key=f"phone_{sel}")
+            with c4:
+                principle_outstanding = sup_data.get('Principle_Outstanding', 'N/A') or 'N/A'
+                st.text_input("Principle Outstanding", value=principle_outstanding, disabled=True, key=f"po_{sel}")
+            
+            if phone:
                 st.markdown(f"[Click to call]({'tel:'+str(phone)})  |  [SIP]({'sip:'+str(phone)})")
         else:
             st.info("Centang satu baris untuk melihat detail kasus.")
