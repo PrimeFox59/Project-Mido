@@ -2722,8 +2722,21 @@ def page_agent():
         
         # Inline sub-tabs for the selected case actions (di dalam tab Cases)
         st.markdown("---")
-        # Sub-tabs untuk update data, report payment, dan memo
-        sub_tabs = st.tabs(["Update Data", "Report Payment/PTP", "Internal Memo"]) 
+        
+        # Cek STATUS terlebih dahulu untuk menentukan tab yang ditampilkan
+        sup_agent = fetchone(
+            "SELECT id, STATUS, REGISTERED_PHONE, Additional_Contacts, Remarks_Suggested_NIK_Prospect, Payment, Paid_Off_Status, Paid_Off "
+            "FROM supervisor_data WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=? ORDER BY id DESC LIMIT 1",
+            (sel, sel, sel)
+        ) if sel else {}
+        
+        current_status = (sup_agent.get('STATUS', '') or '').strip().upper() if sup_agent else ''
+        
+        # Sub-tabs: tampilkan "Report Payment/PTP" hanya jika STATUS = "PTP"
+        if current_status == "PTP":
+            sub_tabs = st.tabs(["Update Data", "Report Payment/PTP", "Internal Memo"])
+        else:
+            sub_tabs = st.tabs(["Update Data", "Internal Memo"]) 
 
         # --- Update Data sub-tab ---
         with sub_tabs[0]:
@@ -2732,11 +2745,6 @@ def page_agent():
             else:
                 st.subheader("Update Data untuk Supervisor (Agent fields)")
                 st.caption("Kolom-kolom ini berasal dari data upload supervisor dan diupdate oleh Agent.")
-                sup_agent = fetchone(
-                    "SELECT id, STATUS, REGISTERED_PHONE, Additional_Contacts, Remarks_Suggested_NIK_Prospect, Payment, Paid_Off_Status, Paid_Off "
-                    "FROM supervisor_data WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=? ORDER BY id DESC LIMIT 1",
-                    (sel, sel, sel)
-                ) or {}
                 with st.form("agent_update_supervisor_fields"):
                     csa, csb = st.columns(2)
                     with csa:
@@ -2801,234 +2809,236 @@ def page_agent():
                         except Exception as e:
                             st.error(f"Gagal memperbarui data supervisor: {e}")
 
-        # --- Report Payment/PTP sub-tab ---
-        with sub_tabs[1]:
-            if not sel:
-                st.info("Pilih Case ID pada tabel di atas terlebih dahulu.")
-            else:
-                st.subheader("Report Payment/PTP")
-                
-                # Pre-form: pilih skema dulu untuk menentukan apakah perlu input cicilan
-                scheme = st.selectbox(
-                    "Skema Pelunasan",
-                    [
-                        "FULL OS",
-                        "CICIL OS",
-                        "LUNDIS",
-                        "CICIL LUNDIS",
-                        "LUNAS POKOK",
-                        "CICIL POKOK",
-                    ],
-                    index=0,
-                    key="payment_scheme_select"
-                )
-                
-                cicil_schemes = {"CICIL OS", "CICIL LUNDIS", "CICIL POKOK"}
-                is_cicil = (scheme or "").upper() in cicil_schemes
-                
-                # Inputs for installment plan when scheme is a CICIL type (OUTSIDE form)
-                plan_dates = []
-                plan_amount = 0.0
-                plan_count = 0
-                if is_cicil:
-                    st.markdown("#### Rencana Cicilan")
-                    plan_count = st.number_input(
-                        "Dicicil berapa kali",
-                        min_value=1,
-                        max_value=24,
-                        value=2,
-                        step=1,
-                        help="Jumlah rencana cicilan yang akan dibuat sebagai PTP.",
-                        key="payment_plan_count"
-                    )
-                    plan_amount = st.number_input(
-                        "Nominal tiap cicilan (opsional)",
-                        min_value=0.0,
-                        step=10000.0,
-                        help="Bila diisi 0, PTP akan direkam tanpa nominal.",
-                        key="payment_plan_amount"
-                    )
-                    # Dynamic date inputs for each planned installment
-                    for i in range(int(plan_count)):
-                        default_dt = today_wib() + relativedelta(months=i+1)
-                        d = st.date_input(f"Tanggal cicilan {i+1}", value=default_dt, key=f"ptp_plan_date_{i}")
-                        plan_dates.append(d)
-                
-                st.markdown("---")
-                
-                # Now the form with the rest of the payment info
-                with st.form("agent_report_payment_ptp"):
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        paid_date = st.date_input("Tanggal Pembayaran", value=today_wib())
-                    with c2:
-                        paid_amount = st.number_input("Nominal Pembayaran", min_value=0.0, step=10000.0)
+        # --- Report Payment/PTP sub-tab (hanya tampil jika STATUS = PTP) ---
+        if current_status == "PTP":
+            with sub_tabs[1]:
+                if not sel:
+                    st.info("Pilih Case ID pada tabel di atas terlebih dahulu.")
+                else:
+                    st.subheader("Report Payment/PTP")
                     
-                    # Upload bukti gambar (percakapan/pembayaran)
-                    st.markdown("---")
-                    st.markdown("#### Bukti Pembayaran / Percakapan (Opsional)")
-                    uploaded_proof = st.file_uploader(
-                        "Upload gambar bukti (WhatsApp chat, transfer, dll)",
-                        type=["png", "jpg", "jpeg", "pdf"],
-                        help="Gambar akan disimpan di Google Drive untuk review Supervisor",
-                        key="payment_proof_upload"
+                    # Pre-form: pilih skema dulu untuk menentukan apakah perlu input cicilan
+                    scheme = st.selectbox(
+                        "Skema Pelunasan",
+                        [
+                            "FULL OS",
+                            "CICIL OS",
+                            "LUNDIS",
+                            "CICIL LUNDIS",
+                            "LUNAS POKOK",
+                            "CICIL POKOK",
+                        ],
+                        index=0,
+                        key="payment_scheme_select"
                     )
-        
+                    
+                    cicil_schemes = {"CICIL OS", "CICIL LUNDIS", "CICIL POKOK"}
+                    is_cicil = (scheme or "").upper() in cicil_schemes
+                    
+                    # Inputs for installment plan when scheme is a CICIL type (OUTSIDE form)
+                    plan_dates = []
+                    plan_amount = 0.0
+                    plan_count = 0
+                    if is_cicil:
+                        st.markdown("#### Rencana Cicilan")
+                        plan_count = st.number_input(
+                            "Dicicil berapa kali",
+                            min_value=1,
+                            max_value=24,
+                            value=2,
+                            step=1,
+                            help="Jumlah rencana cicilan yang akan dibuat sebagai PTP.",
+                            key="payment_plan_count"
+                        )
+                        plan_amount = st.number_input(
+                            "Nominal tiap cicilan (opsional)",
+                            min_value=0.0,
+                            step=10000.0,
+                            help="Bila diisi 0, PTP akan direkam tanpa nominal.",
+                            key="payment_plan_amount"
+                        )
+                        # Dynamic date inputs for each planned installment
+                        for i in range(int(plan_count)):
+                            default_dt = today_wib() + relativedelta(months=i+1)
+                            d = st.date_input(f"Tanggal cicilan {i+1}", value=default_dt, key=f"ptp_plan_date_{i}")
+                            plan_dates.append(d)
+                    
                     st.markdown("---")
-                    st.markdown("#### Kontak Debitur (opsional untuk diperbarui)")
-                    # Prefill from supervisor_data
-                    sup_contact = fetchone(
-                        "SELECT email, REGISTERED_PHONE, Phone_Number_1, Additional_Contacts FROM supervisor_data WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=? LIMIT 1",
-                        (sel, sel, sel),
-                    ) or {}
-                    col_e1, col_e2 = st.columns(2)
-                    with col_e1:
-                        updated_email = st.text_input(
-                            "Email terupdate",
-                            value=(sup_contact.get("email") or ""),
-                            placeholder="contoh: user@mail.com",
+                    
+                    # Now the form with the rest of the payment info
+                    with st.form("agent_report_payment_ptp"):
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            paid_date = st.date_input("Tanggal Pembayaran", value=today_wib())
+                        with c2:
+                            paid_amount = st.number_input("Nominal Pembayaran", min_value=0.0, step=10000.0)
+                        
+                        # Upload bukti gambar (percakapan/pembayaran)
+                        st.markdown("---")
+                        st.markdown("#### Bukti Pembayaran / Percakapan (Opsional)")
+                        uploaded_proof = st.file_uploader(
+                            "Upload gambar bukti (WhatsApp chat, transfer, dll)",
+                            type=["png", "jpg", "jpeg", "pdf"],
+                            help="Gambar akan disimpan di Google Drive untuk review Supervisor",
+                            key="payment_proof_upload"
                         )
-                    with col_e2:
-                        wa_number = st.text_input(
-                            "Nomor WhatsApp",
-                            value=(sup_contact.get("REGISTERED_PHONE") or sup_contact.get("Phone_Number_1") or ""),
-                            placeholder="contoh: 08xxxxxxxxxx / +628xxxxxxxxxx",
-                        )
-                    # New WA field (does not replace registered phone)
-                    new_wa_number = st.text_input(
-                        "Nomor WhatsApp baru (opsional)",
-                        value="",
-                        placeholder="Nomor WA lain yang dipakai debitur saat ini",
-                        help="Tidak menggantikan nomor terdaftar. Akan ditambahkan ke Remarks."
-                    )
-
-                    submit = st.form_submit_button("Simpan")
-                if submit:
-                    if paid_amount is None or float(paid_amount) <= 0:
-                        st.warning("Nominal Pembayaran harus lebih dari 0.")
-                    elif not paid_date:
-                        st.warning("Tanggal Pembayaran wajib diisi.")
-                    elif is_cicil and (not plan_dates or any(d is None for d in plan_dates)):
-                        st.warning("Untuk skema CICIL, isi jumlah dan semua tanggal rencana cicilan.")
-                    else:
-                        try:
-                            # Upload bukti gambar ke Google Drive jika ada
-                            proof_drive_id = None
-                            proof_filename = None
-                            if uploaded_proof is not None:
-                                try:
-                                    service, _ = build_drive_service()
-                                    # Generate filename dengan timestamp dan case_id
-                                    timestamp = now_wib().strftime("%Y%m%d_%H%M%S")
-                                    original_filename = uploaded_proof.name
-                                    ext = original_filename.split('.')[-1] if '.' in original_filename else 'jpg'
-                                    proof_filename = f"payment_proof_{sel}_{timestamp}.{ext}"
-                                    
-                                    # Upload ke folder yang sama dengan backup
-                                    proof_bytes = uploaded_proof.read()
-                                    mimetype = uploaded_proof.type or "image/jpeg"
-                                    proof_drive_id = upload_bytes(service, FOLDER_ID_DEFAULT, proof_filename, proof_bytes, mimetype)
-                                    
-                                    st.success(f"✅ Bukti gambar berhasil diupload: {proof_filename}")
-                                except Exception as e:
-                                    st.warning(f"⚠️ Gagal upload gambar ke Drive: {e}. Payment tetap disimpan tanpa bukti gambar.")
-                            
-                            # 1) Simpan pembayaran dengan info bukti gambar
-                            execute(
-                                "INSERT OR REPLACE INTO payments (Agreement_No, paid_amount, paid_date, status, source_file, uploaded_by, proof_image_drive_id, proof_image_filename) VALUES (?,?,?,?,?,?,?,?)",
-                                (sel, float(paid_amount or 0), (paid_date.isoformat() if paid_date else None), scheme, None, agent_name, proof_drive_id, proof_filename)
+            
+                        st.markdown("---")
+                        st.markdown("#### Kontak Debitur (opsional untuk diperbarui)")
+                        # Prefill from supervisor_data
+                        sup_contact = fetchone(
+                            "SELECT email, REGISTERED_PHONE, Phone_Number_1, Additional_Contacts FROM supervisor_data WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=? LIMIT 1",
+                            (sel, sel, sel),
+                        ) or {}
+                        col_e1, col_e2 = st.columns(2)
+                        with col_e1:
+                            updated_email = st.text_input(
+                                "Email terupdate",
+                                value=(sup_contact.get("email") or ""),
+                                placeholder="contoh: user@mail.com",
                             )
-                            # Audit log pembayaran
+                        with col_e2:
+                            wa_number = st.text_input(
+                                "Nomor WhatsApp",
+                                value=(sup_contact.get("REGISTERED_PHONE") or sup_contact.get("Phone_Number_1") or ""),
+                                placeholder="contoh: 08xxxxxxxxxx / +628xxxxxxxxxx",
+                            )
+                        # New WA field (does not replace registered phone)
+                        new_wa_number = st.text_input(
+                            "Nomor WhatsApp baru (opsional)",
+                            value="",
+                            placeholder="Nomor WA lain yang dipakai debitur saat ini",
+                            help="Tidak menggantikan nomor terdaftar. Akan ditambahkan ke Remarks."
+                        )
+
+                        submit = st.form_submit_button("Simpan")
+                    if submit:
+                        if paid_amount is None or float(paid_amount) <= 0:
+                            st.warning("Nominal Pembayaran harus lebih dari 0.")
+                        elif not paid_date:
+                            st.warning("Tanggal Pembayaran wajib diisi.")
+                        elif is_cicil and (not plan_dates or any(d is None for d in plan_dates)):
+                            st.warning("Untuk skema CICIL, isi jumlah dan semua tanggal rencana cicilan.")
+                        else:
                             try:
-                                u = current_user() or {}
+                                # Upload bukti gambar ke Google Drive jika ada
+                                proof_drive_id = None
+                                proof_filename = None
+                                if uploaded_proof is not None:
+                                    try:
+                                        service, _ = build_drive_service()
+                                        # Generate filename dengan timestamp dan case_id
+                                        timestamp = now_wib().strftime("%Y%m%d_%H%M%S")
+                                        original_filename = uploaded_proof.name
+                                        ext = original_filename.split('.')[-1] if '.' in original_filename else 'jpg'
+                                        proof_filename = f"payment_proof_{sel}_{timestamp}.{ext}"
+                                        
+                                        # Upload ke folder yang sama dengan backup
+                                        proof_bytes = uploaded_proof.read()
+                                        mimetype = uploaded_proof.type or "image/jpeg"
+                                        proof_drive_id = upload_bytes(service, FOLDER_ID_DEFAULT, proof_filename, proof_bytes, mimetype)
+                                        
+                                        st.success(f"✅ Bukti gambar berhasil diupload: {proof_filename}")
+                                    except Exception as e:
+                                        st.warning(f"⚠️ Gagal upload gambar ke Drive: {e}. Payment tetap disimpan tanpa bukti gambar.")
+                                
+                                # 1) Simpan pembayaran dengan info bukti gambar
                                 execute(
-                                    "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
-                                    (u.get('id') if u else None, "AGENT_REPORT_PAYMENT", f"{sel}|{paid_amount}|{paid_date}|{scheme}")
+                                    "INSERT OR REPLACE INTO payments (Agreement_No, paid_amount, paid_date, status, source_file, uploaded_by, proof_image_drive_id, proof_image_filename) VALUES (?,?,?,?,?,?,?,?)",
+                                    (sel, float(paid_amount or 0), (paid_date.isoformat() if paid_date else None), scheme, None, agent_name, proof_drive_id, proof_filename)
                                 )
-                            except Exception:
-                                pass
-
-                            # 1b) Optional: update contact info if provided (registered email/WA)
-                            try:
-                                em = (updated_email or "").strip()
-                                wa = (wa_number or "").strip()
-                                if em or wa:
-                                    execute(
-                                        """
-                                        UPDATE supervisor_data
-                                        SET 
-                                            email = COALESCE(NULLIF(?, ''), email),
-                                            REGISTERED_PHONE = COALESCE(NULLIF(?, ''), REGISTERED_PHONE),
-                                            Phone_Number_1 = COALESCE(NULLIF(?, ''), Phone_Number_1)
-                                        WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=?
-                                        """,
-                                        (em, wa, wa, sel, sel, sel),
-                                    )
-                                    # Audit log contact update
-                                    try:
-                                        execute(
-                                            "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
-                                            (u.get('id') if u else None, "AGENT_UPDATE_CONTACT", f"{sel}|email:{em}|wa:{wa}")
-                                        )
-                                    except Exception:
-                                        pass
-                            except Exception:
-                                # Non-blocking if contact update fails
-                                pass
-
-                            # 1c) If agent provided a new alternate WA number, append to Additional_Contacts
-                            try:
-                                new_wa = (new_wa_number or "").strip()
-                                if new_wa:
-                                    existing_add = (sup_contact.get("Additional_Contacts") or "").strip()
-                                    stamp = now_wib().strftime("%Y-%m-%d")
-                                    line = f"WA baru {stamp} oleh {agent_name}: {new_wa}"
-                                    new_add = (existing_add + ("\n" if existing_add else "") + line)
-                                    execute(
-                                        "UPDATE supervisor_data SET Additional_Contacts=? WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=?",
-                                        (new_add, sel, sel, sel),
-                                    )
-                                    # Audit log for new WA
-                                    try:
-                                        execute(
-                                            "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
-                                            (u.get('id') if u else None, "AGENT_ADD_NEW_WA", f"{sel}|{new_wa}")
-                                        )
-                                    except Exception:
-                                        pass
-                            except Exception:
-                                # Non-blocking if Additional_Contacts update fails
-                                pass
-
-                            # 2) Jika cicil, buat jadwal PTP sesuai rencana
-                            if is_cicil and plan_dates:
+                                # Audit log pembayaran
                                 try:
-                                    for idx, d in enumerate(plan_dates, start=1):
-                                        if not d:
-                                            continue
+                                    u = current_user() or {}
+                                    execute(
+                                        "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                                        (u.get('id') if u else None, "AGENT_REPORT_PAYMENT", f"{sel}|{paid_amount}|{paid_date}|{scheme}")
+                                    )
+                                except Exception:
+                                    pass
+
+                                # 1b) Optional: update contact info if provided (registered email/WA)
+                                try:
+                                    em = (updated_email or "").strip()
+                                    wa = (wa_number or "").strip()
+                                    if em or wa:
                                         execute(
-                                            "INSERT INTO agent_results (Agreement_No, agent, agent_status, agent_ptp_amount, agent_ptp_date, agent_notes) VALUES (?,?,?,?,?,?)",
-                                            (sel, agent_name, "PTP", float(plan_amount or 0), (d.isoformat() if hasattr(d, 'isoformat') else str(d)), f"Rencana cicilan {idx}/{int(plan_count)} dari skema {scheme}")
+                                            """
+                                            UPDATE supervisor_data
+                                            SET 
+                                                email = COALESCE(NULLIF(?, ''), email),
+                                                REGISTERED_PHONE = COALESCE(NULLIF(?, ''), REGISTERED_PHONE),
+                                                Phone_Number_1 = COALESCE(NULLIF(?, ''), Phone_Number_1)
+                                            WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=?
+                                            """,
+                                            (em, wa, wa, sel, sel, sel),
                                         )
-                                        # Audit log tiap PTP rencana
+                                        # Audit log contact update
                                         try:
-                                            u = current_user() or {}
                                             execute(
                                                 "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
-                                                (u.get('id') if u else None, "AGENT_REPORT_PTP", f"{sel}|{plan_amount}|{d}|{scheme}|plan {idx}/{int(plan_count)}")
+                                                (u.get('id') if u else None, "AGENT_UPDATE_CONTACT", f"{sel}|email:{em}|wa:{wa}")
                                             )
                                         except Exception:
                                             pass
-                                except Exception as e:
-                                    st.error(f"Gagal menyimpan rencana PTP cicilan: {e}")
+                                except Exception:
+                                    # Non-blocking if contact update fails
+                                    pass
 
-                            st.success("Laporan tersimpan.")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Gagal menyimpan laporan: {e}")
+                                # 1c) If agent provided a new alternate WA number, append to Additional_Contacts
+                                try:
+                                    new_wa = (new_wa_number or "").strip()
+                                    if new_wa:
+                                        existing_add = (sup_contact.get("Additional_Contacts") or "").strip()
+                                        stamp = now_wib().strftime("%Y-%m-%d")
+                                        line = f"WA baru {stamp} oleh {agent_name}: {new_wa}"
+                                        new_add = (existing_add + ("\n" if existing_add else "") + line)
+                                        execute(
+                                            "UPDATE supervisor_data SET Additional_Contacts=? WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=?",
+                                            (new_add, sel, sel, sel),
+                                        )
+                                        # Audit log for new WA
+                                        try:
+                                            execute(
+                                                "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                                                (u.get('id') if u else None, "AGENT_ADD_NEW_WA", f"{sel}|{new_wa}")
+                                            )
+                                        except Exception:
+                                            pass
+                                except Exception:
+                                    # Non-blocking if Additional_Contacts update fails
+                                    pass
 
-        # --- Internal Memo sub-tab ---
-        with sub_tabs[2]:
+                                # 2) Jika cicil, buat jadwal PTP sesuai rencana
+                                if is_cicil and plan_dates:
+                                    try:
+                                        for idx, d in enumerate(plan_dates, start=1):
+                                            if not d:
+                                                continue
+                                            execute(
+                                                "INSERT INTO agent_results (Agreement_No, agent, agent_status, agent_ptp_amount, agent_ptp_date, agent_notes) VALUES (?,?,?,?,?,?)",
+                                                (sel, agent_name, "PTP", float(plan_amount or 0), (d.isoformat() if hasattr(d, 'isoformat') else str(d)), f"Rencana cicilan {idx}/{int(plan_count)} dari skema {scheme}")
+                                            )
+                                            # Audit log tiap PTP rencana
+                                            try:
+                                                u = current_user() or {}
+                                                execute(
+                                                    "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                                                    (u.get('id') if u else None, "AGENT_REPORT_PTP", f"{sel}|{plan_amount}|{d}|{scheme}|plan {idx}/{int(plan_count)}")
+                                                )
+                                            except Exception:
+                                                pass
+                                    except Exception as e:
+                                        st.error(f"Gagal menyimpan rencana PTP cicilan: {e}")
+
+                                st.success("Laporan tersimpan.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Gagal menyimpan laporan: {e}")
+
+        # --- Internal Memo sub-tab (index dinamis: 2 jika ada PTP, 1 jika tidak ada PTP) ---
+        memo_tab_index = 2 if current_status == "PTP" else 1
+        with sub_tabs[memo_tab_index]:
             if not sel:
                 st.info("Pilih Case ID pada tabel di atas terlebih dahulu.")
             else:
