@@ -5618,161 +5618,490 @@ def page_supervisor():
 
     # --- Freeze Manager Tab ---
     with tabs[7]:
-        st.subheader("Freeze Manager (NIK / Agreement_No)")
-        st.caption("Gunakan fitur ini untuk mem-freeze debitur berdasarkan NIK atau kontrak tertentu. Data yang di-freeze tidak akan dapat di-assign ke Tracer maupun Agent.")
-
+        st.markdown("### 🔒 Freeze Manager - Entity Protection System")
+        st.caption("Manajemen freeze/unfreeze untuk NIK dan Agreement. Data yang frozen tidak bisa di-assign dan ter-proteksi dari collection activity.")
+        
+        # Enhanced CSS
+        st.markdown("""
+        <style>
+        .freeze-stat-card {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            padding: 20px;
+            border-radius: 16px;
+            color: white;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease;
+        }
+        .freeze-stat-card:hover {
+            transform: translateY(-5px);
+        }
+        .freeze-stat-card h3 {
+            margin: 0 0 8px 0;
+            font-size: 32px;
+            font-weight: 700;
+        }
+        .freeze-stat-card p {
+            margin: 0;
+            font-size: 14px;
+            opacity: 0.95;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        # Statistics Dashboard
+        st.markdown("#### 📊 Freeze Statistics")
+        stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
+        
+        # Get statistics
+        total_frozen = fetchone("SELECT COUNT(*) c FROM frozen_entities WHERE active=1")['c'] or 0
+        frozen_niks = fetchone("SELECT COUNT(*) c FROM frozen_entities WHERE active=1 AND NIK_KTP IS NOT NULL AND NIK_KTP != ''")['c'] or 0
+        frozen_agrs = fetchone("SELECT COUNT(*) c FROM frozen_entities WHERE active=1 AND Agreement_No IS NOT NULL AND Agreement_No != ''")['c'] or 0
+        
+        # Count affected cases
+        affected_cases = 0
+        frozen_rows = fetchall("SELECT NIK_KTP, Agreement_No FROM frozen_entities WHERE active=1")
+        for r in frozen_rows:
+            nik = (r.get('NIK_KTP') or '').strip()
+            agr = (r.get('Agreement_No') or '').strip()
+            if nik:
+                cnt = (fetchone("SELECT COUNT(*) c FROM assign_tracer WHERE COALESCE(NIK_KTP,'')=?", (nik,)) or {}).get('c', 0)
+                affected_cases += cnt
+            elif agr:
+                cnt = (fetchone("SELECT COUNT(*) c FROM assign_tracer WHERE Agreement_No=?", (agr,)) or {}).get('c', 0)
+                affected_cases += cnt
+        
+        with stat_col1:
+            st.markdown(f"""
+            <div class='freeze-stat-card'>
+                <h3>🔒 {total_frozen}</h3>
+                <p>Total Frozen Entities</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with stat_col2:
+            st.markdown(f"""
+            <div class='freeze-stat-card' style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);'>
+                <h3>🆔 {frozen_niks}</h3>
+                <p>Frozen by NIK</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with stat_col3:
+            st.markdown(f"""
+            <div class='freeze-stat-card' style='background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);'>
+                <h3>📄 {frozen_agrs}</h3>
+                <p>Frozen by Agreement</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with stat_col4:
+            st.markdown(f"""
+            <div class='freeze-stat-card' style='background: linear-gradient(135deg, #30cfd0 0%, #330867 100%);'>
+                <h3>⚠️ {affected_cases}</h3>
+                <p>Affected Cases</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # Freeze Forms - Enhanced 2-column layout
+        st.markdown("#### ➕ Add New Freeze")
         col_fz1, col_fz2 = st.columns(2)
+        
         with col_fz1:
-            st.markdown("#### Freeze by NIK")
-            nik_in = st.text_input("NIK_KTP", key="freeze_nik")
-            reason_nik = st.text_input("Alasan (opsional)", key="freeze_reason_nik")
-            note_nik = st.text_area("Catatan (opsional)", key="freeze_note_nik", height=80)
-            if st.button("Freeze NIK", key="btn_freeze_nik", type="primary"):
-                nik_val = (nik_in or '').strip()
-                if not nik_val:
-                    st.warning("Masukkan NIK terlebih dahulu.")
-                else:
-                    try:
-                        # If already active, no-op
-                        exists = fetchone("SELECT id FROM frozen_entities WHERE active=1 AND NIK_KTP=? LIMIT 1", (nik_val,))
-                        if exists:
-                            st.info("NIK ini sudah dalam status Freeze.")
-                        else:
-                            u = current_user() or {}
-                            execute(
-                                "INSERT INTO frozen_entities (NIK_KTP, reason, note, created_by) VALUES (?,?,?,?)",
-                                (nik_val, (reason_nik or '').strip() or None, (note_nik or '').strip() or None, (u.get('full_name') or u.get('login_id') or '-'))
-                            )
-                            st.success("Berhasil mem-freeze NIK.")
-                            st.rerun()
-                    except Exception as e:
-                        st.error(f"Gagal menyimpan: {e}")
+            with st.expander("🆔 Freeze by NIK", expanded=True):
+                st.caption("Freeze all loans associated with a specific NIK")
+                nik_in = st.text_input("NIK KTP (16 digit)", key="freeze_nik", placeholder="e.g., 3201234567890001")
+                reason_nik = st.selectbox("Alasan Freeze", [
+                    "Deceased Debtor",
+                    "Legal Dispute",
+                    "Fraud Suspect",
+                    "Data Correction Needed",
+                    "Management Hold",
+                    "Other"
+                ], key="freeze_reason_nik")
+                note_nik = st.text_area("Catatan Detail (opsional)", key="freeze_note_nik", height=80, placeholder="Tambahkan detail informasi...")
+                
+                # Show preview if NIK exists
+                if nik_in and len(nik_in.strip()) >= 5:
+                    preview = fetchall("SELECT Agreement_No, Debtor_Name FROM assign_tracer WHERE NIK_KTP LIKE ? LIMIT 5", (f"%{nik_in.strip()}%",))
+                    if preview:
+                        st.caption(f"📋 Preview: Found **{len(preview)}** loan(s) with this NIK")
+                        for p in preview[:3]:
+                            st.caption(f"  • {p.get('Agreement_No')} - {p.get('Debtor_Name')}")
+                        if len(preview) > 3:
+                            st.caption(f"  ... and {len(preview)-3} more")
+                
+                if st.button("🔒 Freeze NIK", key="btn_freeze_nik", type="primary", use_container_width=True):
+                    nik_val = (nik_in or '').strip()
+                    if not nik_val:
+                        st.warning("⚠️ Masukkan NIK terlebih dahulu.")
+                    elif len(nik_val) < 5:
+                        st.warning("⚠️ NIK terlalu pendek. Minimal 5 karakter.")
+                    else:
+                        try:
+                            exists = fetchone("SELECT id FROM frozen_entities WHERE active=1 AND NIK_KTP=? LIMIT 1", (nik_val,))
+                            if exists:
+                                st.info("ℹ️ NIK ini sudah dalam status Freeze.")
+                            else:
+                                u = current_user() or {}
+                                execute(
+                                    "INSERT INTO frozen_entities (NIK_KTP, reason, note, created_by) VALUES (?,?,?,?)",
+                                    (nik_val, reason_nik, (note_nik or '').strip() or None, (u.get('full_name') or u.get('login_id') or '-'))
+                                )
+                                st.success("✅ Berhasil mem-freeze NIK.")
+                                st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Gagal menyimpan: {e}")
 
         with col_fz2:
-            st.markdown("#### Freeze by Contract (Agreement_No)")
-            agr_in = st.text_input("Agreement_No", key="freeze_agr")
-            reason_agr = st.text_input("Alasan (opsional)", key="freeze_reason_agr")
-            note_agr = st.text_area("Catatan (opsional)", key="freeze_note_agr", height=80)
-            # Show quick NIK lookup for info
-            if (agr_in or '').strip():
-                info = fetchone("SELECT Debtor_Name, NIK_KTP FROM assign_tracer WHERE Agreement_No=?", ((agr_in or '').strip(),)) or {}
-                if info:
-                    st.caption(f"Debtor: {info.get('Debtor_Name') or '-'} | NIK: {info.get('NIK_KTP') or '-'}")
-            if st.button("Freeze Agreement_No", key="btn_freeze_agr", type="primary"):
-                agr_val = (agr_in or '').strip()
-                if not agr_val:
-                    st.warning("Masukkan Agreement_No terlebih dahulu.")
-                else:
-                    try:
-                        exists = fetchone("SELECT id FROM frozen_entities WHERE active=1 AND Agreement_No=? LIMIT 1", (agr_val,))
-                        if exists:
-                            st.info("Agreement_No ini sudah dalam status Freeze.")
-                        else:
-                            u = current_user() or {}
-                            execute(
-                                "INSERT INTO frozen_entities (Agreement_No, reason, note, created_by) VALUES (?,?,?,?)",
-                                (agr_val, (reason_agr or '').strip() or None, (note_agr or '').strip() or None, (u.get('full_name') or u.get('login_id') or '-'))
-                            )
-                            st.success("Berhasil mem-freeze Agreement_No.")
-                            st.rerun()
-                    except Exception as e:
-                        st.error(f"Gagal menyimpan: {e}")
+            with st.expander("📄 Freeze by Agreement", expanded=True):
+                st.caption("Freeze a specific loan contract")
+                agr_in = st.text_input("Agreement No", key="freeze_agr", placeholder="e.g., AGR2025001")
+                reason_agr = st.selectbox("Alasan Freeze", [
+                    "Disputed Amount",
+                    "Wrong Debtor Assignment",
+                    "Payment Processing",
+                    "Legal Hold",
+                    "Data Verification",
+                    "Other"
+                ], key="freeze_reason_agr")
+                note_agr = st.text_area("Catatan Detail (opsional)", key="freeze_note_agr", height=80, placeholder="Tambahkan detail informasi...")
+                
+                # Show quick info lookup
+                if (agr_in or '').strip():
+                    info = fetchone("SELECT Debtor_Name, NIK_KTP, Assigned_To FROM assign_tracer WHERE Agreement_No LIKE ?", (f"%{agr_in.strip()}%",))
+                    if info:
+                        st.info(f"📋 **{info.get('Debtor_Name') or '-'}**\n\n🆔 NIK: {info.get('NIK_KTP') or '-'}\n\n👤 Tracer: {info.get('Assigned_To') or '-'}")
+                
+                if st.button("🔒 Freeze Agreement", key="btn_freeze_agr", type="primary", use_container_width=True):
+                    agr_val = (agr_in or '').strip()
+                    if not agr_val:
+                        st.warning("⚠️ Masukkan Agreement No terlebih dahulu.")
+                    else:
+                        try:
+                            exists = fetchone("SELECT id FROM frozen_entities WHERE active=1 AND Agreement_No=? LIMIT 1", (agr_val,))
+                            if exists:
+                                st.info("ℹ️ Agreement ini sudah dalam status Freeze.")
+                            else:
+                                u = current_user() or {}
+                                execute(
+                                    "INSERT INTO frozen_entities (Agreement_No, reason, note, created_by) VALUES (?,?,?,?)",
+                                    (agr_val, reason_agr, (note_agr or '').strip() or None, (u.get('full_name') or u.get('login_id') or '-'))
+                                )
+                                st.success("✅ Berhasil mem-freeze Agreement.")
+                                st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Gagal menyimpan: {e}")
 
         st.markdown("---")
-        st.markdown("#### Daftar Freeze Aktif")
-        rows = fetchall("SELECT id, NIK_KTP, Agreement_No, reason, note, created_by, created_at FROM frozen_entities WHERE active=1 ORDER BY datetime(created_at) DESC")
-        if not rows:
-            st.info("Belum ada entri Freeze aktif.")
+        
+        # Active Freeze List - Enhanced
+        st.markdown("#### 📋 Active Freeze List")
+        
+        # Enhanced filters
+        filter_col1, filter_col2, filter_col3, filter_col4 = st.columns(4)
+        with filter_col1:
+            filter_type = st.selectbox("Filter by Type", ["All", "NIK Only", "Agreement Only"], index=0, key="freeze_filter_type")
+        with filter_col2:
+            filter_reason = st.text_input("Search Reason", key="freeze_filter_reason", placeholder="Search...")
+        with filter_col3:
+            filter_created_by = st.text_input("Created By", key="freeze_filter_creator", placeholder="Search...")
+        with filter_col4:
+            sort_by = st.selectbox("Sort By", ["Newest First", "Oldest First", "Most Impacted"], index=0, key="freeze_sort")
+        
+        # Build query with filters
+        q_freeze = "SELECT id, NIK_KTP, Agreement_No, reason, note, created_by, created_at FROM frozen_entities WHERE active=1"
+        p_freeze = []
+        
+        if filter_type == "NIK Only":
+            q_freeze += " AND NIK_KTP IS NOT NULL AND NIK_KTP != ''"
+        elif filter_type == "Agreement Only":
+            q_freeze += " AND Agreement_No IS NOT NULL AND Agreement_No != ''"
+        
+        if filter_reason:
+            q_freeze += " AND COALESCE(reason,'') LIKE ?"
+            p_freeze.append(f"%{filter_reason}%")
+        
+        if filter_created_by:
+            q_freeze += " AND COALESCE(created_by,'') LIKE ?"
+            p_freeze.append(f"%{filter_created_by}%")
+        
+        if sort_by == "Oldest First":
+            q_freeze += " ORDER BY datetime(created_at) ASC"
         else:
-            # Compute impacted count for display
+            q_freeze += " ORDER BY datetime(created_at) DESC"
+        
+        rows = fetchall(q_freeze, tuple(p_freeze))
+        
+        if not rows:
+            st.info("ℹ️ Tidak ada freeze aktif sesuai filter.")
+        else:
+            # Prepare display data
             disp = []
             for r in rows:
                 nik = (r.get('NIK_KTP') or '').strip()
                 agr = (r.get('Agreement_No') or '').strip()
                 if nik:
                     cnt = (fetchone("SELECT COUNT(*) c FROM assign_tracer WHERE COALESCE(NIK_KTP,'')=?", (nik,)) or {}).get('c', 0)
-                    target = f"NIK {nik}"
+                    target = f"🆔 NIK: {nik}"
+                    entity_type = "NIK"
                 elif agr:
                     cnt = (fetchone("SELECT COUNT(*) c FROM assign_tracer WHERE Agreement_No=?", (agr,)) or {}).get('c', 0)
-                    target = f"AGR {agr}"
+                    target = f"📄 AGR: {agr}"
+                    entity_type = "Agreement"
                 else:
                     cnt = 0
-                    target = "-"
+                    target = "❓ Unknown"
+                    entity_type = "Unknown"
+                
                 disp.append({
                     "ID": r.get('id'),
+                    "Type": entity_type,
                     "Target": target,
-                    "Reason": r.get('reason') or '',
-                    "Note": r.get('note') or '',
-                    "Impacted rows": cnt,
+                    "Reason": r.get('reason') or '-',
+                    "Note": (r.get('note') or '-')[:50] + ('...' if len(r.get('note') or '') > 50 else ''),
+                    "Impact": cnt,
                     "Created By": r.get('created_by') or '-',
                     "Created At": r.get('created_at') or '-',
                 })
-            st.dataframe(pd.DataFrame(disp))
+            
+            # Sort by impact if requested
+            if sort_by == "Most Impacted":
+                disp = sorted(disp, key=lambda x: x['Impact'], reverse=True)
+            
+            df_freeze = pd.DataFrame(disp)
+            st.caption(f"📊 Showing **{len(df_freeze)}** active freeze(s)")
+            
+            st.dataframe(
+                df_freeze,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "ID": st.column_config.NumberColumn("ID", width="small"),
+                    "Type": st.column_config.TextColumn("Type", width="small"),
+                    "Target": st.column_config.TextColumn("Target Entity", width="large"),
+                    "Reason": st.column_config.TextColumn("Reason", width="medium"),
+                    "Note": st.column_config.TextColumn("Note", width="medium"),
+                    "Impact": st.column_config.NumberColumn("Cases Affected", width="small"),
+                    "Created By": st.column_config.TextColumn("Created By", width="small"),
+                    "Created At": st.column_config.TextColumn("Created At", width="medium"),
+                }
+            )
+            
+            # Export
+            if st.button("📥 Export Freeze List", key="export_freeze"):
+                csv = df_freeze.to_csv(index=False)
+                st.download_button(
+                    label="Download Freeze List CSV",
+                    data=csv,
+                    file_name=f"freeze_list_{today_wib().isoformat()}.csv",
+                    mime="text/csv"
+                )
 
-            # Unfreeze control
-            st.markdown("##### Unfreeze")
-            unfreeze_id = st.text_input("Masukkan ID untuk Unfreeze", key="unfreeze_id")
-            if st.button("Unfreeze", key="btn_unfreeze"):
-                try:
-                    uid = int((unfreeze_id or '0').strip())
-                    execute("UPDATE frozen_entities SET active=0 WHERE id=?", (uid,))
-                    st.success("Berhasil unfreeze.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Gagal unfreeze: {e}")
+            # Unfreeze control - Enhanced
+            st.markdown("---")
+            st.markdown("#### 🔓 Unfreeze Control")
+            unf_col1, unf_col2 = st.columns([3, 1])
+            with unf_col1:
+                unfreeze_id = st.text_input("Enter Freeze ID to Unfreeze", key="unfreeze_id", placeholder="e.g., 123")
+                if unfreeze_id and unfreeze_id.strip().isdigit():
+                    # Show preview
+                    preview = fetchone("SELECT NIK_KTP, Agreement_No, reason FROM frozen_entities WHERE id=? AND active=1", (int(unfreeze_id.strip()),))
+                    if preview:
+                        target_info = preview.get('NIK_KTP') or preview.get('Agreement_No') or 'Unknown'
+                        st.info(f"📋 Preview: **{target_info}** | Reason: {preview.get('reason') or 'N/A'}")
+            
+            with unf_col2:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("🔓 Unfreeze", key="btn_unfreeze", type="secondary", use_container_width=True):
+                    try:
+                        uid = int((unfreeze_id or '0').strip())
+                        if uid <= 0:
+                            st.warning("⚠️ Invalid ID.")
+                        else:
+                            execute("UPDATE frozen_entities SET active=0 WHERE id=?", (uid,))
+                            st.success("✅ Berhasil unfreeze entity.")
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Gagal unfreeze: {e}")
 
         st.markdown("---")
-        
+
 
     # --- Trace Results Tab ---
     with tabs[5]:
-        st.subheader("Trace Results (Touch Logs)")
-        st.caption("Tambah catatan trace dan lihat log.")
-
-        with st.form("trace_add_form"):
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                agr_input = st.text_input("Agreement_No (Loan)")
-            with c2:
-                tracer_sel = st.text_input("Tracer", value=(current_user().get('full_name') if current_user() else ''))
-            with c3:
-                status_sel = st.selectbox("Status", ["", "TRACED", "EMAILED", "RTP", "PAYING", "UNREACHABLE", "OTHER"])
-            c4, c5 = st.columns(2)
-            with c4:
-                party_sel = st.selectbox("Party", ["", "COMPANY", "RELATIVES", "PERSONAL", "OTHER"])
-            with c5:
-                touch_type = st.selectbox("Touch Type", ["", "CALL", "WHATSAPP", "SMS", "EMAIL", "VISIT", "OTHER"])
-            notes = st.text_area("Notes")
-            submitted = st.form_submit_button("Tambah Trace")
-            if submitted:
-                if not agr_input.strip():
-                    st.warning("Isi Agreement_No.")
-                else:
-                    try:
-                        u = current_user() or {}
-                        execute(
-                            "INSERT INTO trace_results (Agreement_No, tracer, status, notes, touch_type, party, created_by) VALUES (?,?,?,?,?,?,?)",
-                            (agr_input.strip(), tracer_sel.strip() if tracer_sel else None, status_sel or None, notes.strip() if notes else None, touch_type or None, party_sel or None, (u.get('full_name') or u.get('login_id') or '-'))
-                        )
-                        st.success("Trace ditambahkan.")
-                    except Exception as e:
-                        st.error(f"Gagal menyimpan: {e}")
+        st.markdown("### 📝 Trace Results - Touch Activity Logs")
+        st.caption("Record dan monitor semua aktivitas tracing. Real-time tracking untuk setiap interaksi dengan debitur.")
+        
+        # Enhanced CSS for Trace Results
+        st.markdown("""
+        <style>
+        .trace-stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 16px;
+            border-radius: 12px;
+            color: white;
+            text-align: center;
+            margin-bottom: 10px;
+        }
+        .trace-stat-value {
+            font-size: 28px;
+            font-weight: 800;
+            margin: 8px 0;
+        }
+        .trace-stat-label {
+            font-size: 12px;
+            opacity: 0.9;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        # Quick Stats
+        stat_cols = st.columns(4)
+        today = today_wib()
+        
+        with stat_cols[0]:
+            total_traces = (fetchone("SELECT COUNT(*) as c FROM trace_results") or {}).get('c', 0)
+            st.markdown(f"""
+            <div class='trace-stat-card' style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);'>
+                <div class='trace-stat-label'>Total Traces</div>
+                <div class='trace-stat-value'>{total_traces:,}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with stat_cols[1]:
+            today_traces = (fetchone("SELECT COUNT(*) as c FROM trace_results WHERE DATE(touched_at) = DATE(?)", (today.isoformat(),)) or {}).get('c', 0)
+            st.markdown(f"""
+            <div class='trace-stat-card' style='background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);'>
+                <div class='trace-stat-label'>Today's Traces</div>
+                <div class='trace-stat-value'>{today_traces:,}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with stat_cols[2]:
+            unique_cases = (fetchone("SELECT COUNT(DISTINCT Agreement_No) as c FROM trace_results") or {}).get('c', 0)
+            st.markdown(f"""
+            <div class='trace-stat-card' style='background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);'>
+                <div class='trace-stat-label'>Unique Cases</div>
+                <div class='trace-stat-value'>{unique_cases:,}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with stat_cols[3]:
+            active_tracers = (fetchone("SELECT COUNT(DISTINCT tracer) as c FROM trace_results WHERE DATE(touched_at) >= DATE(?, '-7 days')", (today.isoformat(),)) or {}).get('c', 0)
+            st.markdown(f"""
+            <div class='trace-stat-card' style='background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);'>
+                <div class='trace-stat-label'>Active Tracers (7d)</div>
+                <div class='trace-stat-value'>{active_tracers:,}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.markdown("---")
+        
+        # Add New Trace - Modern Form
+        with st.expander("➕ Add New Trace Record", expanded=False):
+            with st.form("trace_add_form_enhanced"):
+                st.markdown("#### Basic Information")
+                c1, c2 = st.columns(2)
+                with c1:
+                    agr_input = st.text_input("🔖 Agreement No *", placeholder="e.g., AGR2025001")
+                    tracer_sel = st.text_input("👤 Tracer Name", value=(current_user().get('full_name') if current_user() else ''), disabled=True)
+                with c2:
+                    status_sel = st.selectbox("📊 Status *", ["", "TRACED", "CONTACTED", "RTP", "PTP", "PAYING", "UNREACHABLE", "REFUSED", "PROMISE_BROKEN", "OTHER"])
+                    touch_type = st.selectbox("📞 Contact Method *", ["", "CALL", "WHATSAPP", "SMS", "EMAIL", "VISIT", "VIDEO_CALL", "OTHER"])
+                
+                st.markdown("#### Contact Details")
+                c3, c4 = st.columns(2)
+                with c3:
+                    party_sel = st.selectbox("🎯 Party Contacted", ["", "DEBTOR_DIRECT", "COMPANY_HR", "COMPANY_FINANCE", "RELATIVE", "NEIGHBOR", "EMERGENCY_CONTACT", "OTHER"])
+                with c4:
+                    contact_person = st.text_input("👥 Contact Person Name", placeholder="Optional")
+                
+                st.markdown("#### Notes & Details")
+                notes = st.text_area("📝 Notes / Hasil Kontak", height=120, placeholder="Deskripsikan hasil percakapan, kondisi debitur, atau informasi penting lainnya...")
+                
+                col_submit = st.columns([3, 1])
+                with col_submit[1]:
+                    submitted = st.form_submit_button("✅ Save Trace", type="primary", use_container_width=True)
+                
+                if submitted:
+                    if not agr_input.strip():
+                        st.error("❌ Agreement No wajib diisi!")
+                    elif not status_sel:
+                        st.error("❌ Status wajib dipilih!")
+                    elif not touch_type:
+                        st.error("❌ Contact Method wajib dipilih!")
+                    else:
+                        try:
+                            u = current_user() or {}
+                            # Build detailed notes
+                            detail_notes = notes.strip() if notes else ""
+                            if contact_person:
+                                detail_notes = f"Contact: {contact_person.strip()}\n{detail_notes}"
+                            
+                            execute(
+                                "INSERT INTO trace_results (Agreement_No, tracer, status, notes, touch_type, party, created_by, touched_at) VALUES (?,?,?,?,?,?,?,?)",
+                                (agr_input.strip(), tracer_sel.strip() if tracer_sel else None, status_sel or None, detail_notes or None, touch_type or None, party_sel or None, (u.get('full_name') or u.get('login_id') or '-'), now_wib().isoformat())
+                            )
+                            
+                            # Audit log
+                            try:
+                                execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", 
+                                       (u.get('id') if u else None, "TRACE_ADD", f"Added trace for {agr_input.strip()} with status {status_sel}"))
+                            except Exception:
+                                pass
+                            
+                            st.success("✅ Trace record berhasil disimpan!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Gagal menyimpan: {e}")
 
         st.markdown("---")
-        st.subheader("Lihat Log")
+        
+        # View Logs - Enhanced Filter
+        st.markdown("### 🔍 Search & Filter Trace Logs")
+        
+        # Filter row 1
         fc1, fc2, fc3, fc4 = st.columns(4)
         with fc1:
-            date_from = st.date_input("Dari Tanggal", value=None, key="trace_from")
+            f_agr = st.text_input("🔖 Agreement No", key="trace_q_agr", placeholder="Search...")
         with fc2:
-            date_to = st.date_input("Sampai Tanggal", value=None, key="trace_to")
+            f_tracer = st.text_input("👤 Tracer", key="trace_q_tracer", placeholder="Search...")
         with fc3:
-            f_status = st.multiselect("Status", ["TRACED", "EMAILED", "RTP", "PAYING", "UNREACHABLE", "OTHER"])
+            f_status = st.multiselect("📊 Status", ["TRACED", "CONTACTED", "RTP", "PTP", "PAYING", "UNREACHABLE", "REFUSED", "PROMISE_BROKEN", "OTHER"], key="trace_f_status")
         with fc4:
-            f_tracer = st.text_input("Tracer")
-        f_agr = st.text_input("Cari Agreement_No", key="trace_q_agr")
+            f_touch = st.multiselect("📞 Method", ["CALL", "WHATSAPP", "SMS", "EMAIL", "VISIT", "VIDEO_CALL", "OTHER"], key="trace_f_touch")
+        
+        # Filter row 2
+        fc5, fc6, fc7, fc8 = st.columns(4)
+        with fc5:
+            date_from = st.date_input("📅 From Date", value=None, key="trace_from")
+        with fc6:
+            date_to = st.date_input("📅 To Date", value=None, key="trace_to")
+        with fc7:
+            f_party = st.multiselect("🎯 Party", ["DEBTOR_DIRECT", "COMPANY_HR", "COMPANY_FINANCE", "RELATIVE", "NEIGHBOR", "EMERGENCY_CONTACT", "OTHER"], key="trace_f_party")
+        with fc8:
+            limit_rows = st.number_input("📄 Limit", min_value=50, max_value=2000, value=500, step=50, key="trace_limit")
 
-        q = "SELECT Agreement_No, tracer, status, party, touch_type, notes, touched_at, created_by FROM trace_results WHERE 1=1"
+        # Build query
+        q = """
+        SELECT 
+            Agreement_No, 
+            tracer, 
+            status, 
+            party, 
+            touch_type, 
+            SUBSTR(notes, 1, 100) || CASE WHEN LENGTH(notes) > 100 THEN '...' ELSE '' END as notes_preview,
+            touched_at, 
+            created_by 
+        FROM trace_results 
+        WHERE 1=1
+        """
         params = []
+        
         if f_agr:
             q += " AND Agreement_No LIKE ?"
             params.append(f"%{f_agr}%")
@@ -5783,112 +6112,349 @@ def page_supervisor():
             placeholders = ",".join(["?"] * len(f_status))
             q += f" AND COALESCE(status,'') IN ({placeholders})"
             params.extend(f_status)
-        # Date filtering on touched_at (TEXT ISO). We'll compare date part.
+        if f_touch:
+            placeholders = ",".join(["?"] * len(f_touch))
+            q += f" AND COALESCE(touch_type,'') IN ({placeholders})"
+            params.extend(f_touch)
+        if f_party:
+            placeholders = ",".join(["?"] * len(f_party))
+            q += f" AND COALESCE(party,'') IN ({placeholders})"
+            params.extend(f_party)
         if date_from:
             q += " AND date(touched_at) >= date(?)"
             params.append(str(date_from))
         if date_to:
             q += " AND date(touched_at) <= date(?)"
             params.append(str(date_to))
-        q += " ORDER BY touched_at DESC LIMIT 500"
+        
+        q += " ORDER BY touched_at DESC LIMIT ?"
+        params.append(int(limit_rows))
 
         logs = fetchall(q, tuple(params))
+        
         if logs:
-            st.dataframe(pd.DataFrame(logs), use_container_width=True, hide_index=True)
+            st.caption(f"📊 Menampilkan **{len(logs)}** trace records")
+            df_logs = pd.DataFrame(logs)
+            
+            # Rename columns for better display
+            df_logs.columns = ['Agreement No', 'Tracer', 'Status', 'Party', 'Method', 'Notes Preview', 'Touched At', 'Created By']
+            
+            st.dataframe(
+                df_logs, 
+                use_container_width=True, 
+                hide_index=True,
+                column_config={
+                    "Agreement No": st.column_config.TextColumn("Agreement No", width="medium"),
+                    "Tracer": st.column_config.TextColumn("Tracer", width="medium"),
+                    "Status": st.column_config.TextColumn("Status", width="small"),
+                    "Party": st.column_config.TextColumn("Party", width="medium"),
+                    "Method": st.column_config.TextColumn("Method", width="small"),
+                    "Notes Preview": st.column_config.TextColumn("Notes", width="large"),
+                    "Touched At": st.column_config.TextColumn("Touched At", width="medium"),
+                    "Created By": st.column_config.TextColumn("Created By", width="medium"),
+                }
+            )
+            
+            # Export option
+            if st.button("📥 Export to CSV", key="trace_export"):
+                csv = df_logs.to_csv(index=False)
+                st.download_button(
+                    label="Download CSV",
+                    data=csv,
+                    file_name=f"trace_results_{today.isoformat()}.csv",
+                    mime="text/csv"
+                )
         else:
-            st.info("Belum ada data sesuai filter.")
+            st.info("ℹ️ Tidak ada data sesuai filter. Coba ubah kriteria pencarian.")
 
-    # --- Monitoring Tab (moved to first) end ---
 
     # --- Enriched & Lookup Tab ---
     with tabs[6]:
-        st.title("Enriched Monitoring & Lookup")
-        left, right = st.columns([2, 1])
-        with left:
-            st.subheader("Enriched Monitoring (Loan-centric)")
-            st.caption("Gabungan assign_tracer + agent_assignments + latest trace status + payments")
+        st.markdown("### 🔍 Enriched Monitoring & Global Lookup")
+        st.caption("360° view untuk setiap loan: tracking lengkap dari assignment hingga pembayaran")
+        
+        # Enhanced CSS
+        st.markdown("""
+        <style>
+        .lookup-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            border-radius: 16px;
+            color: white;
+            margin-bottom: 20px;
+        }
+        .lookup-card h3 {
+            margin: 0 0 10px 0;
+            font-size: 18px;
+        }
+        .lookup-result {
+            background: rgba(255,255,255,0.1);
+            padding: 12px;
+            border-radius: 8px;
+            margin-top: 12px;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        # Main content: 2 columns layout
+        left_col, right_col = st.columns([2.5, 1.5])
+        
+        with left_col:
+            st.markdown("#### 📊 Enriched Monitoring")
+            st.caption("Gabungan data dari multiple tables untuk monitoring komprehensif")
+            
+            # Enhanced Filters - Row 1
             fcol1, fcol2, fcol3, fcol4 = st.columns(4)
             with fcol1:
-                f_ag = st.text_input("Agreement_No contains", key="en_ag")
+                f_ag = st.text_input("🔖 Agreement No", key="en_ag", placeholder="Search...")
             with fcol2:
-                f_nik = st.text_input("NIK contains", key="en_nik")
+                f_nik = st.text_input("🆔 NIK", key="en_nik", placeholder="Search...")
             with fcol3:
-                tracers = [r['full_name'] for r in fetchall("SELECT COALESCE(full_name,name) AS full_name FROM users WHERE approved=1 ORDER BY 1") if r.get('full_name')]
-                f_tracer = st.selectbox("Tracer", options=["(All)"] + tracers, index=0, key="en_tracer")
+                # Get tracer list
+                tracers = [r['full_name'] for r in fetchall("SELECT DISTINCT COALESCE(full_name,name) AS full_name FROM users WHERE approved=1 AND role IN ('Tracer', 'Superuser', 'Supervisor') ORDER BY 1") if r.get('full_name')]
+                f_tracer = st.selectbox("👤 Tracer", options=["(All)"] + tracers, index=0, key="en_tracer")
             with fcol4:
-                agents = [r['full_name'] for r in fetchall("SELECT COALESCE(full_name,name) AS full_name FROM users WHERE approved=1 ORDER BY 1") if r.get('full_name')]
-                f_agent = st.selectbox("Agent", options=["(All)"] + agents, index=0, key="en_agent")
+                # Get agent list
+                agents = [r['full_name'] for r in fetchall("SELECT DISTINCT COALESCE(full_name,name) AS full_name FROM users WHERE approved=1 AND role IN ('Agent', 'Superuser', 'Supervisor') ORDER BY 1") if r.get('full_name')]
+                f_agent = st.selectbox("🎯 Agent", options=["(All)"] + agents, index=0, key="en_agent")
 
-            fcol5, fcol6, fcol7 = st.columns(3)
+            # Enhanced Filters - Row 2
+            fcol5, fcol6, fcol7, fcol8 = st.columns(4)
             with fcol5:
-                f_status = st.multiselect("Latest Status", ["TRACED", "EMAILED", "RTP", "PAYING", "UNREACHABLE", "OTHER"], key="en_status")
+                f_status = st.multiselect("📊 Trace Status", ["TRACED", "CONTACTED", "RTP", "PTP", "PAYING", "UNREACHABLE", "REFUSED", "PROMISE_BROKEN", "OTHER"], key="en_status")
             with fcol6:
-                f_pay = st.selectbox("Payment", ["All", "With Payment", "Without Payment"], index=0, key="en_pay")
+                f_pay = st.selectbox("💰 Payment", ["All", "With Payment", "Without Payment", "Paid Off"], index=0, key="en_pay")
             with fcol7:
-                ad_from = st.date_input("Assigned From", value=None, key="en_ad_from")
-                ad_to = st.date_input("Assigned To", value=None, key="en_ad_to")
+                ad_from = st.date_input("📅 Assigned From", value=None, key="en_ad_from")
+            with fcol8:
+                ad_to = st.date_input("📅 Assigned To", value=None, key="en_ad_to")
 
-            q_en = (
-                "SELECT a.Agreement_No, a.Debtor_Name, a.NIK_KTP, a.Assigned_To AS tracer, "
-                "a.Masked_Company_Name, ag.Agent_Assigned_To AS agent, ag.assigned_at, "
-                "ts.status AS latest_status, ts.touched_at AS status_time, "
-                "COALESCE(p.amount, 0) AS paid_amount_total, p.last_paid_date "
-                "FROM assign_tracer a "
-                "LEFT JOIN agent_assignments ag ON ag.Agreement_No = a.Agreement_No "
-                "LEFT JOIN ( "
-                "  SELECT tr1.Agreement_No, tr1.status, tr1.touched_at "
-                "  FROM trace_results tr1 "
-                "  JOIN (SELECT Agreement_No, MAX(touched_at) mt FROM trace_results GROUP BY Agreement_No) t2 "
-                "    ON t2.Agreement_No = tr1.Agreement_No AND t2.mt = tr1.touched_at "
-                ") ts ON ts.Agreement_No = a.Agreement_No "
-                "LEFT JOIN ( "
-                "  SELECT Agreement_No, SUM(paid_amount) AS amount, MAX(paid_date) AS last_paid_date "
-                "  FROM payments GROUP BY Agreement_No "
-                ") p ON p.Agreement_No = a.Agreement_No "
-                "WHERE 1=1"
-            )
+            # Build comprehensive query
+            q_en = """
+                SELECT 
+                    a.Agreement_No,
+                    a.Debtor_Name,
+                    a.NIK_KTP,
+                    a.Assigned_To AS tracer,
+                    a.Masked_Company_Name AS company,
+                    ag.Agent_Assigned_To AS agent,
+                    ag.assigned_at,
+                    ts.status AS latest_status,
+                    ts.touched_at AS last_touch,
+                    ar.agent_status,
+                    ar.agent_ptp_amount,
+                    ar.agent_ptp_date,
+                    COALESCE(p.amount, 0) AS paid_total,
+                    p.last_paid_date,
+                    CASE 
+                        WHEN COALESCE(p.amount, 0) > 0 THEN '✅ Paid'
+                        WHEN ar.agent_status = 'PTP' THEN '⏳ PTP'
+                        WHEN ts.status IN ('TRACED', 'CONTACTED') THEN '🔍 Traced'
+                        WHEN ag.Agent_Assigned_To IS NOT NULL THEN '👤 Agent Assigned'
+                        WHEN a.Assigned_To IS NOT NULL THEN '📋 Tracer Assigned'
+                        ELSE '⚪ New'
+                    END as pipeline_stage
+                FROM assign_tracer a
+                LEFT JOIN agent_assignments ag ON ag.Agreement_No = a.Agreement_No AND IFNULL(ag.active,1)=1
+                LEFT JOIN (
+                    SELECT tr1.Agreement_No, tr1.status, tr1.touched_at
+                    FROM trace_results tr1
+                    JOIN (SELECT Agreement_No, MAX(touched_at) mt FROM trace_results GROUP BY Agreement_No) t2
+                    ON t2.Agreement_No = tr1.Agreement_No AND t2.mt = tr1.touched_at
+                ) ts ON ts.Agreement_No = a.Agreement_No
+                LEFT JOIN (
+                    SELECT Agreement_No, agent_status, agent_ptp_amount, agent_ptp_date
+                    FROM agent_results
+                    WHERE id IN (SELECT MAX(id) FROM agent_results GROUP BY Agreement_No)
+                ) ar ON ar.Agreement_No = a.Agreement_No
+                LEFT JOIN (
+                    SELECT Agreement_No, SUM(paid_amount) AS amount, MAX(paid_date) AS last_paid_date
+                    FROM payments
+                    GROUP BY Agreement_No
+                ) p ON p.Agreement_No = a.Agreement_No
+                WHERE 1=1
+            """
+            
             p_en = []
             if f_ag:
-                q_en += " AND a.Agreement_No LIKE ?"; p_en.append(f"%{f_ag}%")
+                q_en += " AND a.Agreement_No LIKE ?"
+                p_en.append(f"%{f_ag}%")
             if f_nik:
-                q_en += " AND COALESCE(a.NIK_KTP,'') LIKE ?"; p_en.append(f"%{f_nik}%")
+                q_en += " AND COALESCE(a.NIK_KTP,'') LIKE ?"
+                p_en.append(f"%{f_nik}%")
             if f_tracer and f_tracer != "(All)":
-                q_en += " AND COALESCE(a.Assigned_To,'') = ?"; p_en.append(f_tracer)
+                q_en += " AND COALESCE(a.Assigned_To,'') = ?"
+                p_en.append(f_tracer)
             if f_agent and f_agent != "(All)":
-                q_en += " AND COALESCE(ag.Agent_Assigned_To,'') = ?"; p_en.append(f_agent)
+                q_en += " AND COALESCE(ag.Agent_Assigned_To,'') = ?"
+                p_en.append(f_agent)
             if f_status:
                 placeholders = ",".join(["?"] * len(f_status))
-                q_en += f" AND COALESCE(ts.status,'') IN ({placeholders})"; p_en.extend(f_status)
+                q_en += f" AND COALESCE(ts.status,'') IN ({placeholders})"
+                p_en.extend(f_status)
             if f_pay == "With Payment":
                 q_en += " AND COALESCE(p.amount,0) > 0"
             elif f_pay == "Without Payment":
                 q_en += " AND COALESCE(p.amount,0) = 0"
+            elif f_pay == "Paid Off":
+                q_en += " AND COALESCE(p.amount,0) >= 100000"  # Assume paid off threshold
             if ad_from:
-                q_en += " AND DATE(ag.assigned_at) >= DATE(?)"; p_en.append(str(ad_from))
+                q_en += " AND DATE(ag.assigned_at) >= DATE(?)"
+                p_en.append(str(ad_from))
             if ad_to:
-                q_en += " AND DATE(ag.assigned_at) <= DATE(?)"; p_en.append(str(ad_to))
+                q_en += " AND DATE(ag.assigned_at) <= DATE(?)"
+                p_en.append(str(ad_to))
+            
             q_en += " ORDER BY ag.assigned_at DESC, a.id DESC LIMIT 500"
 
             rows_en = fetchall(q_en, tuple(p_en))
+            
             if rows_en:
-                st.dataframe(pd.DataFrame(rows_en), use_container_width=True, hide_index=True)
-            else:
-                st.info("Tidak ada data sesuai filter.")
-
-        with right:
-            st.subheader("🔎 Lookup NIK Across Loans")
-            nik_q = st.text_input("Cari NIK (global)", key="monitor_nik_lookup")
-            if nik_q:
-                nik_rows = fetchall(
-                    "SELECT Agreement_No, Debtor_Name, NIK_KTP, Assigned_To FROM assign_tracer WHERE NIK_KTP LIKE ? ORDER BY id DESC LIMIT 200",
-                    (f"%{nik_q}%",)
+                df_en = pd.DataFrame(rows_en)
+                st.caption(f"📊 Menampilkan **{len(df_en)}** enriched records")
+                
+                # Rename columns
+                df_en.columns = [
+                    'Agreement No', 'Debtor', 'NIK', 'Tracer', 'Company', 'Agent', 
+                    'Assigned At', 'Trace Status', 'Last Touch', 'Agent Status', 
+                    'PTP Amount', 'PTP Date', 'Paid Total', 'Last Paid', 'Pipeline Stage'
+                ]
+                
+                st.dataframe(
+                    df_en,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Agreement No": st.column_config.TextColumn("Agreement No", width="medium"),
+                        "Debtor": st.column_config.TextColumn("Debtor", width="medium"),
+                        "NIK": st.column_config.TextColumn("NIK", width="small"),
+                        "Tracer": st.column_config.TextColumn("Tracer", width="small"),
+                        "Company": st.column_config.TextColumn("Company", width="medium"),
+                        "Agent": st.column_config.TextColumn("Agent", width="small"),
+                        "Assigned At": st.column_config.TextColumn("Assigned", width="small"),
+                        "Trace Status": st.column_config.TextColumn("T.Status", width="small"),
+                        "Last Touch": st.column_config.TextColumn("Last Touch", width="small"),
+                        "Agent Status": st.column_config.TextColumn("A.Status", width="small"),
+                        "PTP Amount": st.column_config.NumberColumn("PTP Amt", format="Rp %.0f"),
+                        "PTP Date": st.column_config.TextColumn("PTP Date", width="small"),
+                        "Paid Total": st.column_config.NumberColumn("Paid", format="Rp %.0f"),
+                        "Last Paid": st.column_config.TextColumn("Last Paid", width="small"),
+                        "Pipeline Stage": st.column_config.TextColumn("Stage", width="medium"),
+                    }
                 )
-                if nik_rows:
-                    df_n = pd.DataFrame(nik_rows)
-                    st.caption(f"Ditemukan {len(df_n)} loan untuk NIK mengandung '{nik_q}'")
-                    st.dataframe(df_n, use_container_width=True, hide_index=True)
-                else:
-                    st.info("Tidak ditemukan loan untuk NIK tersebut.")
+                
+                # Export
+                if st.button("📥 Export to CSV", key="enriched_export"):
+                    csv = df_en.to_csv(index=False)
+                    st.download_button(
+                        label="Download Enriched Data",
+                        data=csv,
+                        file_name=f"enriched_monitoring_{today_wib().isoformat()}.csv",
+                        mime="text/csv"
+                    )
+            else:
+                st.info("ℹ️ Tidak ada data sesuai filter.")
+
+        with right_col:
+            st.markdown("#### 🔎 Global Lookup Tools")
+            
+            # NIK Lookup
+            with st.container():
+                st.markdown("""
+                <div class='lookup-card'>
+                    <h3>🆔 NIK Lookup</h3>
+                    <p style='font-size:13px; margin:0; opacity:0.9;'>Cari semua loan berdasarkan NIK</p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                nik_q = st.text_input("Masukkan NIK", key="monitor_nik_lookup", placeholder="16 digit NIK...")
+                
+                if nik_q and len(nik_q.strip()) >= 3:
+                    nik_rows = fetchall("""
+                        SELECT 
+                            Agreement_No, 
+                            Debtor_Name, 
+                            NIK_KTP, 
+                            Assigned_To as Tracer,
+                            created_at as Assigned_Date
+                        FROM assign_tracer 
+                        WHERE NIK_KTP LIKE ? 
+                        ORDER BY id DESC 
+                        LIMIT 100
+                    """, (f"%{nik_q.strip()}%",))
+                    
+                    if nik_rows:
+                        df_nik = pd.DataFrame(nik_rows)
+                        st.success(f"✅ Ditemukan **{len(df_nik)}** loan untuk NIK: `{nik_q}`")
+                        st.dataframe(df_nik, use_container_width=True, hide_index=True)
+                        
+                        # Check if frozen
+                        frozen_check = fetchone("SELECT id, reason FROM frozen_entities WHERE active=1 AND NIK_KTP LIKE ?", (f"%{nik_q.strip()}%",))
+                        if frozen_check:
+                            st.warning(f"⚠️ **FROZEN:** NIK ini di-freeze. Reason: {frozen_check.get('reason') or 'N/A'}")
+                    else:
+                        st.info("ℹ️ Tidak ditemukan loan untuk NIK ini.")
+            
+            st.markdown("---")
+            
+            # Agreement Lookup
+            with st.container():
+                st.markdown("""
+                <div class='lookup-card' style='background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);'>
+                    <h3>🔖 Agreement Lookup</h3>
+                    <p style='font-size:13px; margin:0; opacity:0.9;'>Detail lengkap per Agreement</p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                agr_q = st.text_input("Masukkan Agreement No", key="monitor_agr_lookup", placeholder="e.g., AGR2025001")
+                
+                if agr_q and len(agr_q.strip()) >= 3:
+                    # Get comprehensive data
+                    agr_detail = fetchone("""
+                        SELECT 
+                            a.Agreement_No,
+                            a.Debtor_Name,
+                            a.NIK_KTP,
+                            a.Assigned_To as Tracer,
+                            ag.Agent_Assigned_To as Agent,
+                            ar.agent_status,
+                            COALESCE(p.total_paid, 0) as Total_Paid,
+                            (SELECT COUNT(*) FROM trace_results WHERE Agreement_No = a.Agreement_No) as Trace_Count
+                        FROM assign_tracer a
+                        LEFT JOIN agent_assignments ag ON ag.Agreement_No = a.Agreement_No
+                        LEFT JOIN agent_results ar ON ar.Agreement_No = a.Agreement_No
+                        LEFT JOIN (SELECT Agreement_No, SUM(paid_amount) as total_paid FROM payments GROUP BY Agreement_No) p 
+                            ON p.Agreement_No = a.Agreement_No
+                        WHERE a.Agreement_No LIKE ?
+                        LIMIT 1
+                    """, (f"%{agr_q.strip()}%",))
+                    
+                    if agr_detail:
+                        st.success(f"✅ Agreement: **{agr_detail['Agreement_No']}**")
+                        
+                        # Display details
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric("👤 Debtor", agr_detail['Debtor_Name'] or '-')
+                            st.metric("🆔 NIK", agr_detail['NIK_KTP'] or '-')
+                        with col2:
+                            st.metric("👥 Tracer", agr_detail['Tracer'] or '-')
+                            st.metric("🎯 Agent", agr_detail['Agent'] or '-')
+                        
+                        col3, col4 = st.columns(2)
+                        with col3:
+                            st.metric("📊 Status", agr_detail['agent_status'] or 'N/A')
+                            st.metric("💰 Total Paid", f"Rp {agr_detail['Total_Paid']:,.0f}")
+                        with col4:
+                            st.metric("🔍 Traces", agr_detail['Trace_Count'])
+                        
+                        # Check frozen
+                        frozen_agr = fetchone("SELECT reason FROM frozen_entities WHERE active=1 AND Agreement_No LIKE ?", (f"%{agr_q.strip()}%",))
+                        if frozen_agr:
+                            st.error(f"🔒 **FROZEN:** {frozen_agr.get('reason') or 'No reason specified'}")
+                    else:
+                        st.info("ℹ️ Agreement tidak ditemukan.")
+
 def page_tracer():
     require_roles(("Superuser", "Supervisor", "Tracer"))
     u = current_user()
