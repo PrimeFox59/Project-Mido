@@ -4777,6 +4777,10 @@ def page_user_setting():
 def page_supervisor():
     require_roles(("Superuser", "Supervisor"))
     st.title("Supervisor Menu")
+    
+    # Initialize database connection for this page
+    conn = get_db()
+    
     # Monitoring first so it's the default view
     tabs = st.tabs(["Monitoring", "Payment Recap", "Input", "Trace Assigning", "Agent Assigning", "Trace Results", "Enriched & Lookup", "Freeze Manager"])
 
@@ -6317,14 +6321,14 @@ def page_supervisor():
                                 pass
                             # Check if already assigned to tracer
                             try:
-                                conn = get_connection()
-                                cur = conn.cursor()
+                                conn_check = get_db()
+                                cur = conn_check.cursor()
                                 cur.execute("SELECT COUNT(*) as cnt FROM assign_tracer WHERE Agreement_No=? AND IFNULL(Assigned_To,'')!=''", (agr,))
                                 if cur.fetchone()['cnt'] > 0:
                                     already_tracer += 1
-                                    conn.close()
+                                    conn_check.close()
                                     continue
-                                conn.close()
+                                conn_check.close()
                             except Exception:
                                 pass
                             try:
@@ -6384,14 +6388,14 @@ def page_supervisor():
                                 pass
                             # Check if already assigned to tracer
                             try:
-                                conn = get_connection()
-                                cur = conn.cursor()
+                                conn_check2 = get_db()
+                                cur = conn_check2.cursor()
                                 cur.execute("SELECT COUNT(*) as cnt FROM assign_tracer WHERE Agreement_No=? AND IFNULL(Assigned_To,'')!=''", (agr,))
                                 if cur.fetchone()['cnt'] > 0:
                                     already_tracer += 1
-                                    conn.close()
+                                    conn_check2.close()
                                     continue
-                                conn.close()
+                                conn_check2.close()
                             except Exception:
                                 pass
                             agent = sel_agents[i % len(sel_agents)]
@@ -7263,6 +7267,9 @@ def page_supervisor():
                             st.error(f"🔒 **FROZEN:** {frozen_agr.get('reason') or 'No reason specified'}")
                     else:
                         st.info("ℹ️ Case ID tidak ditemukan.")
+    
+    # Close database connection
+    conn.close()
 
 def page_tracer():
     require_roles(("Superuser", "Supervisor", "Tracer"))
