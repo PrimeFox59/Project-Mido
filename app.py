@@ -50,12 +50,11 @@ st.markdown("""
             #f0f4f8 100%) !important;
     }
     
-    /* Main content area with subtle glass effect */
+    /* Main content area with subtle glass effect - no size constraints here */
     .main .block-container {
         background: rgba(255, 255, 255, 0.3) !important;
         backdrop-filter: blur(10px) !important;
         border-radius: 20px !important;
-        padding: 2rem !important;
     }
     
     /* ============================================
@@ -1632,7 +1631,7 @@ def require_roles(allowed_roles):
 
 # ... (page_auth, page_dashboard, page_resume, page_reporting, page_admin_panel, page_user_guide and main function remain the same) ...
 def page_auth():
-    # Sembunyikan sidebar dan batasi lebar konten untuk halaman login dengan glassmorphism
+    # Sembunyikan sidebar dan paksa layout kecil untuk halaman login dengan glassmorphism
     st.markdown("""
         <style>
         /* Hide sidebar on login page */
@@ -1640,23 +1639,35 @@ def page_auth():
         
         /* Background gradient for login page */
         .stApp {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
         }
         
-        /* Compact centered layout on login page - smaller form */
+        /* FORCE compact centered layout - override wide mode completely */
         .main .block-container {
             max-width: 420px !important;
-            padding-left: 2rem !important;
-            padding-right: 2rem !important;
-            padding-top: 3rem !important;
+            padding: 3rem 2rem !important;
             margin: 0 auto !important;
+            width: 100% !important;
         }
         
-        /* Center the container */
+        /* Force center the main container */
+        .main {
+            display: flex !important;
+            justify-content: center !important;
+            align-items: flex-start !important;
+        }
+        
+        /* Override any wide mode settings */
+        section[data-testid="stMain"] {
+            max-width: 100vw !important;
+            display: flex !important;
+            justify-content: center !important;
+        }
+        
         section[data-testid="stMain"] > div {
-            max-width: 100%;
-            display: flex;
-            justify-content: center;
+            max-width: 100% !important;
+            display: flex !important;
+            justify-content: center !important;
         }
         
         /* Glassmorphism card for login form */
@@ -1694,7 +1705,7 @@ def page_auth():
         }
         
         /* Input fields glass effect */
-        .stTextInput input, .stSelectbox select {
+        .stTextInput input, .stSelectbox select, .stDateInput input, .stTextArea textarea, .stFileUploader {
             background: rgba(255, 255, 255, 0.2) !important;
             backdrop-filter: blur(5px) !important;
             border: 1px solid rgba(255, 255, 255, 0.3) !important;
@@ -1702,12 +1713,17 @@ def page_auth():
             color: #1F2937 !important;
         }
         
+        /* Tabs styling for login/register */
+        .stTabs [data-baseweb="tab-list"] {
+            justify-content: center !important;
+            max-width: 100% !important;
+        }
+        
         /* Responsive for mobile */
         @media (max-width: 768px) {
             .main .block-container {
                 max-width: 100% !important;
-                padding-left: 1rem !important;
-                padding-right: 1rem !important;
+                padding: 2rem 1rem !important;
             }
         }
         </style>
@@ -2479,33 +2495,6 @@ def main():
         st.session_state.page = "Authentication"
     if "user" not in st.session_state:
         st.session_state.user = None
-    
-    # ========================================================================
-    # LAYOUT MODE: Non-wide untuk login, Wide untuk halaman lainnya
-    # ========================================================================
-    # Inject CSS untuk override layout berdasarkan halaman aktif
-    current_page = st.session_state.get("page", "Authentication")
-    
-    if current_page != "Authentication":
-        # Wide mode untuk semua halaman kecuali login
-        st.markdown("""
-            <style>
-            /* Force wide mode for all pages except login */
-            .main .block-container {
-                max-width: 100% !important;
-                padding-left: 3rem !important;
-                padding-right: 3rem !important;
-            }
-            
-            /* Responsive padding */
-            @media (max-width: 768px) {
-                .main .block-container {
-                    padding-left: 1rem !important;
-                    padding-right: 1rem !important;
-                }
-            }
-            </style>
-        """, unsafe_allow_html=True)
     
     if "prelogin_auto_restore_done" not in st.session_state:
         is_fresh = _is_probably_fresh_seed_db()
