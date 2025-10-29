@@ -2655,7 +2655,6 @@ def main():
         # Enhanced User Profile Card with Modern UI/UX
         full_name = user.get('full_name') or user.get('name') or user.get('login_id') or 'User'
         email = user.get('email') or '-'
-        work_email = user.get('work_email') or '-'
         division = user.get('division') or '-'
         role = user.get('role') or 'User'
         
