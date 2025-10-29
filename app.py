@@ -2557,19 +2557,64 @@ def main():
             color: #111827 !important;
         }
         
-        /* Active Button - Gradient Highlight */
+        /* Active Button - Enhanced Gradient Highlight with Left Border Indicator */
         div[data-testid="stSidebar"] .stButton > button:disabled {
             background: linear-gradient(135deg, 
-                rgba(99, 102, 241, 0.85) 0%, 
-                rgba(139, 92, 246, 0.85) 100%) !important;
-            backdrop-filter: blur(10px) !important;
-            border: 1px solid rgba(255, 255, 255, 0.4) !important;
-            box-shadow: 0 8px 24px rgba(99, 102, 241, 0.3), 
-                        inset 0 1px 0 rgba(255, 255, 255, 0.4) !important;
+                rgba(99, 102, 241, 0.95) 0%, 
+                rgba(139, 92, 246, 0.90) 100%) !important;
+            backdrop-filter: blur(15px) saturate(180%) !important;
+            border: 2px solid rgba(255, 255, 255, 0.5) !important;
+            border-left: 5px solid #FFFFFF !important;
+            box-shadow: 0 10px 30px rgba(99, 102, 241, 0.4), 
+                        inset 0 2px 4px rgba(255, 255, 255, 0.5),
+                        0 0 25px rgba(99, 102, 241, 0.3) !important;
             color: #FFFFFF !important;
             opacity: 1 !important;
-            font-weight: 700 !important;
-            transform: scale(1.02) !important;
+            font-weight: 800 !important;
+            font-size: 15px !important;
+            letter-spacing: 0.5px !important;
+            transform: scale(1.03) translateX(4px) !important;
+            position: relative !important;
+        }
+        
+        /* Active Button - Animated Pulse Effect */
+        div[data-testid="stSidebar"] .stButton > button:disabled::after {
+            content: '●';
+            position: absolute;
+            right: 16px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #FFFFFF;
+            font-size: 10px;
+            animation: pulse-dot 2s ease-in-out infinite;
+        }
+        
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; transform: translateY(-50%) scale(1); }
+            50% { opacity: 0.6; transform: translateY(-50%) scale(1.2); }
+        }
+        
+        /* Active Button - Glow Border Animation */
+        div[data-testid="stSidebar"] .stButton > button:disabled::before {
+            content: '';
+            position: absolute;
+            top: -2px;
+            left: -2px;
+            right: -2px;
+            bottom: -2px;
+            background: linear-gradient(45deg, 
+                rgba(99, 102, 241, 0.5), 
+                rgba(139, 92, 246, 0.5), 
+                rgba(99, 102, 241, 0.5));
+            border-radius: 14px;
+            z-index: -1;
+            opacity: 0.7;
+            animation: glow-border 3s ease-in-out infinite;
+        }
+        
+        @keyframes glow-border {
+            0%, 100% { opacity: 0.5; }
+            50% { opacity: 0.9; }
         }
         
         /* Button Ripple Effect (Shimmer) */
