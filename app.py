@@ -1642,43 +1642,47 @@ def page_auth():
         st.session_state.login_status_message = {"type": None, "text": ""}
 
     with tab[0]:
-        st.subheader("Login")
-        login_id = st.text_input("Id", key="login_id")
-        pw = st.text_input("Password", type="password", key="login_pw")
-        login_clicked = st.button("Login", use_container_width=True)
+        # Bagi layout menjadi 5 kolom, form login di kolom tengah (col 3)
+        col1, col2, col3, col4, col5 = st.columns([1, 1, 2, 1, 1])
+        
+        with col3:
+            st.subheader("Login")
+            login_id = st.text_input("Id", key="login_id")
+            pw = st.text_input("Password", type="password", key="login_pw")
+            login_clicked = st.button("Login", use_container_width=True)
 
-        if login_clicked:
-            st.session_state.login_status_message = {"type": None, "text": ""}
-            # Login by Id (login_id); fallback to email for backward compatibility
-            row = fetchone("SELECT * FROM users WHERE login_id=?", (login_id,))
-            if not row and login_id:
-                row = fetchone("SELECT * FROM users WHERE email=?", (login_id,))
-            if not row:
-                st.session_state.login_status_message = {"type": "error", "text": "User tidak ditemukan."}
-            else:
-                if not row['approved']:
-                    st.session_state.login_status_message = {"type": "error", "text": "Akun belum disetujui oleh Admin."}
-                elif verify_password(pw, row['password_hash']):
-                    login_user(row)
-                    # Catat audit trail login
-                    try:
-                        detail_id = row.get('login_id') or row.get('email') or '-'
-                        execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (row['id'], "LOGIN", f"User {detail_id} login."))
-                    except Exception:
-                        pass
-                    # BACKUP DIHAPUS DARI LOGIN
-                    # Backup hanya dilakukan saat logout untuk mengurangi beban sistem
-                    # dan memastikan hanya backup data terakhir setelah user selesai bekerja
-                    st.session_state.login_status_message = {"type": "success", "text": "Login berhasil. Mengalihkan..."}
-                    st.session_state.page = "Dashboard"
-                    st.rerun()
+            if login_clicked:
+                st.session_state.login_status_message = {"type": None, "text": ""}
+                # Login by Id (login_id); fallback to email for backward compatibility
+                row = fetchone("SELECT * FROM users WHERE login_id=?", (login_id,))
+                if not row and login_id:
+                    row = fetchone("SELECT * FROM users WHERE email=?", (login_id,))
+                if not row:
+                    st.session_state.login_status_message = {"type": "error", "text": "User tidak ditemukan."}
                 else:
-                    st.session_state.login_status_message = {"type": "error", "text": "Password salah."}
+                    if not row['approved']:
+                        st.session_state.login_status_message = {"type": "error", "text": "Akun belum disetujui oleh Admin."}
+                    elif verify_password(pw, row['password_hash']):
+                        login_user(row)
+                        # Catat audit trail login
+                        try:
+                            detail_id = row.get('login_id') or row.get('email') or '-'
+                            execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (row['id'], "LOGIN", f"User {detail_id} login."))
+                        except Exception:
+                            pass
+                        # BACKUP DIHAPUS DARI LOGIN
+                        # Backup hanya dilakukan saat logout untuk mengurangi beban sistem
+                        # dan memastikan hanya backup data terakhir setelah user selesai bekerja
+                        st.session_state.login_status_message = {"type": "success", "text": "Login berhasil. Mengalihkan..."}
+                        st.session_state.page = "Dashboard"
+                        st.rerun()
+                    else:
+                        st.session_state.login_status_message = {"type": "error", "text": "Password salah."}
 
-        if st.session_state.login_status_message["type"] == "error":
-            st.error(st.session_state.login_status_message["text"])
-        elif st.session_state.login_status_message["type"] == "success":
-            st.success(st.session_state.login_status_message["text"])
+            if st.session_state.login_status_message["type"] == "error":
+                st.error(st.session_state.login_status_message["text"])
+            elif st.session_state.login_status_message["type"] == "success":
+                st.success(st.session_state.login_status_message["text"])
 
     with tab[1]:
         st.subheader("Register")
