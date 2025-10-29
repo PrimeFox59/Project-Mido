@@ -2541,11 +2541,11 @@ def main():
             /* Transition */
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
             position: relative !important;
-            overflow: hidden !important;
+            overflow: visible !important;
         }
         
         /* Button Hover - Glow Effect */
-        div[data-testid="stSidebar"] .stButton > button:hover {
+        div[data-testid="stSidebar"] .stButton > button:hover:not(:disabled) {
             background: linear-gradient(135deg, 
                 rgba(255, 255, 255, 0.35) 0%, 
                 rgba(255, 255, 255, 0.18) 100%) !important;
@@ -2557,68 +2557,75 @@ def main():
             color: #111827 !important;
         }
         
-        /* Active Button - Enhanced Gradient Highlight with Left Border Indicator */
-        div[data-testid="stSidebar"] .stButton > button:disabled {
+        /* Active/Disabled Button - MEGA HIGHLIGHT */
+        div[data-testid="stSidebar"] .stButton > button:disabled,
+        div[data-testid="stSidebar"] .stButton > button[disabled],
+        div[data-testid="stSidebar"] .stButton > button[aria-disabled="true"] {
+            /* Super vibrant gradient background */
             background: linear-gradient(135deg, 
-                rgba(99, 102, 241, 0.95) 0%, 
-                rgba(139, 92, 246, 0.90) 100%) !important;
-            backdrop-filter: blur(15px) saturate(180%) !important;
-            border: 2px solid rgba(255, 255, 255, 0.5) !important;
-            border-left: 5px solid #FFFFFF !important;
-            box-shadow: 0 10px 30px rgba(99, 102, 241, 0.4), 
-                        inset 0 2px 4px rgba(255, 255, 255, 0.5),
-                        0 0 25px rgba(99, 102, 241, 0.3) !important;
+                #6366F1 0%, 
+                #8B5CF6 100%) !important;
+            
+            /* Strong borders with left accent */
+            border: 2px solid rgba(255, 255, 255, 0.6) !important;
+            border-left: 6px solid #FFFFFF !important;
+            
+            /* Multiple layered shadows for depth */
+            box-shadow: 
+                0 0 0 3px rgba(99, 102, 241, 0.2),
+                0 12px 35px rgba(99, 102, 241, 0.5), 
+                inset 0 2px 6px rgba(255, 255, 255, 0.4),
+                0 0 30px rgba(99, 102, 241, 0.4) !important;
+            
+            /* Stronger backdrop filter */
+            backdrop-filter: blur(20px) saturate(200%) !important;
+            -webkit-backdrop-filter: blur(20px) saturate(200%) !important;
+            
+            /* Bold white text */
             color: #FFFFFF !important;
-            opacity: 1 !important;
-            font-weight: 800 !important;
+            font-weight: 900 !important;
             font-size: 15px !important;
-            letter-spacing: 0.5px !important;
-            transform: scale(1.03) translateX(4px) !important;
-            position: relative !important;
+            letter-spacing: 0.6px !important;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2) !important;
+            
+            /* Elevated and shifted */
+            opacity: 1 !important;
+            transform: scale(1.05) translateX(6px) !important;
+            
+            /* Pointer events */
+            cursor: not-allowed !important;
+            pointer-events: none !important;
         }
         
-        /* Active Button - Animated Pulse Effect */
-        div[data-testid="stSidebar"] .stButton > button:disabled::after {
+        /* Active Button Indicator Dot */
+        div[data-testid="stSidebar"] .stButton > button:disabled::after,
+        div[data-testid="stSidebar"] .stButton > button[disabled]::after {
             content: '●';
             position: absolute;
-            right: 16px;
+            right: 14px;
             top: 50%;
             transform: translateY(-50%);
             color: #FFFFFF;
-            font-size: 10px;
-            animation: pulse-dot 2s ease-in-out infinite;
+            font-size: 12px;
+            text-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
+            animation: pulse-active 2s ease-in-out infinite;
         }
         
-        @keyframes pulse-dot {
-            0%, 100% { opacity: 1; transform: translateY(-50%) scale(1); }
-            50% { opacity: 0.6; transform: translateY(-50%) scale(1.2); }
+        @keyframes pulse-active {
+            0%, 100% { 
+                opacity: 1; 
+                transform: translateY(-50%) scale(1);
+                text-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
+            }
+            50% { 
+                opacity: 0.7; 
+                transform: translateY(-50%) scale(1.3);
+                text-shadow: 0 0 15px rgba(255, 255, 255, 1);
+            }
         }
         
-        /* Active Button - Glow Border Animation */
-        div[data-testid="stSidebar"] .stButton > button:disabled::before {
-            content: '';
-            position: absolute;
-            top: -2px;
-            left: -2px;
-            right: -2px;
-            bottom: -2px;
-            background: linear-gradient(45deg, 
-                rgba(99, 102, 241, 0.5), 
-                rgba(139, 92, 246, 0.5), 
-                rgba(99, 102, 241, 0.5));
-            border-radius: 14px;
-            z-index: -1;
-            opacity: 0.7;
-            animation: glow-border 3s ease-in-out infinite;
-        }
-        
-        @keyframes glow-border {
-            0%, 100% { opacity: 0.5; }
-            50% { opacity: 0.9; }
-        }
-        
-        /* Button Ripple Effect (Shimmer) */
-        div[data-testid="stSidebar"] .stButton > button::before {
+        /* Button Ripple Effect - Only for non-disabled buttons */
+        div[data-testid="stSidebar"] .stButton > button:not(:disabled)::before {
             content: '';
             position: absolute;
             top: 0;
@@ -2630,9 +2637,10 @@ def main():
                 rgba(255, 255, 255, 0.3), 
                 transparent);
             transition: left 0.5s;
+            z-index: 1;
         }
         
-        div[data-testid="stSidebar"] .stButton > button:hover::before {
+        div[data-testid="stSidebar"] .stButton > button:not(:disabled):hover::before {
             left: 100%;
         }
         
