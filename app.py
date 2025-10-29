@@ -1704,9 +1704,8 @@ def page_auth():
         </style>
     """, unsafe_allow_html=True)
     
-    # Layout 3 kolom dengan fokus area login lebih kecil: kosong | login form | kosong
-    # Rasio [2, 1, 2] atau [3, 2, 3] membuat form lebih compact dan terfokus
-    col_left, col_center, col_right = st.columns([2.5, 1, 2.5])
+    # Layout 3 kolom: kosong | login form | kosong
+    col_left, col_center, col_right = st.columns([1, 2, 1])
     
     with col_center:
         # Tampilkan logo sebagai header
