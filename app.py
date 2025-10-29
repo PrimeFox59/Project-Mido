@@ -2660,128 +2660,37 @@ def main():
         role = user.get('role') or 'User'
         
         # Modern User Profile Card
-        st.sidebar.markdown(f"""
-            <div style="
-                background: linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(139, 92, 246, 0.10) 100%);
-                backdrop-filter: blur(10px);
-                border: 1px solid rgba(255, 255, 255, 0.3);
-                border-radius: 16px;
-                padding: 20px;
-                margin-bottom: 20px;
-                box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
-            ">
-                <!-- User Avatar & Name -->
-                <div style="text-align: center; margin-bottom: 16px;">
-                    <div style="
-                        width: 64px;
-                        height: 64px;
-                        background: linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%);
-                        border-radius: 50%;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        margin: 0 auto 12px auto;
-                        font-size: 28px;
-                        font-weight: 700;
-                        color: white;
-                        box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
-                    ">
-                        {full_name[0].upper()}
-                    </div>
-                    <div style="
-                        font-size: 18px;
-                        font-weight: 700;
-                        color: #1F2937;
-                        margin-bottom: 4px;
-                    ">{full_name}</div>
+        profile_html = f"""
+        <div style="background: linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(139, 92, 246, 0.10) 100%); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 16px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);">
+            <div style="text-align: center; margin-bottom: 16px;">
+                <div style="width: 64px; height: 64px; background: linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%); border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 12px; font-size: 28px; font-weight: 700; color: white; box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);">
+                    {full_name[0].upper()}
                 </div>
-                
-                <!-- User Details Grid -->
-                <div style="
-                    background: rgba(255, 255, 255, 0.5);
-                    backdrop-filter: blur(5px);
-                    border-radius: 12px;
-                    padding: 14px;
-                    border: 1px solid rgba(255, 255, 255, 0.4);
-                ">
-                    <!-- Email -->
-                    <div style="margin-bottom: 10px;">
-                        <div style="
-                            font-size: 10px;
-                            font-weight: 600;
-                            color: #6B7280;
-                            text-transform: uppercase;
-                            letter-spacing: 0.5px;
-                            margin-bottom: 4px;
-                        ">📧 Email</div>
-                        <div style="
-                            font-size: 12px;
-                            color: #1F2937;
-                            font-weight: 500;
-                            word-break: break-all;
-                        ">{email}</div>
-                    </div>
-                    
-                    <!-- Work Email -->
-                    <div style="margin-bottom: 10px;">
-                        <div style="
-                            font-size: 10px;
-                            font-weight: 600;
-                            color: #6B7280;
-                            text-transform: uppercase;
-                            letter-spacing: 0.5px;
-                            margin-bottom: 4px;
-                        ">💼 Work Email</div>
-                        <div style="
-                            font-size: 12px;
-                            color: #1F2937;
-                            font-weight: 500;
-                            word-break: break-all;
-                        ">{work_email}</div>
-                    </div>
-                    
-                    <!-- Division -->
-                    <div style="margin-bottom: 10px;">
-                        <div style="
-                            font-size: 10px;
-                            font-weight: 600;
-                            color: #6B7280;
-                            text-transform: uppercase;
-                            letter-spacing: 0.5px;
-                            margin-bottom: 4px;
-                        ">🏢 Division</div>
-                        <div style="
-                            font-size: 12px;
-                            color: #1F2937;
-                            font-weight: 500;
-                        ">{division}</div>
-                    </div>
-                    
-                    <!-- Role Badge -->
-                    <div>
-                        <div style="
-                            font-size: 10px;
-                            font-weight: 600;
-                            color: #6B7280;
-                            text-transform: uppercase;
-                            letter-spacing: 0.5px;
-                            margin-bottom: 4px;
-                        ">👑 Role</div>
-                        <div style="
-                            display: inline-block;
-                            background: linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%);
-                            color: white;
-                            padding: 6px 14px;
-                            border-radius: 20px;
-                            font-size: 12px;
-                            font-weight: 700;
-                            letter-spacing: 0.3px;
-                            box-shadow: 0 2px 8px rgba(99, 102, 241, 0.25);
-                        ">{role}</div>
-                    </div>
+                <div style="font-size: 18px; font-weight: 700; color: #1F2937; margin-bottom: 4px;">
+                    {full_name}
                 </div>
             </div>
-        """, unsafe_allow_html=True)
+            <div style="background: rgba(255, 255, 255, 0.5); backdrop-filter: blur(5px); border-radius: 12px; padding: 14px; border: 1px solid rgba(255, 255, 255, 0.4);">
+                <div style="margin-bottom: 10px;">
+                    <div style="font-size: 10px; font-weight: 600; color: #6B7280; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">📧 Email</div>
+                    <div style="font-size: 12px; color: #1F2937; font-weight: 500; word-break: break-all;">{email}</div>
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <div style="font-size: 10px; font-weight: 600; color: #6B7280; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">💼 Work Email</div>
+                    <div style="font-size: 12px; color: #1F2937; font-weight: 500; word-break: break-all;">{work_email}</div>
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <div style="font-size: 10px; font-weight: 600; color: #6B7280; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">🏢 Division</div>
+                    <div style="font-size: 12px; color: #1F2937; font-weight: 500;">{division}</div>
+                </div>
+                <div>
+                    <div style="font-size: 10px; font-weight: 600; color: #6B7280; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">👑 Role</div>
+                    <div style="display: inline-block; background: linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%); color: white; padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 700; letter-spacing: 0.3px; box-shadow: 0 2px 8px rgba(99, 102, 241, 0.25);">{role}</div>
+                </div>
+            </div>
+        </div>
+        """
+        st.sidebar.markdown(profile_html, unsafe_allow_html=True)
         
         st.sidebar.markdown("---")
         # Navigasi utama setelah login (centralized) — gunakan button putih seragam; aktif di-highlight
