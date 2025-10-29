@@ -1644,9 +1644,8 @@ def page_auth():
         st.markdown("---")
             
         tab = st.tabs(["Login", "Register"])
-    
-    with tab[0]:
-        with col3:
+        
+        with tab[0]:
             st.subheader("Login")
             login_id = st.text_input("Id", key="login_id")
             pw = st.text_input("Password", type="password", key="login_pw")
@@ -1685,12 +1684,12 @@ def page_auth():
             elif st.session_state.login_status_message["type"] == "success":
                 st.success(st.session_state.login_status_message["text"])
 
-    with tab[1]:
-        st.subheader("Register")
-        st.caption("Lengkapi semua informasi di bawah ini untuk membuat akun baru.")
-        
-        with st.form("registration_form"):
-            st.markdown("#### Basic Information")
+        with tab[1]:
+            st.subheader("Register")
+            st.caption("Lengkapi semua informasi di bawah ini untuk membuat akun baru.")
+            
+            with st.form("registration_form"):
+                st.markdown("#### Basic Information")
             col1, col2 = st.columns(2)
             with col1:
                 reg_id = st.text_input("Login ID *", key="reg_login_id", placeholder="e.g., johndoe", help="Username untuk login")
