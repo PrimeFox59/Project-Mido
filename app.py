@@ -1640,7 +1640,7 @@ def page_auth():
     col1, col2, col3, col4, col5 = st.columns([1, 1, 2, 1, 1])
     
     with col3:
-        st.image("logo.png", width=600)
+        st.image("logo.png", width=650)
         st.markdown("---")
             
         tab = st.tabs(["Login", "Register"])
