@@ -1638,21 +1638,33 @@ def page_auth():
         /* Hide sidebar on login page */
         [data-testid="stSidebar"] {display: none !important;}
         
-        /* Background gradient for login page */
+        /* Background gradient for login page - full coverage */
         .stApp {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
         }
         
-        /* Remove max-width limit for full page layout */
+        /* Remove default padding and background */
         .main .block-container {
             max-width: 100% !important;
-            padding-left: 1rem !important;
-            padding-right: 1rem !important;
-            padding-top: 3rem !important;
+            padding-left: 0 !important;
+            padding-right: 0 !important;
+            padding-top: 0 !important;
+            padding-bottom: 0 !important;
+            background: transparent !important;
         }
         
-        /* Glassmorphism card for login form */
-        [data-testid="stVerticalBlock"] {
+        /* Remove white background from main content area */
+        .main, section[data-testid="stMain"] {
+            background: transparent !important;
+        }
+        
+        /* Hide default streamlit elements */
+        header[data-testid="stHeader"] {
+            background: transparent !important;
+        }
+        
+        /* Glassmorphism card for login form - only apply to center column content */
+        div[data-testid="column"]:nth-child(2) > div {
             background: rgba(255, 255, 255, 0.15) !important;
             backdrop-filter: blur(20px) saturate(180%) !important;
             -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
@@ -1660,6 +1672,7 @@ def page_auth():
             border: 1px solid rgba(255, 255, 255, 0.2) !important;
             padding: 32px !important;
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15) !important;
+            margin-top: 10vh !important;
         }
         
         /* Glass buttons on login page */
@@ -1686,7 +1699,7 @@ def page_auth():
         }
         
         /* Input fields glass effect */
-        .stTextInput input, .stSelectbox select {
+        .stTextInput input, .stSelectbox select, .stTextArea textarea, .stDateInput input {
             background: rgba(255, 255, 255, 0.2) !important;
             backdrop-filter: blur(5px) !important;
             border: 1px solid rgba(255, 255, 255, 0.3) !important;
@@ -1696,9 +1709,9 @@ def page_auth():
         
         /* Responsive for mobile */
         @media (max-width: 768px) {
-            .main .block-container {
-                padding-left: 0.5rem !important;
-                padding-right: 0.5rem !important;
+            div[data-testid="column"]:nth-child(2) > div {
+                margin-top: 2vh !important;
+                padding: 20px !important;
             }
         }
         </style>
@@ -1816,86 +1829,88 @@ def page_auth():
             
             st.caption("Fields marked with * are required")
             
+            # Submit button HARUS di dalam form
             submitted = st.form_submit_button("📝 Register", use_container_width=True)
-            
-            if submitted:
-                # Validation
-                if not all([reg_id, full_name, nik, phone_number, division, alamat, nomor_rekening_bca, nama_rekening_bca, pw1]):
-                    st.error("❌ Please fill in all required fields (*)")
-                elif pw1 != pw2:
-                    st.error("❌ Password and confirmation do not match.")
-                elif len(nik) < 16:
-                    st.error("❌ NIK must be 16 characters.")
-                else:
-                    try:
-                        # Check if login_id or NIK already exists
-                        existing_id = fetchone("SELECT id FROM users WHERE login_id=?", (reg_id.strip(),))
-                        existing_nik = fetchone("SELECT id FROM users WHERE nik=?", (nik.strip(),))
+        
+        # Processing diluar form tapi masih dalam tab[1]
+        if submitted:
+            # Validation
+            if not all([reg_id, full_name, nik, phone_number, division, alamat, nomor_rekening_bca, nama_rekening_bca, pw1]):
+                st.error("❌ Please fill in all required fields (*)")
+            elif pw1 != pw2:
+                st.error("❌ Password and confirmation do not match.")
+            elif len(nik) < 16:
+                st.error("❌ NIK must be 16 characters.")
+            else:
+                try:
+                    # Check if login_id or NIK already exists
+                    existing_id = fetchone("SELECT id FROM users WHERE login_id=?", (reg_id.strip(),))
+                    existing_nik = fetchone("SELECT id FROM users WHERE nik=?", (nik.strip(),))
+                    
+                    if existing_id:
+                        st.error(f"❌ Login ID '{reg_id.strip()}' already exists!")
+                    elif existing_nik:
+                        st.error(f"❌ NIK '{nik.strip()}' is already registered!")
+                    else:
+                        # Handle certificate upload if provided
+                        cert_drive_id = None
+                        cert_filename = None
                         
-                        if existing_id:
-                            st.error(f"❌ Login ID '{reg_id.strip()}' already exists!")
-                        elif existing_nik:
-                            st.error(f"❌ NIK '{nik.strip()}' is already registered!")
-                        else:
-                            # Handle certificate upload if provided
-                            cert_drive_id = None
-                            cert_filename = None
-                            
-                            if sertifikasi_file:
-                                try:
-                                    service, _ = build_drive_service()
-                                    timestamp = now_wib().strftime("%Y%m%d_%H%M%S")
-                                    file_ext = sertifikasi_file.name.split('.')[-1]
-                                    cert_filename = f"cert_{reg_id.strip()}_{timestamp}.{file_ext}"
-                                    cert_bytes = sertifikasi_file.read()
-                                    cert_drive_id = upload_bytes(service, FOLDER_ID_DEFAULT, cert_filename, cert_bytes, sertifikasi_file.type)
-                                    
-                                    if not cert_drive_id:
-                                        st.warning("⚠️ Certificate upload failed, but registration will continue without it.")
-                                except Exception as e:
-                                    st.warning(f"⚠️ Certificate upload error: {e}. Registration will continue without it.")
-                            
-                            # Insert user with all fields
-                            uid = execute(
-                                """INSERT INTO users (
-                                    login_id, full_name, name, email, password_hash, role, approved,
-                                    division, nik, dob, phone_number, alamat, work_email, join_date,
-                                    nomor_rekening_bca, nama_rekening_bca, sertifikasi_drive_id, sertifikasi_filename
-                                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                                (
-                                    reg_id.strip(), 
-                                    full_name.strip(), 
-                                    full_name.strip(), 
-                                    (email_r.strip() or None),
-                                    hash_password(pw1), 
-                                    "Agent",  # Default role
-                                    0,  # Awaiting approval
-                                    division.strip(),
-                                    nik.strip(),
-                                    dob.isoformat(),
-                                    phone_number.strip(),
-                                    alamat.strip(),
-                                    (work_email.strip() or None),
-                                    join_date.isoformat(),
-                                    nomor_rekening_bca.strip(),
-                                    nama_rekening_bca.strip(),
-                                    cert_drive_id,
-                                    cert_filename
-                                )
-                            )
-                            
-                            # Audit log registration
+                        if sertifikasi_file:
                             try:
-                                execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", 
-                                       (uid, "REGISTER", f"User {reg_id.strip()} registered with complete profile."))
-                            except Exception:
-                                pass
-                            
-                            st.success("✅ Registration successful! Please wait for admin approval.")
-                            st.info("📧 You will be notified once your account is approved.")
-                            st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ Registration failed: {e}")
+                                service, _ = build_drive_service()
+                                timestamp = now_wib().strftime("%Y%m%d_%H%M%S")
+                                file_ext = sertifikasi_file.name.split('.')[-1]
+                                cert_filename = f"cert_{reg_id.strip()}_{timestamp}.{file_ext}"
+                                cert_bytes = sertifikasi_file.read()
+                                cert_drive_id = upload_bytes(service, FOLDER_ID_DEFAULT, cert_filename, cert_bytes, sertifikasi_file.type)
+                                
+                                if not cert_drive_id:
+                                    st.warning("⚠️ Certificate upload failed, but registration will continue without it.")
+                            except Exception as e:
+                                st.warning(f"⚠️ Certificate upload error: {e}. Registration will continue without it.")
+                        
+                        # Insert user with all fields
+                        uid = execute(
+                            """INSERT INTO users (
+                                login_id, full_name, name, email, password_hash, role, approved,
+                                division, nik, dob, phone_number, alamat, work_email, join_date,
+                                nomor_rekening_bca, nama_rekening_bca, sertifikasi_drive_id, sertifikasi_filename
+                            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                            (
+                                reg_id.strip(), 
+                                full_name.strip(), 
+                                full_name.strip(), 
+                                (email_r.strip() or None),
+                                hash_password(pw1), 
+                                "Agent",  # Default role
+                                0,  # Awaiting approval
+                                division.strip(),
+                                nik.strip(),
+                                dob.isoformat(),
+                                phone_number.strip(),
+                                alamat.strip(),
+                                (work_email.strip() or None),
+                                join_date.isoformat(),
+                            nomor_rekening_bca.strip(),
+                            nama_rekening_bca.strip(),
+                            cert_drive_id,
+                            cert_filename
+                        )
+                    )
+                        
+                        # Audit log registration
+                        try:
+                            execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", 
+                                   (uid, "REGISTER", f"User {reg_id.strip()} registered with complete profile."))
+                        except Exception:
+                            pass
+                        
+                        st.success("✅ Registration successful! Please wait for admin approval.")
+                        st.info("📧 You will be notified once your account is approved.")
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Registration failed: {e}")
 
 def page_gdrive():
     require_roles(ALL_ROLES)
