@@ -1633,6 +1633,15 @@ def require_roles(allowed_roles):
 # ... (page_auth, page_dashboard, page_resume, page_reporting, page_admin_panel, page_user_guide and main function remain the same) ...
 def page_auth():
     
+    # Hide sidebar on login page
+    st.markdown("""
+        <style>
+        [data-testid="stSidebar"] {
+            display: none;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+    
     if "login_status_message" not in st.session_state:
         st.session_state.login_status_message = {"type": None, "text": ""}
 
