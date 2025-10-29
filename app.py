@@ -30,7 +30,8 @@ ICON_PATH = os.path.join(os.path.dirname(__file__), "icon.png")
 ENABLE_TIMELINE_WEIGHTING = True
 # Use absolute path for page icon to ensure it loads even when cwd differs
 _icon_arg = ICON_PATH if os.path.exists(ICON_PATH) else "icon.png"
-st.set_page_config(layout="wide", page_icon=_icon_arg, page_title="Minama Felonic Solutions")
+# Default layout centered (non-wide) untuk login page, akan di-override ke wide setelah login
+st.set_page_config(layout="centered", page_icon=_icon_arg, page_title="Minama Felonic Solutions")
 
 # ============================================
 # GLOBAL GLASSMORPHISM THEME INJECTION
@@ -42,7 +43,7 @@ st.markdown("""
        GLOBAL APP BACKGROUND & THEME
     ============================================ */
     
-    /* Subtle gradient background for main app */
+    /* Subtle gradient background for main app (will be overridden on login page) */
     .stApp {
         background: linear-gradient(135deg, 
             #f5f7fa 0%, 
@@ -50,12 +51,11 @@ st.markdown("""
             #f0f4f8 100%) !important;
     }
     
-    /* Main content area with subtle glass effect */
+    /* Main content area with subtle glass effect - no width/padding constraint here */
     .main .block-container {
         background: rgba(255, 255, 255, 0.3) !important;
         backdrop-filter: blur(10px) !important;
         border-radius: 20px !important;
-        padding: 2rem !important;
     }
     
     /* ============================================
@@ -2493,15 +2493,13 @@ def main():
             /* Force wide mode for all pages except login */
             .main .block-container {
                 max-width: 100% !important;
-                padding-left: 3rem !important;
-                padding-right: 3rem !important;
+                padding: 2rem 3rem !important;
             }
             
             /* Responsive padding */
             @media (max-width: 768px) {
                 .main .block-container {
-                    padding-left: 1rem !important;
-                    padding-right: 1rem !important;
+                    padding: 1rem !important;
                 }
             }
             </style>
