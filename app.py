@@ -22,7 +22,6 @@ FOLDER_ID_DEFAULT = "1Y98WYhpaqWoYZ2Y5RRGW-KJPXo1nBtAp"
 
 DB_PATH = "minama.db"
 ICON_PATH = os.path.join(os.path.dirname(__file__), "icon.png")
-st.set_page_config(layout="wide", page_icon=_icon_arg, page_title="Minama Felonic Solutions")
 
 # ---------------------------------
 # Configuration Flags
