@@ -1632,20 +1632,21 @@ def require_roles(allowed_roles):
 
 # ... (page_auth, page_dashboard, page_resume, page_reporting, page_admin_panel, page_user_guide and main function remain the same) ...
 def page_auth():
-
     
     if "login_status_message" not in st.session_state:
         st.session_state.login_status_message = {"type": None, "text": ""}
 
+    # Bagi layout menjadi 5 kolom, form login di kolom tengah (col 3)
+    col1, col2, col3, col4, col5 = st.columns([1, 1, 2, 1, 1])
+    
+    with col3:
+        st.image("logo.png", width=180)
+        st.markdown("---")
+            
+        tab = st.tabs(["Login", "Register"])
+    
     with tab[0]:
-        # Bagi layout menjadi 5 kolom, form login di kolom tengah (col 3)
-        col1, col2, col3, col4, col5 = st.columns([1, 1, 2, 1, 1])
-        
         with col3:
-            st.image("logo.png", width=180)
-            st.markdown("---")
-                
-            tab = st.tabs(["Login", "Register"])
             st.subheader("Login")
             login_id = st.text_input("Id", key="login_id")
             pw = st.text_input("Password", type="password", key="login_pw")
