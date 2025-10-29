@@ -1643,19 +1643,12 @@ def page_auth():
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         }
         
-        /* Limit content width to compact centered layout on login page */
+        /* Remove max-width limit for full page layout */
         .main .block-container {
-            max-width: 480px !important;
-            padding-left: 2rem !important;
-            padding-right: 2rem !important;
+            max-width: 100% !important;
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
             padding-top: 3rem !important;
-        }
-        
-        /* Center the container */
-        section[data-testid="stMain"] > div {
-            max-width: 100%;
-            display: flex;
-            justify-content: center;
         }
         
         /* Glassmorphism card for login form */
@@ -1704,70 +1697,74 @@ def page_auth():
         /* Responsive for mobile */
         @media (max-width: 768px) {
             .main .block-container {
-                max-width: 100% !important;
-                padding-left: 1rem !important;
-                padding-right: 1rem !important;
+                padding-left: 0.5rem !important;
+                padding-right: 0.5rem !important;
             }
         }
         </style>
     """, unsafe_allow_html=True)
-    # Tampilkan logo sebagai header
-    st.image("logo.png", width=180)
-    st.markdown("---")
-        
-    tab = st.tabs(["Login", "Register"])
     
-    if "login_status_message" not in st.session_state:
-        st.session_state.login_status_message = {"type": None, "text": ""}
-
-    with tab[0]:
-        st.subheader("Login")
-        login_id = st.text_input("Id", key="login_id")
-        pw = st.text_input("Password", type="password", key="login_pw")
-        login_clicked = st.button("Login", use_container_width=True)
-
-        if login_clicked:
-            st.session_state.login_status_message = {"type": None, "text": ""}
-            # Login by Id (login_id); fallback to email for backward compatibility
-            row = fetchone("SELECT * FROM users WHERE login_id=?", (login_id,))
-            if not row and login_id:
-                row = fetchone("SELECT * FROM users WHERE email=?", (login_id,))
-            if not row:
-                st.session_state.login_status_message = {"type": "error", "text": "User tidak ditemukan."}
-            else:
-                if not row['approved']:
-                    st.session_state.login_status_message = {"type": "error", "text": "Akun belum disetujui oleh Admin."}
-                elif verify_password(pw, row['password_hash']):
-                    login_user(row)
-                    # Catat audit trail login
-                    try:
-                        detail_id = row.get('login_id') or row.get('email') or '-'
-                        execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (row['id'], "LOGIN", f"User {detail_id} login."))
-                    except Exception:
-                        pass
-                    # BACKUP DIHAPUS DARI LOGIN
-                    # Backup hanya dilakukan saat logout untuk mengurangi beban sistem
-                    # dan memastikan hanya backup data terakhir setelah user selesai bekerja
-                    st.session_state.login_status_message = {"type": "success", "text": "Login berhasil. Mengalihkan..."}
-                    st.session_state.page = "Dashboard"
-                    st.rerun()
-                else:
-                    st.session_state.login_status_message = {"type": "error", "text": "Password salah."}
-
-        if st.session_state.login_status_message["type"] == "error":
-            st.error(st.session_state.login_status_message["text"])
-        elif st.session_state.login_status_message["type"] == "success":
-            st.success(st.session_state.login_status_message["text"])
-
-    with tab[1]:
-        st.subheader("Register")
-        st.caption("Lengkapi semua informasi di bawah ini untuk membuat akun baru.")
+    # Layout 3 kolom: kosong | login form | kosong
+    col_left, col_center, col_right = st.columns([1, 2, 1])
+    
+    with col_center:
+        # Tampilkan logo sebagai header
+        st.image("logo.png", width=180)
+        st.markdown("---")
+            
+        tab = st.tabs(["Login", "Register"])
         
-        with st.form("registration_form"):
-            st.markdown("#### Basic Information")
-            col1, col2 = st.columns(2)
-            with col1:
-                reg_id = st.text_input("Login ID *", key="reg_login_id", placeholder="e.g., johndoe", help="Username untuk login")
+        if "login_status_message" not in st.session_state:
+            st.session_state.login_status_message = {"type": None, "text": ""}
+
+        with tab[0]:
+            st.subheader("Login")
+            login_id = st.text_input("Id", key="login_id")
+            pw = st.text_input("Password", type="password", key="login_pw")
+            login_clicked = st.button("Login", use_container_width=True)
+
+            if login_clicked:
+                st.session_state.login_status_message = {"type": None, "text": ""}
+                # Login by Id (login_id); fallback to email for backward compatibility
+                row = fetchone("SELECT * FROM users WHERE login_id=?", (login_id,))
+                if not row and login_id:
+                    row = fetchone("SELECT * FROM users WHERE email=?", (login_id,))
+                if not row:
+                    st.session_state.login_status_message = {"type": "error", "text": "User tidak ditemukan."}
+                else:
+                    if not row['approved']:
+                        st.session_state.login_status_message = {"type": "error", "text": "Akun belum disetujui oleh Admin."}
+                    elif verify_password(pw, row['password_hash']):
+                        login_user(row)
+                        # Catat audit trail login
+                        try:
+                            detail_id = row.get('login_id') or row.get('email') or '-'
+                            execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (row['id'], "LOGIN", f"User {detail_id} login."))
+                        except Exception:
+                            pass
+                        # BACKUP DIHAPUS DARI LOGIN
+                        # Backup hanya dilakukan saat logout untuk mengurangi beban sistem
+                        # dan memastikan hanya backup data terakhir setelah user selesai bekerja
+                        st.session_state.login_status_message = {"type": "success", "text": "Login berhasil. Mengalihkan..."}
+                        st.session_state.page = "Dashboard"
+                        st.rerun()
+                    else:
+                        st.session_state.login_status_message = {"type": "error", "text": "Password salah."}
+
+            if st.session_state.login_status_message["type"] == "error":
+                st.error(st.session_state.login_status_message["text"])
+            elif st.session_state.login_status_message["type"] == "success":
+                st.success(st.session_state.login_status_message["text"])
+
+        with tab[1]:
+            st.subheader("Register")
+            st.caption("Lengkapi semua informasi di bawah ini untuk membuat akun baru.")
+            
+            with st.form("registration_form"):
+                st.markdown("#### Basic Information")
+                col1, col2 = st.columns(2)
+                with col1:
+                    reg_id = st.text_input("Login ID *", key="reg_login_id", placeholder="e.g., johndoe", help="Username untuk login")
                 full_name = st.text_input("Full Name *", key="reg_full_name")
                 email_r = st.text_input("Email", key="reg_email")
                 work_email = st.text_input("Work Email", key="reg_work_email")
