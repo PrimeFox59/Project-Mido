@@ -1632,23 +1632,21 @@ def require_roles(allowed_roles):
 
 # ... (page_auth, page_dashboard, page_resume, page_reporting, page_admin_panel, page_user_guide and main function remain the same) ...
 def page_auth():
-    # Sembunyikan sidebar dan batasi lebar konten untuk halaman login dengan glassmorphism
+    # Modern login page with clean white card design
     st.markdown("""
         <style>
         /* Hide sidebar on login page */
         [data-testid="stSidebar"] {display: none !important;}
         
-        /* Background gradient for login page */
+        /* Light gradient background */
         .stApp {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #e9ecef 0%, #dee2e6 100%);
         }
         
-        /* Compact centered layout on login page - smaller form */
+        /* Compact centered layout */
         .main .block-container {
-            max-width: 420px !important;
-            padding-left: 2rem !important;
-            padding-right: 2rem !important;
-            padding-top: 3rem !important;
+            max-width: 440px !important;
+            padding: 2rem 1.5rem !important;
             margin: 0 auto !important;
         }
         
@@ -1657,110 +1655,195 @@ def page_auth():
             max-width: 100%;
             display: flex;
             justify-content: center;
+            align-items: center;
+            min-height: 100vh;
         }
         
-        /* Glassmorphism card for login form */
+        /* Clean white card for login form */
         [data-testid="stVerticalBlock"] {
-            background: rgba(255, 255, 255, 0.15) !important;
-            backdrop-filter: blur(20px) saturate(180%) !important;
-            -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-            border-radius: 24px !important;
-            border: 1px solid rgba(255, 255, 255, 0.2) !important;
-            padding: 32px !important;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15) !important;
+            background: #ffffff !important;
+            border-radius: 16px !important;
+            padding: 40px 36px !important;
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08) !important;
         }
         
-        /* Glass buttons on login page */
+        /* Modern gradient button */
         .stButton > button {
-            background: linear-gradient(135deg, 
-                rgba(255, 255, 255, 0.25) 0%, 
-                rgba(255, 255, 255, 0.12) 100%) !important;
-            backdrop-filter: blur(10px) !important;
-            border: 1px solid rgba(255, 255, 255, 0.3) !important;
-            border-radius: 12px !important;
-            color: #1F2937 !important;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+            border: none !important;
+            border-radius: 8px !important;
+            color: #FFFFFF !important;
             font-weight: 600 !important;
+            font-size: 16px !important;
             padding: 12px 24px !important;
-            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1) !important;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3) !important;
             transition: all 0.3s ease !important;
+            text-transform: none !important;
         }
         
         .stButton > button:hover {
-            background: linear-gradient(135deg, 
-                rgba(255, 255, 255, 0.35) 0%, 
-                rgba(255, 255, 255, 0.18) 100%) !important;
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4) !important;
             transform: translateY(-2px) !important;
-            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15) !important;
         }
         
-        /* Input fields glass effect */
-        .stTextInput input, .stSelectbox select {
-            background: rgba(255, 255, 255, 0.2) !important;
-            backdrop-filter: blur(5px) !important;
-            border: 1px solid rgba(255, 255, 255, 0.3) !important;
-            border-radius: 10px !important;
-            color: #1F2937 !important;
+        /* Clean input fields */
+        .stTextInput input, .stTextInput input[type="password"] {
+            background: #f8f9fa !important;
+            border: 1px solid #e9ecef !important;
+            border-radius: 8px !important;
+            padding: 12px 16px !important;
+            font-size: 14px !important;
+            color: #495057 !important;
+            transition: all 0.3s ease !important;
+        }
+        
+        .stTextInput input:focus, .stTextInput input[type="password"]:focus {
+            background: #ffffff !important;
+            border-color: #667eea !important;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1) !important;
+        }
+        
+        /* Input labels */
+        .stTextInput label {
+            color: #495057 !important;
+            font-size: 14px !important;
+            font-weight: 500 !important;
+            margin-bottom: 8px !important;
+        }
+        
+        /* Checkbox styling */
+        .stCheckbox {
+            padding: 8px 0 !important;
+        }
+        
+        .stCheckbox label {
+            color: #6c757d !important;
+            font-size: 14px !important;
+        }
+        
+        /* Form title styling */
+        h1, h2, h3 {
+            color: #2d3748 !important;
+            text-align: center !important;
+            margin-bottom: 24px !important;
+        }
+        
+        /* Link styling */
+        a {
+            color: #667eea !important;
+            text-decoration: none !important;
+            font-size: 14px !important;
+        }
+        
+        a:hover {
+            text-decoration: underline !important;
+        }
+        
+        /* Caption text */
+        .caption-text {
+            text-align: center;
+            color: #6c757d;
+            font-size: 14px;
+            margin-top: 20px;
+        }
+        
+        /* Tabs hidden for cleaner login page */
+        .stTabs [data-baseweb="tab-list"] {
+            display: none !important;
         }
         
         /* Responsive for mobile */
         @media (max-width: 768px) {
             .main .block-container {
                 max-width: 100% !important;
-                padding-left: 1rem !important;
-                padding-right: 1rem !important;
+                padding: 1rem !important;
+            }
+            
+            [data-testid="stVerticalBlock"] {
+                padding: 32px 24px !important;
             }
         }
         </style>
     """, unsafe_allow_html=True)
     
-    # Tampilkan logo sebagai header
-    st.image("logo.png", width=180)
-    st.markdown("---")
-        
-    tab = st.tabs(["Login", "Register"])
+    # Form title with gradient text
+    st.markdown("""
+        <h2 style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                   -webkit-background-clip: text;
+                   -webkit-text-fill-color: transparent;
+                   background-clip: text;
+                   font-size: 28px;
+                   font-weight: 700;
+                   margin-bottom: 32px;'>
+            Form Login
+        </h2>
+    """, unsafe_allow_html=True)
     
     if "login_status_message" not in st.session_state:
         st.session_state.login_status_message = {"type": None, "text": ""}
+    
+    if "remember_me" not in st.session_state:
+        st.session_state.remember_me = False
 
-    with tab[0]:
-        st.subheader("Login")
-        login_id = st.text_input("Id", key="login_id")
-        pw = st.text_input("Password", type="password", key="login_pw")
-        login_clicked = st.button("Login", use_container_width=True)
+    # Login form
+    login_id = st.text_input("Masukan Email", key="login_id", placeholder="contoh@email.com")
+    pw = st.text_input("Masukan Password", type="password", key="login_pw", placeholder="••••••••")
+    
+    # Remember me checkbox and forgot password link in columns
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        remember = st.checkbox("Ingat saya", value=st.session_state.remember_me, key="remember_checkbox")
+    with col2:
+        st.markdown('<div style="text-align: right; padding-top: 4px;"><a href="#" style="color: #667eea;">Lupa password?</a></div>', unsafe_allow_html=True)
+    
+    st.markdown("<br>", unsafe_allow_html=True)
+    login_clicked = st.button("Login", use_container_width=True)
 
-        if login_clicked:
-            st.session_state.login_status_message = {"type": None, "text": ""}
-            # Login by Id (login_id); fallback to email for backward compatibility
-            row = fetchone("SELECT * FROM users WHERE login_id=?", (login_id,))
-            if not row and login_id:
-                row = fetchone("SELECT * FROM users WHERE email=?", (login_id,))
-            if not row:
-                st.session_state.login_status_message = {"type": "error", "text": "User tidak ditemukan."}
+    if login_clicked:
+        st.session_state.login_status_message = {"type": None, "text": ""}
+        # Store remember me preference
+        st.session_state.remember_me = remember
+        
+        # Login by Id (login_id); fallback to email for backward compatibility
+        row = fetchone("SELECT * FROM users WHERE login_id=?", (login_id,))
+        if not row and login_id:
+            row = fetchone("SELECT * FROM users WHERE email=?", (login_id,))
+        if not row:
+            st.session_state.login_status_message = {"type": "error", "text": "User tidak ditemukan."}
+        else:
+            if not row['approved']:
+                st.session_state.login_status_message = {"type": "error", "text": "Akun belum disetujui oleh Admin."}
+            elif verify_password(pw, row['password_hash']):
+                login_user(row)
+                # Catat audit trail login
+                try:
+                    detail_id = row.get('login_id') or row.get('email') or '-'
+                    execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (row['id'], "LOGIN", f"User {detail_id} login."))
+                except Exception:
+                    pass
+                # BACKUP DIHAPUS DARI LOGIN
+                # Backup hanya dilakukan saat logout untuk mengurangi beban sistem
+                # dan memastikan hanya backup data terakhir setelah user selesai bekerja
+                st.session_state.login_status_message = {"type": "success", "text": "Login berhasil. Mengalihkan..."}
+                st.session_state.page = "Dashboard"
+                st.rerun()
             else:
-                if not row['approved']:
-                    st.session_state.login_status_message = {"type": "error", "text": "Akun belum disetujui oleh Admin."}
-                elif verify_password(pw, row['password_hash']):
-                    login_user(row)
-                    # Catat audit trail login
-                    try:
-                        detail_id = row.get('login_id') or row.get('email') or '-'
-                        execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (row['id'], "LOGIN", f"User {detail_id} login."))
-                    except Exception:
-                        pass
-                    # BACKUP DIHAPUS DARI LOGIN
-                    # Backup hanya dilakukan saat logout untuk mengurangi beban sistem
-                    # dan memastikan hanya backup data terakhir setelah user selesai bekerja
-                    st.session_state.login_status_message = {"type": "success", "text": "Login berhasil. Mengalihkan..."}
-                    st.session_state.page = "Dashboard"
-                    st.rerun()
-                else:
-                    st.session_state.login_status_message = {"type": "error", "text": "Password salah."}
+                st.session_state.login_status_message = {"type": "error", "text": "Password salah."}
 
-        if st.session_state.login_status_message["type"] == "error":
-            st.error(st.session_state.login_status_message["text"])
-        elif st.session_state.login_status_message["type"] == "success":
-            st.success(st.session_state.login_status_message["text"])
-
+    if st.session_state.login_status_message["type"] == "error":
+        st.error(st.session_state.login_status_message["text"])
+    elif st.session_state.login_status_message["type"] == "success":
+        st.success(st.session_state.login_status_message["text"])
+    
+    # Register link at bottom
+    st.markdown("""
+        <div class='caption-text'>
+            Belum menjadi anggota? <a href='#' style='color: #667eea; font-weight: 600;'>Daftar Sekarang</a>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    # Hidden register tab (kept for compatibility but not shown)
+    tab = st.tabs(["Login", "Register"])
     with tab[1]:
         st.subheader("Register")
         st.caption("Lengkapi semua informasi di bawah ini untuk membuat akun baru.")
