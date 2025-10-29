@@ -2675,10 +2675,6 @@ def main():
                     <div style="font-size: 12px; color: #1F2937; font-weight: 500; word-break: break-all;">{email}</div>
                 </div>
                 <div style="margin-bottom: 10px;">
-                    <div style="font-size: 10px; font-weight: 600; color: #6B7280; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">💼 Work Email</div>
-                    <div style="font-size: 12px; color: #1F2937; font-weight: 500; word-break: break-all;">{work_email}</div>
-                </div>
-                <div style="margin-bottom: 10px;">
                     <div style="font-size: 10px; font-weight: 600; color: #6B7280; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">🏢 Division</div>
                     <div style="font-size: 12px; color: #1F2937; font-weight: 500;">{division}</div>
                 </div>
