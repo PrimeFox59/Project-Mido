@@ -2480,33 +2480,6 @@ def main():
     if "user" not in st.session_state:
         st.session_state.user = None
     
-    # ========================================================================
-    # LAYOUT MODE: Non-wide untuk login, Wide untuk halaman lainnya
-    # ========================================================================
-    # Inject CSS untuk override layout berdasarkan halaman aktif
-    current_page = st.session_state.get("page", "Authentication")
-    
-    if current_page != "Authentication":
-        # Wide mode untuk semua halaman kecuali login
-        st.markdown("""
-            <style>
-            /* Force wide mode for all pages except login */
-            .main .block-container {
-                max-width: 100% !important;
-                padding-left: 3rem !important;
-                padding-right: 3rem !important;
-            }
-            
-            /* Responsive padding */
-            @media (max-width: 768px) {
-                .main .block-container {
-                    padding-left: 1rem !important;
-                    padding-right: 1rem !important;
-                }
-            }
-            </style>
-        """, unsafe_allow_html=True)
-    
     if "prelogin_auto_restore_done" not in st.session_state:
         is_fresh = _is_probably_fresh_seed_db()
         
