@@ -1643,12 +1643,20 @@ def page_auth():
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         }
         
-        /* Remove max-width limit for full page layout */
+        /* Compact centered layout on login page - smaller form */
         .main .block-container {
-            max-width: 100% !important;
-            padding-left: 1rem !important;
-            padding-right: 1rem !important;
+            max-width: 420px !important;
+            padding-left: 2rem !important;
+            padding-right: 2rem !important;
             padding-top: 3rem !important;
+            margin: 0 auto !important;
+        }
+        
+        /* Center the container */
+        section[data-testid="stMain"] > div {
+            max-width: 100%;
+            display: flex;
+            justify-content: center;
         }
         
         /* Glassmorphism card for login form */
@@ -1697,205 +1705,203 @@ def page_auth():
         /* Responsive for mobile */
         @media (max-width: 768px) {
             .main .block-container {
-                padding-left: 0.5rem !important;
-                padding-right: 0.5rem !important;
+                max-width: 100% !important;
+                padding-left: 1rem !important;
+                padding-right: 1rem !important;
             }
         }
         </style>
     """, unsafe_allow_html=True)
     
-    # Layout 3 kolom: kosong | login form | kosong
-    col_left, col_center, col_right = st.columns([1, 2, 1])
-    
-    with col_center:
-        # Tampilkan logo sebagai header
-        st.image("logo.png", width=180)
-        st.markdown("---")
-            
-        tab = st.tabs(["Login", "Register"])
+    # Tampilkan logo sebagai header
+    st.image("logo.png", width=180)
+    st.markdown("---")
         
-        if "login_status_message" not in st.session_state:
+    tab = st.tabs(["Login", "Register"])
+    
+    if "login_status_message" not in st.session_state:
+        st.session_state.login_status_message = {"type": None, "text": ""}
+
+    with tab[0]:
+        st.subheader("Login")
+        login_id = st.text_input("Id", key="login_id")
+        pw = st.text_input("Password", type="password", key="login_pw")
+        login_clicked = st.button("Login", use_container_width=True)
+
+        if login_clicked:
             st.session_state.login_status_message = {"type": None, "text": ""}
-
-        with tab[0]:
-            st.subheader("Login")
-            login_id = st.text_input("Id", key="login_id")
-            pw = st.text_input("Password", type="password", key="login_pw")
-            login_clicked = st.button("Login", use_container_width=True)
-
-            if login_clicked:
-                st.session_state.login_status_message = {"type": None, "text": ""}
-                # Login by Id (login_id); fallback to email for backward compatibility
-                row = fetchone("SELECT * FROM users WHERE login_id=?", (login_id,))
-                if not row and login_id:
-                    row = fetchone("SELECT * FROM users WHERE email=?", (login_id,))
-                if not row:
-                    st.session_state.login_status_message = {"type": "error", "text": "User tidak ditemukan."}
+            # Login by Id (login_id); fallback to email for backward compatibility
+            row = fetchone("SELECT * FROM users WHERE login_id=?", (login_id,))
+            if not row and login_id:
+                row = fetchone("SELECT * FROM users WHERE email=?", (login_id,))
+            if not row:
+                st.session_state.login_status_message = {"type": "error", "text": "User tidak ditemukan."}
+            else:
+                if not row['approved']:
+                    st.session_state.login_status_message = {"type": "error", "text": "Akun belum disetujui oleh Admin."}
+                elif verify_password(pw, row['password_hash']):
+                    login_user(row)
+                    # Catat audit trail login
+                    try:
+                        detail_id = row.get('login_id') or row.get('email') or '-'
+                        execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (row['id'], "LOGIN", f"User {detail_id} login."))
+                    except Exception:
+                        pass
+                    # BACKUP DIHAPUS DARI LOGIN
+                    # Backup hanya dilakukan saat logout untuk mengurangi beban sistem
+                    # dan memastikan hanya backup data terakhir setelah user selesai bekerja
+                    st.session_state.login_status_message = {"type": "success", "text": "Login berhasil. Mengalihkan..."}
+                    st.session_state.page = "Dashboard"
+                    st.rerun()
                 else:
-                    if not row['approved']:
-                        st.session_state.login_status_message = {"type": "error", "text": "Akun belum disetujui oleh Admin."}
-                    elif verify_password(pw, row['password_hash']):
-                        login_user(row)
-                        # Catat audit trail login
-                        try:
-                            detail_id = row.get('login_id') or row.get('email') or '-'
-                            execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (row['id'], "LOGIN", f"User {detail_id} login."))
-                        except Exception:
-                            pass
-                        # BACKUP DIHAPUS DARI LOGIN
-                        # Backup hanya dilakukan saat logout untuk mengurangi beban sistem
-                        # dan memastikan hanya backup data terakhir setelah user selesai bekerja
-                        st.session_state.login_status_message = {"type": "success", "text": "Login berhasil. Mengalihkan..."}
-                        st.session_state.page = "Dashboard"
-                        st.rerun()
-                    else:
-                        st.session_state.login_status_message = {"type": "error", "text": "Password salah."}
+                    st.session_state.login_status_message = {"type": "error", "text": "Password salah."}
 
-            if st.session_state.login_status_message["type"] == "error":
-                st.error(st.session_state.login_status_message["text"])
-            elif st.session_state.login_status_message["type"] == "success":
-                st.success(st.session_state.login_status_message["text"])
+        if st.session_state.login_status_message["type"] == "error":
+            st.error(st.session_state.login_status_message["text"])
+        elif st.session_state.login_status_message["type"] == "success":
+            st.success(st.session_state.login_status_message["text"])
 
-        with tab[1]:
-            st.subheader("Register")
-            st.caption("Lengkapi semua informasi di bawah ini untuk membuat akun baru.")
+    with tab[1]:
+        st.subheader("Register")
+        st.caption("Lengkapi semua informasi di bawah ini untuk membuat akun baru.")
+        
+        with st.form("registration_form"):
+            st.markdown("#### Basic Information")
+            col1, col2 = st.columns(2)
+            with col1:
+                reg_id = st.text_input("Login ID *", key="reg_login_id", placeholder="e.g., johndoe", help="Username untuk login")
+                full_name = st.text_input("Full Name *", key="reg_full_name")
+                email_r = st.text_input("Email", key="reg_email")
+                work_email = st.text_input("Work Email", key="reg_work_email")
+                division = st.text_input("Division *", key="reg_division", help="Divisi/Departemen Anda")
             
-            with st.form("registration_form"):
-                st.markdown("#### Basic Information")
-                col1, col2 = st.columns(2)
-                with col1:
-                    reg_id = st.text_input("Login ID *", key="reg_login_id", placeholder="e.g., johndoe", help="Username untuk login")
-                    full_name = st.text_input("Full Name *", key="reg_full_name")
-                    email_r = st.text_input("Email", key="reg_email")
-                    work_email = st.text_input("Work Email", key="reg_work_email")
-                    division = st.text_input("Division *", key="reg_division", help="Divisi/Departemen Anda")
-                
-                with col2:
-                    nik = st.text_input("NIK *", key="reg_nik", max_chars=16, help="Nomor Induk Kependudukan (max 16 karakter)")
-                    phone_number = st.text_input("Phone Number *", key="reg_phone", placeholder="+62...")
-                    dob = st.date_input(
-                        "Date of Birth *", 
-                        key="reg_dob",
-                        min_value=date(1950, 1, 1),
-                        max_value=today_wib(),
-                        value=date(1990, 1, 1),
-                        help="Tanggal lahir Anda"
-                    )
-                    join_date = st.date_input(
-                        "Join Date *", 
-                        key="reg_join_date",
-                        min_value=date(2000, 1, 1),
-                        max_value=today_wib(),
-                        value=today_wib(),
-                        help="Tanggal bergabung dengan perusahaan"
-                    )
-                
-                alamat = st.text_area("Alamat *", key="reg_alamat", height=100, help="Alamat lengkap tempat tinggal")
-                
-                st.markdown("#### Banking Information")
-                col3, col4 = st.columns(2)
-                with col3:
-                    nomor_rekening_bca = st.text_input("Nomor Rekening BCA *", key="reg_bca_no")
-                with col4:
-                    nama_rekening_bca = st.text_input("Nama Rekening BCA *", key="reg_bca_name", help="Nama sesuai rekening BCA")
-                
-                st.markdown("#### Certification (Optional)")
-                sertifikasi_file = st.file_uploader(
-                    "Sertifikasi Penagihan SPPI/AFPI", 
-                    type=["pdf", "jpg", "jpeg", "png"],
-                    key="reg_cert_upload",
-                    help="Upload sertifikat penagihan (opsional)"
+            with col2:
+                nik = st.text_input("NIK *", key="reg_nik", max_chars=16, help="Nomor Induk Kependudukan (max 16 karakter)")
+                phone_number = st.text_input("Phone Number *", key="reg_phone", placeholder="+62...")
+                dob = st.date_input(
+                    "Date of Birth *", 
+                    key="reg_dob",
+                    min_value=date(1950, 1, 1),
+                    max_value=today_wib(),
+                    value=date(1990, 1, 1),
+                    help="Tanggal lahir Anda"
                 )
-                
-                st.markdown("#### Security")
-                col5, col6 = st.columns(2)
-                with col5:
-                    pw1 = st.text_input("Password *", type="password", key="reg_pw1")
-                with col6:
-                    pw2 = st.text_input("Confirm Password *", type="password", key="reg_pw2")
-                
-                st.caption("Fields marked with * are required")
-                
-                submitted = st.form_submit_button("📝 Register", use_container_width=True)
-                
-                if submitted:
-                    # Validation
-                    if not all([reg_id, full_name, nik, phone_number, division, alamat, nomor_rekening_bca, nama_rekening_bca, pw1]):
-                        st.error("❌ Please fill in all required fields (*)")
-                    elif pw1 != pw2:
-                        st.error("❌ Password and confirmation do not match.")
-                    elif len(nik) < 16:
-                        st.error("❌ NIK must be 16 characters.")
-                    else:
-                        try:
-                            # Check if login_id or NIK already exists
-                            existing_id = fetchone("SELECT id FROM users WHERE login_id=?", (reg_id.strip(),))
-                            existing_nik = fetchone("SELECT id FROM users WHERE nik=?", (nik.strip(),))
+                join_date = st.date_input(
+                    "Join Date *", 
+                    key="reg_join_date",
+                    min_value=date(2000, 1, 1),
+                    max_value=today_wib(),
+                    value=today_wib(),
+                    help="Tanggal bergabung dengan perusahaan"
+                )
+            
+            alamat = st.text_area("Alamat *", key="reg_alamat", height=100, help="Alamat lengkap tempat tinggal")
+            
+            st.markdown("#### Banking Information")
+            col3, col4 = st.columns(2)
+            with col3:
+                nomor_rekening_bca = st.text_input("Nomor Rekening BCA *", key="reg_bca_no")
+            with col4:
+                nama_rekening_bca = st.text_input("Nama Rekening BCA *", key="reg_bca_name", help="Nama sesuai rekening BCA")
+            
+            st.markdown("#### Certification (Optional)")
+            sertifikasi_file = st.file_uploader(
+                "Sertifikasi Penagihan SPPI/AFPI", 
+                type=["pdf", "jpg", "jpeg", "png"],
+                key="reg_cert_upload",
+                help="Upload sertifikat penagihan (opsional)"
+            )
+            
+            st.markdown("#### Security")
+            col5, col6 = st.columns(2)
+            with col5:
+                pw1 = st.text_input("Password *", type="password", key="reg_pw1")
+            with col6:
+                pw2 = st.text_input("Confirm Password *", type="password", key="reg_pw2")
+            
+            st.caption("Fields marked with * are required")
+            
+            submitted = st.form_submit_button("📝 Register", use_container_width=True)
+            
+            if submitted:
+                # Validation
+                if not all([reg_id, full_name, nik, phone_number, division, alamat, nomor_rekening_bca, nama_rekening_bca, pw1]):
+                    st.error("❌ Please fill in all required fields (*)")
+                elif pw1 != pw2:
+                    st.error("❌ Password and confirmation do not match.")
+                elif len(nik) < 16:
+                    st.error("❌ NIK must be 16 characters.")
+                else:
+                    try:
+                        # Check if login_id or NIK already exists
+                        existing_id = fetchone("SELECT id FROM users WHERE login_id=?", (reg_id.strip(),))
+                        existing_nik = fetchone("SELECT id FROM users WHERE nik=?", (nik.strip(),))
                             
-                            if existing_id:
-                                st.error(f"❌ Login ID '{reg_id.strip()}' already exists!")
-                            elif existing_nik:
-                                st.error(f"❌ NIK '{nik.strip()}' is already registered!")
-                            else:
-                                # Handle certificate upload if provided
-                                cert_drive_id = None
-                                cert_filename = None
-                                
-                                if sertifikasi_file:
-                                    try:
-                                        service, _ = build_drive_service()
-                                        timestamp = now_wib().strftime("%Y%m%d_%H%M%S")
-                                        file_ext = sertifikasi_file.name.split('.')[-1]
-                                        cert_filename = f"cert_{reg_id.strip()}_{timestamp}.{file_ext}"
-                                        cert_bytes = sertifikasi_file.read()
-                                        cert_drive_id = upload_bytes(service, FOLDER_ID_DEFAULT, cert_filename, cert_bytes, sertifikasi_file.type)
-                                        
-                                        if not cert_drive_id:
-                                            st.warning("⚠️ Certificate upload failed, but registration will continue without it.")
-                                    except Exception as e:
-                                        st.warning(f"⚠️ Certificate upload error: {e}. Registration will continue without it.")
-                                
-                                # Insert user with all fields
-                                uid = execute(
-                                    """INSERT INTO users (
-                                        login_id, full_name, name, email, password_hash, role, approved,
-                                        division, nik, dob, phone_number, alamat, work_email, join_date,
-                                        nomor_rekening_bca, nama_rekening_bca, sertifikasi_drive_id, sertifikasi_filename
-                                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                                    (
-                                        reg_id.strip(), 
-                                        full_name.strip(), 
-                                        full_name.strip(), 
-                                        (email_r.strip() or None),
-                                        hash_password(pw1), 
-                                        "Agent",  # Default role
-                                        0,  # Awaiting approval
-                                        division.strip(),
-                                        nik.strip(),
-                                        dob.isoformat(),
-                                        phone_number.strip(),
-                                        alamat.strip(),
-                                        (work_email.strip() or None),
-                                        join_date.isoformat(),
-                                        nomor_rekening_bca.strip(),
-                                        nama_rekening_bca.strip(),
-                                        cert_drive_id,
-                                        cert_filename
-                                    )
-                                )
-                                
-                                # Audit log registration
+                        
+                        if existing_id:
+                            st.error(f"❌ Login ID '{reg_id.strip()}' already exists!")
+                        elif existing_nik:
+                            st.error(f"❌ NIK '{nik.strip()}' is already registered!")
+                        else:
+                            # Handle certificate upload if provided
+                            cert_drive_id = None
+                            cert_filename = None
+                            
+                            if sertifikasi_file:
                                 try:
-                                    execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", 
-                                           (uid, "REGISTER", f"User {reg_id.strip()} registered with complete profile."))
-                                except Exception:
-                                    pass
-                                
-                                st.success("✅ Registration successful! Please wait for admin approval.")
-                                st.info("📧 You will be notified once your account is approved.")
-                                st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ Registration failed: {e}")
+                                    service, _ = build_drive_service()
+                                    timestamp = now_wib().strftime("%Y%m%d_%H%M%S")
+                                    file_ext = sertifikasi_file.name.split('.')[-1]
+                                    cert_filename = f"cert_{reg_id.strip()}_{timestamp}.{file_ext}"
+                                    cert_bytes = sertifikasi_file.read()
+                                    cert_drive_id = upload_bytes(service, FOLDER_ID_DEFAULT, cert_filename, cert_bytes, sertifikasi_file.type)
+                                    
+                                    if not cert_drive_id:
+                                        st.warning("⚠️ Certificate upload failed, but registration will continue without it.")
+                                except Exception as e:
+                                    st.warning(f"⚠️ Certificate upload error: {e}. Registration will continue without it.")
+                            
+                            # Insert user with all fields
+                            uid = execute(
+                                """INSERT INTO users (
+                                    login_id, full_name, name, email, password_hash, role, approved,
+                                    division, nik, dob, phone_number, alamat, work_email, join_date,
+                                    nomor_rekening_bca, nama_rekening_bca, sertifikasi_drive_id, sertifikasi_filename
+                                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                (
+                                    reg_id.strip(), 
+                                    full_name.strip(), 
+                                    full_name.strip(), 
+                                    (email_r.strip() or None),
+                                    hash_password(pw1), 
+                                    "Agent",  # Default role
+                                    0,  # Awaiting approval
+                                    division.strip(),
+                                    nik.strip(),
+                                    dob.isoformat(),
+                                    phone_number.strip(),
+                                    alamat.strip(),
+                                    (work_email.strip() or None),
+                                    join_date.isoformat(),
+                                    nomor_rekening_bca.strip(),
+                                    nama_rekening_bca.strip(),
+                                    cert_drive_id,
+                                    cert_filename
+                                )
+                            )
+                            
+                            # Audit log registration
+                            try:
+                                execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", 
+                                       (uid, "REGISTER", f"User {reg_id.strip()} registered with complete profile."))
+                            except Exception:
+                                pass
+                            
+                            st.success("✅ Registration successful! Please wait for admin approval.")
+                            st.info("📧 You will be notified once your account is approved.")
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Registration failed: {e}")
 
 def page_gdrive():
     require_roles(ALL_ROLES)
