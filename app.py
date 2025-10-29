@@ -1643,13 +1643,12 @@ def page_auth():
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         }
         
-        /* Compact centered layout on login page - smaller form */
+        /* Limit content width to compact centered layout on login page */
         .main .block-container {
-            max-width: 420px !important;
+            max-width: 480px !important;
             padding-left: 2rem !important;
             padding-right: 2rem !important;
             padding-top: 3rem !important;
-            margin: 0 auto !important;
         }
         
         /* Center the container */
@@ -1712,7 +1711,6 @@ def page_auth():
         }
         </style>
     """, unsafe_allow_html=True)
-    
     # Tampilkan logo sebagai header
     st.image("logo.png", width=180)
     st.markdown("---")
@@ -1836,7 +1834,6 @@ def page_auth():
                         # Check if login_id or NIK already exists
                         existing_id = fetchone("SELECT id FROM users WHERE login_id=?", (reg_id.strip(),))
                         existing_nik = fetchone("SELECT id FROM users WHERE nik=?", (nik.strip(),))
-                            
                         
                         if existing_id:
                             st.error(f"❌ Login ID '{reg_id.strip()}' already exists!")
