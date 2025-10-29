@@ -1705,7 +1705,7 @@ def page_auth():
     """, unsafe_allow_html=True)
     
     # Layout 3 kolom: kosong | login form | kosong
-    col_left, col_center, col_right = st.columns([1, 2, 1])
+    col_left, col_center, col_right = st.columns([0, 2, 0])
     
     with col_center:
         # Tampilkan logo sebagai header
