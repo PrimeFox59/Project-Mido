@@ -5907,28 +5907,6 @@ def page_supervisor():
                         
                         st.markdown(rows_html + "</div>", unsafe_allow_html=True)
                         
-                        # Nett Debt Section - Simple Expander
-                        with st.expander("💰 Nett Debt : #N/A", expanded=False):
-                            st.text(f"Nomor Rekening Pembayaran (BNI): {detail_row.get('Virtual_Account_Number', '#N/A')}")
-                            st.text(f"Employer Update: {detail_row.get('EMPLOYMENT_UPDATE', '#N/A') if 'EMPLOYMENT_UPDATE' in detail_row else '#N/A'}")
-                            st.text(f"Employer Update Emails: #N/A")
-                            st.text(f"Employee Role: #N/A")
-                            st.text(f"Employee Name: {detail_row.get('EMPLOYER', '#N/A') if 'EMPLOYER' in detail_row else '#N/A'}")
-                            st.text(f"Employee NIK: #N/A")
-                            st.text(f"Debtor Legal Name: {detail_row.get('Customer_name', '#N/A')}")
-                            st.text(f"Debtor Role: #N/A")
-                        
-                        # Principal Section - Simple Expander
-                        with st.expander("📊 Principal : #N/A", expanded=False):
-                            st.text(f"Increaments Plan: 2")
-                            st.text(f"Amount to Pay per Increment: {detail_row.get('Principle_Outstanding', '#N/A')}")
-                        
-                        # Lunas Diskon Section - Simple Expander
-                        with st.expander("🎯 Lunas Diskon : #N/A", expanded=False):
-                            st.text(f"Requested Discount: 50%")
-                            st.text(f"Discounted Increaments Plan: 2")
-                            st.text(f"Amount to Pay per Discounted Increments: #N/A")
-                        
                         # Additional sections in expander
                         with st.expander("📞 Contact Person Details"):
                             contacts = []
