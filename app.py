@@ -5827,163 +5827,160 @@ def page_supervisor():
                         # Spacing between header and main content
                         st.markdown("<br>", unsafe_allow_html=True)
                         
-                        # Main content section
-                        col_main = st.columns([1])[0]
+                        # Main content section (full width)
+                        # Create detail table with alternating row colors
+                        detail_data = [
+                            ("Debtor Name", detail_row.get('Customer_name', '#N/A')),
+                            ("PhoneNumber", detail_row.get('Phone_Number_1', '#N/A')),
+                            ("Gender", detail_row.get('Gender', '#N/A')),
+                            ("Legal Address", detail_row.get('Home_Address', '#N/A')),
+                            ("DOB", detail_row.get('Date', '#N/A')),
+                            ("Email", detail_row.get('email', '#N/A')),
+                            ("Last known Office Name", detail_row.get('EMPLOYER', '#N/A') if 'EMPLOYER' in detail_row else '#N/A'),
+                            ("Last Known Job Position", detail_row.get('Customer_Occupation', '#N/A')),
+                            ("Last Known Work Phone", detail_row.get('Phone_Number_2', '#N/A')),
+                            ("Debtor Phone Number II", detail_row.get('Phone_Number_2', '#N/A')),
+                            ("Debtor Other Phone Number(s)", '#N/A'),
+                            ("", ""),
+                            ("Date of Contract", detail_row.get('Assignment_Date', '#N/A')),
+                            ("DPD", detail_row.get('DPD', '#N/A')),
+                        ]
                         
-                        with col_main:
-                            # Create detail table with alternating row colors
-                            detail_data = [
-                                ("Debtor Name", detail_row.get('Customer_name', '#N/A')),
-                                ("PhoneNumber", detail_row.get('Phone_Number_1', '#N/A')),
-                                ("Gender", detail_row.get('Gender', '#N/A')),
-                                ("Legal Address", detail_row.get('Home_Address', '#N/A')),
-                                ("DOB", detail_row.get('Date', '#N/A')),
-                                ("Email", detail_row.get('email', '#N/A')),
-                                ("Last known Office Name", detail_row.get('EMPLOYER', '#N/A') if 'EMPLOYER' in detail_row else '#N/A'),
-                                ("Last Known Job Position", detail_row.get('Customer_Occupation', '#N/A')),
-                                ("Last Known Work Phone", detail_row.get('Phone_Number_2', '#N/A')),
-                                ("Debtor Phone Number II", detail_row.get('Phone_Number_2', '#N/A')),
-                                ("Debtor Other Phone Number(s)", '#N/A'),
-                                ("", ""),
-                                ("Date of Contract", detail_row.get('Assignment_Date', '#N/A')),
-                                ("DPD", detail_row.get('DPD', '#N/A')),
-                            ]
+                        # Nett Debt Section
+                        st.markdown("""
+                        <div style="background: #2D1810; color: white; padding: 10px 15px; 
+                                    font-weight: bold; border-radius: 8px 8px 0 0; margin-top: 10px;">
+                            Nett Debt : #N/A
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        nett_debt_data = [
+                            ("Nomor Rekening Pembayaran (BNI)", detail_row.get('Virtual_Account_Number', '#N/A')),
+                            ("Employer Update", detail_row.get('EMPLOYMENT_UPDATE', '#N/A') if 'EMPLOYMENT_UPDATE' in detail_row else '#N/A'),
+                            ("Employer Update Emails", '#N/A'),
+                            ("Employee Role", '#N/A'),
+                            ("Employee Name", detail_row.get('EMPLOYER', '#N/A') if 'EMPLOYER' in detail_row else '#N/A'),
+                            ("Employee NIK", '#N/A'),
+                            ("Debtor Legal Name", detail_row.get('Customer_name', '#N/A')),
+                            ("Debtor Role", '#N/A'),
+                        ]
+                        
+                        # Principal Section
+                        st.markdown("""
+                        <div style="background: #2D1810; color: white; padding: 10px 15px; 
+                                    font-weight: bold; border-radius: 8px 8px 0 0; margin-top: 15px;">
+                            Principal : #N/A
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        principal_data = [
+                            ("Increaments Plan", "2"),
+                            ("Amount to Pay per Increment", detail_row.get('Principle_Outstanding', '#N/A')),
+                        ]
+                        
+                        # Lunas Diskon Section
+                        st.markdown("""
+                        <div style="background: #2D1810; color: white; padding: 10px 15px; 
+                                    font-weight: bold; border-radius: 8px 8px 0 0; margin-top: 15px;">
+                            Lunas Diskon : #N/A
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        lunas_data = [
+                            ("Requested Discount", "50%"),
+                            ("Discounted Increaments Plan", "2"),
+                            ("Amount to Pay per Discounted Increments", '#N/A'),
+                        ]
+                        
+                        # Combine all data
+                        all_data = detail_data + [("", "")] + nett_debt_data + [("", "")] + principal_data + [("", "")] + lunas_data
+                        
+                        # Render table with alternating colors
+                        table_html = '<div style="border: 1px solid #ddd; border-radius: 0 0 8px 8px;">'
+                        for idx, (label, value) in enumerate(all_data):
+                            if label == "":
+                                continue
+                            bg_color = "#f5f5f5" if idx % 2 == 0 else "white"
                             
-                            # Nett Debt Section
-                            st.markdown("""
-                            <div style="background: #2D1810; color: white; padding: 10px 15px; 
-                                        font-weight: bold; border-radius: 8px 8px 0 0; margin-top: 10px;">
-                                Nett Debt : #N/A
+                            # Check if value is #N/A to style it red
+                            value_color = "#dc2626" if value == "#N/A" else "#374151"
+                            value_weight = "bold" if value == "#N/A" else "normal"
+                            
+                            table_html += f"""
+                            <div style="display: grid; grid-template-columns: 2fr 3fr; 
+                                        background: {bg_color}; padding: 10px 15px; 
+                                        border-bottom: 1px solid #e5e7eb;">
+                                <div style="color: #1f2937; font-size: 14px;">{label}</div>
+                                <div style="color: {value_color}; font-weight: {value_weight}; 
+                                            font-size: 14px;">: {value}</div>
                             </div>
-                            """, unsafe_allow_html=True)
-                            
-                            nett_debt_data = [
-                                ("Nomor Rekening Pembayaran (BNI)", detail_row.get('Virtual_Account_Number', '#N/A')),
-                                ("Employer Update", detail_row.get('EMPLOYMENT_UPDATE', '#N/A') if 'EMPLOYMENT_UPDATE' in detail_row else '#N/A'),
-                                ("Employer Update Emails", '#N/A'),
-                                ("Employee Role", '#N/A'),
-                                ("Employee Name", detail_row.get('EMPLOYER', '#N/A') if 'EMPLOYER' in detail_row else '#N/A'),
-                                ("Employee NIK", '#N/A'),
-                                ("Debtor Legal Name", detail_row.get('Customer_name', '#N/A')),
-                                ("Debtor Role", '#N/A'),
-                            ]
-                            
-                            # Principal Section
-                            st.markdown("""
-                            <div style="background: #2D1810; color: white; padding: 10px 15px; 
-                                        font-weight: bold; border-radius: 8px 8px 0 0; margin-top: 15px;">
-                                Principal : #N/A
-                            </div>
-                            """, unsafe_allow_html=True)
-                            
-                            principal_data = [
-                                ("Increaments Plan", "2"),
-                                ("Amount to Pay per Increment", detail_row.get('Principle_Outstanding', '#N/A')),
-                            ]
-                            
-                            # Lunas Diskon Section
-                            st.markdown("""
-                            <div style="background: #2D1810; color: white; padding: 10px 15px; 
-                                        font-weight: bold; border-radius: 8px 8px 0 0; margin-top: 15px;">
-                                Lunas Diskon : #N/A
-                            </div>
-                            """, unsafe_allow_html=True)
-                            
-                            lunas_data = [
-                                ("Requested Discount", "50%"),
-                                ("Discounted Increaments Plan", "2"),
-                                ("Amount to Pay per Discounted Increments", '#N/A'),
-                            ]
-                            
-                            # Combine all data
-                            all_data = detail_data + [("", "")] + nett_debt_data + [("", "")] + principal_data + [("", "")] + lunas_data
-                            
-                            # Render table with alternating colors
-                            table_html = '<div style="border: 1px solid #ddd; border-radius: 0 0 8px 8px;">'
-                            for idx, (label, value) in enumerate(all_data):
-                                if label == "":
-                                    continue
-                                bg_color = "#f5f5f5" if idx % 2 == 0 else "white"
+                            """
+                        table_html += '</div>'
+                        
+                        st.markdown(table_html, unsafe_allow_html=True)
+                        
+                        # Additional sections in expander
+                        with st.expander("📞 Contact Person Details"):
+                            contacts = []
+                            for i in range(1, 9):
+                                contact_type = detail_row.get(f'Contact_Type_{i}', '')
+                                contact_name = detail_row.get(f'Contact_Name_{i}', '')
+                                contact_phone = detail_row.get(f'Contact_Phone_{i}', '')
                                 
-                                # Check if value is #N/A to style it red
-                                value_color = "#dc2626" if value == "#N/A" else "#374151"
-                                value_weight = "bold" if value == "#N/A" else "normal"
-                                
-                                table_html += f"""
-                                <div style="display: grid; grid-template-columns: 2fr 3fr; 
-                                            background: {bg_color}; padding: 10px 15px; 
-                                            border-bottom: 1px solid #e5e7eb;">
-                                    <div style="color: #1f2937; font-size: 14px;">{label}</div>
-                                    <div style="color: {value_color}; font-weight: {value_weight}; 
-                                                font-size: 14px;">: {value}</div>
-                                </div>
-                                """
-                            table_html += '</div>'
+                                if contact_type or contact_name or contact_phone:
+                                    contacts.append({
+                                        'No': i,
+                                        'Type': contact_type or '-',
+                                        'Name': contact_name or '-',
+                                        'Phone': contact_phone or '-'
+                                    })
                             
-                            st.markdown(table_html, unsafe_allow_html=True)
+                            if contacts:
+                                st.dataframe(pd.DataFrame(contacts), use_container_width=True, hide_index=True)
+                            else:
+                                st.info("Tidak ada kontak tersimpan")
+                        
+                        with st.expander("💰 Financial Details"):
+                            fin_col1, fin_col2 = st.columns(2)
+                            with fin_col1:
+                                st.markdown("**Outstanding Amount**")
+                                st.text(f"Principle Outstanding: {detail_row.get('Principle_Outstanding', '#N/A')}")
+                                st.text(f"Principal Overdue: {detail_row.get('Principal_Overdue_CURR', '#N/A')}")
+                                st.text(f"Interest Overdue: {detail_row.get('Interest_Overdue_CURR', '#N/A')}")
+                                st.text(f"Last Late Fee: {detail_row.get('Last_Late_Fee', '#N/A')}")
                             
-                            # Additional sections in expander
-                            with st.expander("📞 Contact Person Details"):
-                                contacts = []
-                                for i in range(1, 9):
-                                    contact_type = detail_row.get(f'Contact_Type_{i}', '')
-                                    contact_name = detail_row.get(f'Contact_Name_{i}', '')
-                                    contact_phone = detail_row.get(f'Contact_Phone_{i}', '')
-                                    
-                                    if contact_type or contact_name or contact_phone:
-                                        contacts.append({
-                                            'No': i,
-                                            'Type': contact_type or '-',
-                                            'Name': contact_name or '-',
-                                            'Phone': contact_phone or '-'
-                                        })
-                                
-                                if contacts:
-                                    st.dataframe(pd.DataFrame(contacts), use_container_width=True, hide_index=True)
-                                else:
-                                    st.info("Tidak ada kontak tersimpan")
+                            with fin_col2:
+                                st.markdown("**Third Party Debt**")
+                                st.text(f"Total Debt: {detail_row.get('Total_debt_in_third_party', '#N/A')}")
+                                st.text(f"Repayment: {detail_row.get('Repayment_on_third_Party', '#N/A')}")
+                                st.text(f"Remaining: {detail_row.get('Remaining_Loan_on_third_Party', '#N/A')}")
+                        
+                        with st.expander("📍 Address Details"):
+                            st.text(f"Province: {detail_row.get('Province', '#N/A')}")
+                            st.text(f"City: {detail_row.get('City', '#N/A')}")
+                            st.text(f"Street: {detail_row.get('Street', '#N/A')}")
+                            st.text(f"Room Number: {detail_row.get('RoomNumber', '#N/A')}")
+                            st.text(f"Postcode: {detail_row.get('Postcode', '#N/A')}")
+                        
+                        with st.expander("📝 Trace & Payment History"):
+                            # Check latest trace result
+                            latest_trace = fetchone("SELECT tracer, status, notes, touched_at FROM trace_results WHERE Agreement_No = ? ORDER BY id DESC LIMIT 1", (detail_row.get('Case_ID', ''),))
+                            if latest_trace:
+                                st.markdown("**Latest Trace**")
+                                st.text(f"Tracer: {latest_trace.get('tracer', 'N/A')}")
+                                st.text(f"Status: {latest_trace.get('status', 'N/A')}")
+                                st.text(f"Notes: {latest_trace.get('notes', 'N/A')}")
+                                st.text(f"Touched At: {latest_trace.get('touched_at', 'N/A')}")
+                                st.markdown("---")
                             
-                            with st.expander("💰 Financial Details"):
-                                fin_col1, fin_col2 = st.columns(2)
-                                with fin_col1:
-                                    st.markdown("**Outstanding Amount**")
-                                    st.text(f"Principle Outstanding: {detail_row.get('Principle_Outstanding', '#N/A')}")
-                                    st.text(f"Principal Overdue: {detail_row.get('Principal_Overdue_CURR', '#N/A')}")
-                                    st.text(f"Interest Overdue: {detail_row.get('Interest_Overdue_CURR', '#N/A')}")
-                                    st.text(f"Last Late Fee: {detail_row.get('Last_Late_Fee', '#N/A')}")
-                                
-                                with fin_col2:
-                                    st.markdown("**Third Party Debt**")
-                                    st.text(f"Total Debt: {detail_row.get('Total_debt_in_third_party', '#N/A')}")
-                                    st.text(f"Repayment: {detail_row.get('Repayment_on_third_Party', '#N/A')}")
-                                    st.text(f"Remaining: {detail_row.get('Remaining_Loan_on_third_Party', '#N/A')}")
-                            
-                            with st.expander("📍 Address Details"):
-                                st.text(f"Province: {detail_row.get('Province', '#N/A')}")
-                                st.text(f"City: {detail_row.get('City', '#N/A')}")
-                                st.text(f"Street: {detail_row.get('Street', '#N/A')}")
-                                st.text(f"Room Number: {detail_row.get('RoomNumber', '#N/A')}")
-                                st.text(f"Postcode: {detail_row.get('Postcode', '#N/A')}")
-                            
-                            with st.expander("📝 Trace & Payment History"):
-                                # Check latest trace result
-                                latest_trace = fetchone("SELECT tracer, status, notes, touched_at FROM trace_results WHERE Agreement_No = ? ORDER BY id DESC LIMIT 1", (detail_row.get('Case_ID', ''),))
-                                if latest_trace:
-                                    st.markdown("**Latest Trace**")
-                                    st.text(f"Tracer: {latest_trace.get('tracer', 'N/A')}")
-                                    st.text(f"Status: {latest_trace.get('status', 'N/A')}")
-                                    st.text(f"Notes: {latest_trace.get('notes', 'N/A')}")
-                                    st.text(f"Touched At: {latest_trace.get('touched_at', 'N/A')}")
-                                    st.markdown("---")
-                                
-                                # Check payment history
-                                payments = fetchall("SELECT paid_amount, paid_date, status FROM payments WHERE Agreement_No = ? ORDER BY id DESC LIMIT 5", (detail_row.get('Case_ID', ''),))
-                                if payments:
-                                    st.markdown("**Payment History (Latest 5)**")
-                                    payment_df = pd.DataFrame(payments)
-                                    st.dataframe(payment_df, use_container_width=True, hide_index=True)
-                                else:
-                                    st.info("Belum ada riwayat pembayaran")
+                            # Check payment history
+                            payments = fetchall("SELECT paid_amount, paid_date, status FROM payments WHERE Agreement_No = ? ORDER BY id DESC LIMIT 5", (detail_row.get('Case_ID', ''),))
+                            if payments:
+                                st.markdown("**Payment History (Latest 5)**")
+                                payment_df = pd.DataFrame(payments)
+                                st.dataframe(payment_df, use_container_width=True, hide_index=True)
+                            else:
+                                st.info("Belum ada riwayat pembayaran")
                     
                     else:
                         st.warning("Data detail tidak ditemukan.")
