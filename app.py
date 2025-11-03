@@ -5795,21 +5795,22 @@ def page_supervisor():
                         agent_assign = fetchone("SELECT Agent_Assigned_To, assigned_at FROM agent_assignments WHERE Agreement_No = ? AND active = 1", (detail_row.get('Case_ID', ''),))
                         agent_name = agent_assign.get('Agent_Assigned_To', 'N/A') if agent_assign else 'N/A'
                         
-                        # Header with styling similar to the image
-                        st.markdown(f"""
-                        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                                    padding: 30px; border-radius: 16px; margin-bottom: 20px; color: white;">
-                            <h2 style="margin: 0 0 10px 0; color: white;">Here's your Contract Details</h2>
-                            <p style="margin: 0; font-style: italic; opacity: 0.9;">We are happy to help with any settlement scheme of your choosing!</p>
-                        </div>
-                        """, unsafe_allow_html=True)
+                        # Header and Handling Agent Info Box (Top Section)
+                        col_header, col_agent_top = st.columns([3, 1])
                         
-                        # Handling Agent Info Box (Top Right)
-                        col_main, col_agent = st.columns([3, 1])
-                        
-                        with col_agent:
+                        with col_header:
+                            # Header with styling similar to the image
                             st.markdown(f"""
-                            <div style="background: #2D1810; padding: 15px; border-radius: 8px; color: white; margin-bottom: 10px;">
+                            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                                        padding: 30px; border-radius: 16px; color: white;">
+                                <h2 style="margin: 0 0 10px 0; color: white;">Here's your Contract Details</h2>
+                                <p style="margin: 0; font-style: italic; opacity: 0.9;">We are happy to help with any settlement scheme of your choosing!</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        
+                        with col_agent_top:
+                            st.markdown(f"""
+                            <div style="background: #2D1810; padding: 15px; border-radius: 8px; color: white;">
                                 <div style="font-size: 12px; margin-bottom: 5px;">Handling Agent</div>
                                 <div style="font-weight: bold; margin-bottom: 10px;">{agent_name}</div>
                                 <div style="font-size: 12px; margin-bottom: 3px;">Agent Phone Number</div>
@@ -5822,6 +5823,12 @@ def page_supervisor():
                                 <div style="font-weight: bold;">#N/A</div>
                             </div>
                             """, unsafe_allow_html=True)
+                        
+                        # Spacing between header and main content
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        
+                        # Main content section
+                        col_main = st.columns([1])[0]
                         
                         with col_main:
                             # Create detail table with alternating row colors
