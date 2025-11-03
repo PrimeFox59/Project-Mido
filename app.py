@@ -5827,9 +5827,48 @@ def page_supervisor():
                         # Spacing between header and main content
                         st.markdown("<br>", unsafe_allow_html=True)
                         
-                        # Main content section (full width)
-                        # Prepare all data sections
-                        detail_data = [
+                        # Helper function to display info rows with modern styling
+                        def display_info_section(title, data_list, bg_header="#2D1810"):
+                            """Display an info section with header and data rows"""
+                            # Section header
+                            if title:
+                                st.markdown(f"""
+                                <div style="background: {bg_header}; color: white; padding: 12px 20px; 
+                                            font-weight: 700; font-size: 15px; border-radius: 10px 10px 0 0; 
+                                            margin-top: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                                    {title}
+                                </div>
+                                """, unsafe_allow_html=True)
+                            
+                            # Data rows
+                            rows_html = '<div style="border: 1px solid #e5e7eb; border-radius: 0 0 10px 10px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">'
+                            
+                            for idx, (label, value) in enumerate(data_list):
+                                if label == "":
+                                    continue
+                                    
+                                # Alternating row colors
+                                bg_color = "#f9fafb" if idx % 2 == 0 else "#ffffff"
+                                
+                                # Style for #N/A values
+                                if str(value) == "#N/A":
+                                    value_style = "color: #ef4444; font-weight: 600;"
+                                else:
+                                    value_style = "color: #111827; font-weight: 400;"
+                                
+                                rows_html += f"""
+                                <div style="display: flex; background: {bg_color}; padding: 12px 20px; 
+                                            border-bottom: 1px solid #e5e7eb; transition: background 0.2s;">
+                                    <div style="flex: 2; color: #374151; font-size: 14px; font-weight: 500;">{label}</div>
+                                    <div style="flex: 3; {value_style} font-size: 14px; padding-left: 10px;">: {value}</div>
+                                </div>
+                                """
+                            
+                            rows_html += '</div>'
+                            st.markdown(rows_html, unsafe_allow_html=True)
+                        
+                        # Main Info Section
+                        main_data = [
                             ("Debtor Name", detail_row.get('Customer_name', '#N/A')),
                             ("PhoneNumber", detail_row.get('Phone_Number_1', '#N/A')),
                             ("Gender", detail_row.get('Gender', '#N/A')),
@@ -5841,11 +5880,34 @@ def page_supervisor():
                             ("Last Known Work Phone", detail_row.get('Phone_Number_2', '#N/A')),
                             ("Debtor Phone Number II", detail_row.get('Phone_Number_2', '#N/A')),
                             ("Debtor Other Phone Number(s)", '#N/A'),
-                            ("", ""),
                             ("Date of Contract", detail_row.get('Assignment_Date', '#N/A')),
                             ("DPD", detail_row.get('DPD', '#N/A')),
                         ]
                         
+                        # Render main section without header
+                        st.markdown("""
+                        <div style="border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden; 
+                                    box-shadow: 0 2px 8px rgba(0,0,0,0.05); margin-top: 5px;">
+                        """, unsafe_allow_html=True)
+                        
+                        rows_html = ""
+                        for idx, (label, value) in enumerate(main_data):
+                            if label == "":
+                                continue
+                            bg_color = "#f9fafb" if idx % 2 == 0 else "#ffffff"
+                            value_style = "color: #ef4444; font-weight: 600;" if str(value) == "#N/A" else "color: #111827; font-weight: 400;"
+                            
+                            rows_html += f"""
+                            <div style="display: flex; background: {bg_color}; padding: 12px 20px; 
+                                        border-bottom: 1px solid #e5e7eb;">
+                                <div style="flex: 2; color: #374151; font-size: 14px; font-weight: 500;">{label}</div>
+                                <div style="flex: 3; {value_style} font-size: 14px; padding-left: 10px;">: {value}</div>
+                            </div>
+                            """
+                        
+                        st.markdown(rows_html + "</div>", unsafe_allow_html=True)
+                        
+                        # Nett Debt Section
                         nett_debt_data = [
                             ("Nomor Rekening Pembayaran (BNI)", detail_row.get('Virtual_Account_Number', '#N/A')),
                             ("Employer Update", detail_row.get('EMPLOYMENT_UPDATE', '#N/A') if 'EMPLOYMENT_UPDATE' in detail_row else '#N/A'),
@@ -5856,71 +5918,22 @@ def page_supervisor():
                             ("Debtor Legal Name", detail_row.get('Customer_name', '#N/A')),
                             ("Debtor Role", '#N/A'),
                         ]
+                        display_info_section("Nett Debt : #N/A", nett_debt_data)
                         
+                        # Principal Section
                         principal_data = [
                             ("Increaments Plan", "2"),
                             ("Amount to Pay per Increment", detail_row.get('Principle_Outstanding', '#N/A')),
                         ]
+                        display_info_section("Principal : #N/A", principal_data)
                         
+                        # Lunas Diskon Section
                         lunas_data = [
                             ("Requested Discount", "50%"),
                             ("Discounted Increaments Plan", "2"),
                             ("Amount to Pay per Discounted Increments", '#N/A'),
                         ]
-                        
-                        # Function to render rows
-                        def render_rows(data_list):
-                            html = ""
-                            for idx, (label, value) in enumerate(data_list):
-                                if label == "":
-                                    continue
-                                bg_color = "#f5f5f5" if idx % 2 == 0 else "white"
-                                value_color = "#dc2626" if value == "#N/A" else "#374151"
-                                value_weight = "bold" if value == "#N/A" else "normal"
-                                
-                                html += f"""
-                                <div style="display: grid; grid-template-columns: 2fr 3fr; 
-                                            background: {bg_color}; padding: 10px 15px; 
-                                            border-bottom: 1px solid #e5e7eb;">
-                                    <div style="color: #1f2937; font-size: 14px;">{label}</div>
-                                    <div style="color: {value_color}; font-weight: {value_weight}; 
-                                                font-size: 14px;">: {value}</div>
-                                </div>
-                                """
-                            return html
-                        
-                        # Build complete HTML with all sections
-                        complete_html = f"""
-                        <div style="border: 1px solid #ddd; border-radius: 8px; overflow: hidden;">
-                            {render_rows(detail_data)}
-                        </div>
-                        
-                        <div style="background: #2D1810; color: white; padding: 10px 15px; 
-                                    font-weight: bold; border-radius: 8px 8px 0 0; margin-top: 15px;">
-                            Nett Debt : #N/A
-                        </div>
-                        <div style="border: 1px solid #ddd; border-radius: 0 0 8px 8px; overflow: hidden;">
-                            {render_rows(nett_debt_data)}
-                        </div>
-                        
-                        <div style="background: #2D1810; color: white; padding: 10px 15px; 
-                                    font-weight: bold; border-radius: 8px 8px 0 0; margin-top: 15px;">
-                            Principal : #N/A
-                        </div>
-                        <div style="border: 1px solid #ddd; border-radius: 0 0 8px 8px; overflow: hidden;">
-                            {render_rows(principal_data)}
-                        </div>
-                        
-                        <div style="background: #2D1810; color: white; padding: 10px 15px; 
-                                    font-weight: bold; border-radius: 8px 8px 0 0; margin-top: 15px;">
-                            Lunas Diskon : #N/A
-                        </div>
-                        <div style="border: 1px solid #ddd; border-radius: 0 0 8px 8px; overflow: hidden;">
-                            {render_rows(lunas_data)}
-                        </div>
-                        """
-                        
-                        st.markdown(complete_html, unsafe_allow_html=True)
+                        display_info_section("Lunas Diskon : #N/A", lunas_data)
                         
                         # Additional sections in expander
                         with st.expander("📞 Contact Person Details"):
