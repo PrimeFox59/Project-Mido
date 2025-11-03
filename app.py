@@ -5782,6 +5782,155 @@ def page_supervisor():
             except Exception:
                 selected_ids = []
 
+            # --- Detail Contract Section ---
+            # Tampilkan detail jika hanya 1 row yang dipilih
+            if len(selected_ids) == 1:
+                st.markdown("---")
+                st.subheader("📋 Detail Contract")
+                
+                try:
+                    detail_row = fetchone("SELECT * FROM supervisor_data WHERE id = ?", (selected_ids[0],))
+                    
+                    if detail_row:
+                        # Create tabs for organized detail view
+                        detail_tabs = st.tabs(["Info Utama", "Kontak", "Alamat", "Financial", "Timeline"])
+                        
+                        # Tab 1: Info Utama
+                        with detail_tabs[0]:
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.markdown("**Informasi Customer**")
+                                st.text(f"Case ID: {detail_row.get('Case_ID', 'N/A')}")
+                                st.text(f"Task ID: {detail_row.get('Task_ID', 'N/A')}")
+                                st.text(f"Customer Name: {detail_row.get('Customer_name', 'N/A')}")
+                                st.text(f"Email: {detail_row.get('email', 'N/A')}")
+                                st.text(f"Gender: {detail_row.get('Gender', 'N/A')}")
+                                st.text(f"Occupation: {detail_row.get('Customer_Occupation', 'N/A')}")
+                                st.text(f"Third UID: {detail_row.get('Third_Uid', 'N/A')}")
+                                st.text(f"Virtual Account: {detail_row.get('Virtual_Account_Number', 'N/A')}")
+                            
+                            with col2:
+                                st.markdown("**Informasi Pinjaman**")
+                                st.text(f"Lending Entity: {detail_row.get('Lending_Entity', 'N/A')}")
+                                st.text(f"Product: {detail_row.get('Product', 'N/A')}")
+                                st.text(f"Loan Type: {detail_row.get('Loan_Type', 'N/A')}")
+                                st.text(f"DPD: {detail_row.get('DPD', 'N/A')}")
+                                st.text(f"Date: {detail_row.get('Date', 'N/A')}")
+                                st.text(f"Assignment Date: {detail_row.get('Assignment_Date', 'N/A')}")
+                                st.text(f"Withdrawal Date: {detail_row.get('Withdrawal_Date', 'N/A')}")
+                                st.text(f"Return Date: {detail_row.get('Return_Date', 'N/A')}")
+                        
+                        # Tab 2: Kontak
+                        with detail_tabs[1]:
+                            st.markdown("**Nomor Telepon**")
+                            st.text(f"Phone 1: {detail_row.get('Phone_Number_1', 'N/A')}")
+                            st.text(f"Phone 2: {detail_row.get('Phone_Number_2', 'N/A')}")
+                            
+                            st.markdown("**Contact Person**")
+                            contacts = []
+                            for i in range(1, 9):
+                                contact_type = detail_row.get(f'Contact_Type_{i}', '')
+                                contact_name = detail_row.get(f'Contact_Name_{i}', '')
+                                contact_phone = detail_row.get(f'Contact_Phone_{i}', '')
+                                
+                                if contact_type or contact_name or contact_phone:
+                                    contacts.append({
+                                        'No': i,
+                                        'Type': contact_type or '-',
+                                        'Name': contact_name or '-',
+                                        'Phone': contact_phone or '-'
+                                    })
+                            
+                            if contacts:
+                                st.dataframe(pd.DataFrame(contacts), use_container_width=True, hide_index=True)
+                            else:
+                                st.info("Tidak ada kontak tersimpan")
+                        
+                        # Tab 3: Alamat
+                        with detail_tabs[2]:
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.markdown("**Alamat Lengkap**")
+                                st.text(f"Home Address: {detail_row.get('Home_Address', 'N/A')}")
+                                st.text(f"Street: {detail_row.get('Street', 'N/A')}")
+                                st.text(f"Room Number: {detail_row.get('RoomNumber', 'N/A')}")
+                            
+                            with col2:
+                                st.markdown("**Wilayah**")
+                                st.text(f"Province: {detail_row.get('Province', 'N/A')}")
+                                st.text(f"City: {detail_row.get('City', 'N/A')}")
+                                st.text(f"Postcode: {detail_row.get('Postcode', 'N/A')}")
+                        
+                        # Tab 4: Financial
+                        with detail_tabs[3]:
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.markdown("**Outstanding Amount**")
+                                principle = detail_row.get('Principle_Outstanding', 'N/A')
+                                principal_overdue = detail_row.get('Principal_Overdue_CURR', 'N/A')
+                                interest_overdue = detail_row.get('Interest_Overdue_CURR', 'N/A')
+                                late_fee = detail_row.get('Last_Late_Fee', 'N/A')
+                                
+                                st.text(f"Principle Outstanding: {principle}")
+                                st.text(f"Principal Overdue: {principal_overdue}")
+                                st.text(f"Interest Overdue: {interest_overdue}")
+                                st.text(f"Last Late Fee: {late_fee}")
+                            
+                            with col2:
+                                st.markdown("**Third Party Debt**")
+                                total_debt = detail_row.get('Total_debt_in_third_party', 'N/A')
+                                repayment = detail_row.get('Repayment_on_third_Party', 'N/A')
+                                remaining = detail_row.get('Remaining_Loan_on_third_Party', 'N/A')
+                                
+                                st.text(f"Total Debt: {total_debt}")
+                                st.text(f"Repayment: {repayment}")
+                                st.text(f"Remaining: {remaining}")
+                        
+                        # Tab 5: Timeline
+                        with detail_tabs[4]:
+                            st.markdown("**Detail & Catatan**")
+                            detail_text = detail_row.get('Detail', 'N/A')
+                            st.text_area("Detail", value=detail_text, height=100, disabled=True, key="detail_contract_detail")
+                            
+                            st.markdown("**Status**")
+                            st.text(f"DT: {detail_row.get('DT', 'N/A')}")
+                            st.text(f"Paid Off: {detail_row.get('Paid_Off', 'N/A')}")
+                            st.text(f"Created At: {detail_row.get('created_at', 'N/A')}")
+                            
+                            # Check agent assignment
+                            agent_assign = fetchone("SELECT Agent_Assigned_To, assigned_at FROM agent_assignments WHERE Agreement_No = ? AND active = 1", (detail_row.get('Case_ID', ''),))
+                            if agent_assign:
+                                st.markdown("**Assignment Info**")
+                                st.text(f"Assigned To: {agent_assign.get('Agent_Assigned_To', 'N/A')}")
+                                st.text(f"Assigned At: {agent_assign.get('assigned_at', 'N/A')}")
+                            
+                            # Check latest trace result
+                            latest_trace = fetchone("SELECT tracer, status, notes, touched_at FROM trace_results WHERE Agreement_No = ? ORDER BY id DESC LIMIT 1", (detail_row.get('Case_ID', ''),))
+                            if latest_trace:
+                                st.markdown("**Latest Trace**")
+                                st.text(f"Tracer: {latest_trace.get('tracer', 'N/A')}")
+                                st.text(f"Status: {latest_trace.get('status', 'N/A')}")
+                                st.text(f"Notes: {latest_trace.get('notes', 'N/A')}")
+                                st.text(f"Touched At: {latest_trace.get('touched_at', 'N/A')}")
+                            
+                            # Check payment history
+                            payments = fetchall("SELECT paid_amount, paid_date, status FROM payments WHERE Agreement_No = ? ORDER BY id DESC LIMIT 5", (detail_row.get('Case_ID', ''),))
+                            if payments:
+                                st.markdown("**Payment History (Latest 5)**")
+                                payment_df = pd.DataFrame(payments)
+                                st.dataframe(payment_df, use_container_width=True, hide_index=True)
+                    
+                    else:
+                        st.warning("Data detail tidak ditemukan.")
+                        
+                except Exception as e:
+                    st.error(f"Error menampilkan detail: {e}")
+                
+                st.markdown("---")
+            
+            elif len(selected_ids) > 1:
+                st.info(f"💡 Pilih hanya 1 row untuk melihat Detail Contract. Saat ini {len(selected_ids)} row terpilih.")
+
             cdel1, cdel2 = st.columns([1, 6])
             with cdel1:
                 do_delete = st.button(
