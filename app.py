@@ -7191,8 +7191,6 @@ def page_supervisor():
 
     # Build SQL with filters + exclude yang sudah di-assign ke Agent
         where = ["Case_ID IS NOT NULL", "TRIM(Case_ID)<>''"]
-        # VALIDASI: Hanya tampilkan data yang sudah APPROVED
-        where.append("approval_status = 'APPROVED'")
         # VALIDASI: Exclude Case_ID yang sudah di-assign ke Agent
         where.append("Case_ID NOT IN (SELECT Agreement_No FROM agent_assignments WHERE IFNULL(active,1)=1)")
         params = []
@@ -7554,8 +7552,6 @@ def page_supervisor():
 
         # Build SQL with filters
         wh = ["Case_ID IS NOT NULL", "TRIM(Case_ID)<>''"]
-        # VALIDASI: Hanya tampilkan data yang sudah APPROVED
-        wh.append("approval_status = 'APPROVED'")
         par = []
         if fa_case:
             wh.append("Case_ID LIKE ?")
