@@ -7697,40 +7697,77 @@ def page_supervisor():
         st.markdown("### 📝 Trace Results - Touch Activity Logs")
         st.caption("Record dan monitor semua aktivitas tracing. Real-time tracking untuk setiap interaksi dengan debitur.")
         
-        # Enhanced CSS for Trace Results
+        # Enhanced CSS for Trace Results - Financial Dashboard Style
         st.markdown("""
         <style>
-        .trace-stat-card {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            padding: 16px;
-            border-radius: 12px;
-            color: white;
-            text-align: center;
+        /* Financial KPI card matching dashboard style */
+        .trace-stat-card { 
+            position: relative; 
+            overflow: hidden; 
+            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+            border: 1px solid #E5E7EB; 
+            border-radius: 20px; 
+            padding: 24px 20px; 
+            box-shadow: 0 4px 12px rgba(16,24,40,0.08), 0 1px 3px rgba(16,24,40,0.05);
+            transition: all 0.3s ease;
             margin-bottom: 10px;
         }
-        .trace-stat-value {
-            font-size: 28px;
-            font-weight: 800;
-            margin: 8px 0;
+        .trace-stat-card:hover {
+            box-shadow: 0 8px 24px rgba(16,24,40,0.12), 0 2px 6px rgba(16,24,40,0.08);
+            transform: translateY(-2px);
         }
+        
+        /* Accent circle (decorative element) */
+        .trace-stat-card::after { 
+            content:""; 
+            position:absolute; 
+            right:-40px; 
+            top:-50px; 
+            width:200px; 
+            height:200px; 
+            border-radius: 50%; 
+            background: radial-gradient(circle at center, var(--accent-light, #EEF4FF), rgba(255,255,255,0) 60%); 
+            opacity:.5;
+            z-index: 0;
+        }
+        
+        /* Content layer above decoration */
+        .trace-stat-card > * { position: relative; z-index: 1; }
+        
         .trace-stat-label {
-            font-size: 12px;
-            opacity: 0.9;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
+            letter-spacing: .5px; 
+            text-transform: uppercase; 
+            font-size: 11px; 
+            font-weight: 700;
+            color: #6B7280; 
+            margin-bottom: 12px;
         }
+        .trace-stat-value {
+            font-size: 32px; 
+            font-weight: 800; 
+            color: var(--accent, #111827); 
+            line-height: 1.1;
+            margin: 8px 0;
+            letter-spacing: -0.5px;
+        }
+        
+        /* Color variants matching dashboard */
+        .accent-teal { --accent: #0D9488; --accent-light: #CCFBF1; }
+        .accent-rose { --accent: #E11D48; --accent-light: #FFE4E6; }
+        .accent-sky { --accent: #0284C7; --accent-light: #E0F2FE; }
+        .accent-emerald { --accent: #059669; --accent-light: #D1FAE5; }
         </style>
         """, unsafe_allow_html=True)
         
-        # Quick Stats
+        # Quick Stats - Financial Dashboard Style
         stat_cols = st.columns(4)
         today = today_wib()
         
         with stat_cols[0]:
             total_traces = (fetchone("SELECT COUNT(*) as c FROM trace_results") or {}).get('c', 0)
             st.markdown(f"""
-            <div class='trace-stat-card' style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);'>
-                <div class='trace-stat-label'>Total Traces</div>
+            <div class='trace-stat-card accent-teal'>
+                <div class='trace-stat-label'>💼 Total Traces</div>
                 <div class='trace-stat-value'>{total_traces:,}</div>
             </div>
             """, unsafe_allow_html=True)
@@ -7738,8 +7775,8 @@ def page_supervisor():
         with stat_cols[1]:
             today_traces = (fetchone("SELECT COUNT(*) as c FROM trace_results WHERE DATE(touched_at) = DATE(?)", (today.isoformat(),)) or {}).get('c', 0)
             st.markdown(f"""
-            <div class='trace-stat-card' style='background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);'>
-                <div class='trace-stat-label'>Today's Traces</div>
+            <div class='trace-stat-card accent-rose'>
+                <div class='trace-stat-label'>📅 Today's Traces</div>
                 <div class='trace-stat-value'>{today_traces:,}</div>
             </div>
             """, unsafe_allow_html=True)
@@ -7747,8 +7784,8 @@ def page_supervisor():
         with stat_cols[2]:
             unique_cases = (fetchone("SELECT COUNT(DISTINCT Agreement_No) as c FROM trace_results") or {}).get('c', 0)
             st.markdown(f"""
-            <div class='trace-stat-card' style='background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);'>
-                <div class='trace-stat-label'>Unique Cases</div>
+            <div class='trace-stat-card accent-sky'>
+                <div class='trace-stat-label'>📋 Unique Cases</div>
                 <div class='trace-stat-value'>{unique_cases:,}</div>
             </div>
             """, unsafe_allow_html=True)
@@ -7756,8 +7793,8 @@ def page_supervisor():
         with stat_cols[3]:
             active_tracers = (fetchone("SELECT COUNT(DISTINCT tracer) as c FROM trace_results WHERE DATE(touched_at) >= DATE(?, '-7 days')", (today.isoformat(),)) or {}).get('c', 0)
             st.markdown(f"""
-            <div class='trace-stat-card' style='background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);'>
-                <div class='trace-stat-label'>Active Tracers (7d)</div>
+            <div class='trace-stat-card accent-emerald'>
+                <div class='trace-stat-label'>👥 Active Tracers (7d)</div>
                 <div class='trace-stat-value'>{active_tracers:,}</div>
             </div>
             """, unsafe_allow_html=True)
