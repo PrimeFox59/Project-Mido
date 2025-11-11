@@ -913,7 +913,7 @@ def get_active_assignment(agreement_no: str):
     """
     try:
         row = fetchone("""
-            SELECT Agreement_No, Agent_Assigned_To as assigned_to, assignment_type, 
+            SELECT Agreement_No, Agent_Assigned_To as assigned_to, assignment_type,
                    assigned_at, auto_return_date
             FROM agent_assignments
             WHERE Agreement_No=? AND active=1
@@ -7711,9 +7711,10 @@ def page_supervisor():
                         st.error(f"Gagal assign: {e}")
 
         with c2:
-            st.markdown("#### Distribusi acak ke beberapa Agent")
+            st.markdown("#### Distribusi Seimbang ke beberapa Agent")
+            st.caption("⚖️ Distribusi berdasarkan keseimbangan jumlah case DAN total hutang (Principle Outstanding)")
             sel_agents = st.multiselect("Pilih beberapa agent", options=agents, key="aa_multi_agents")
-            btn_multi = st.button("Random distribute", key="aa_btn_multi")
+            btn_multi = st.button("Balanced Distribution (by Outstanding)", key="aa_btn_multi", type="primary")
             if btn_multi:
                 if not len(selected_rows):
                     st.warning("Pilih minimal satu baris dahulu.")
@@ -7724,20 +7725,56 @@ def page_supervisor():
                         import random as _rand
                         u = current_user() or {}
                         by = (u.get('full_name') or u.get('login_id') or '-')
-                        ids = [str(x).strip() for x in selected_rows['Case_ID'].tolist() if str(x).strip()]
-                        _rand.shuffle(ids)
+                        
+                        # Prepare case list with principle outstanding
+                        cases_with_po = []
+                        for _, r in selected_rows.iterrows():
+                            agr = str(r.get('Case_ID') or '').strip()
+                            if not agr:
+                                continue
+                            
+                            # Get principle outstanding (hutang)
+                            po_str = str(r.get('Principle_Outstanding', '0') or '0').strip()
+                            try:
+                                # Clean string: remove currency symbols, commas, etc.
+                                po_clean = ''.join(c for c in po_str if c.isdigit() or c == '.')
+                                po_value = float(po_clean) if po_clean else 0.0
+                            except Exception:
+                                po_value = 0.0
+                            
+                            cases_with_po.append({
+                                'case_id': agr,
+                                'po': po_value,
+                                'row': r
+                            })
+                        
+                        # Sort cases by principle outstanding DESC (largest first)
+                        # This helps balance distribution better
+                        cases_with_po.sort(key=lambda x: x['po'], reverse=True)
+                        
+                        # Initialize agent workload tracking
+                        agent_workload = {agent: {'count': 0, 'total_po': 0.0, 'cases': []} for agent in sel_agents}
+                        
+                        # Statistics tracking
                         assigned = 0
                         frozen_skips = 0
                         already_tracer = 0
                         rotation_blocked = 0
                         
-                        for i, agr in enumerate(ids):
+                        # BALANCED DISTRIBUTION ALGORITHM
+                        # For each case, assign to agent with LOWEST total_po (greedy algorithm)
+                        for case_data in cases_with_po:
+                            agr = case_data['case_id']
+                            po = case_data['po']
+                            
+                            # Validation checks
                             try:
                                 if is_frozen_by_agreement(agr):
                                     frozen_skips += 1
                                     continue
                             except Exception:
                                 pass
+                            
                             # Check if already assigned to tracer
                             try:
                                 conn_check2 = get_db()
@@ -7751,23 +7788,68 @@ def page_supervisor():
                             except Exception:
                                 pass
                             
-                            agent = sel_agents[i % len(sel_agents)]
+                            # Find agent with LOWEST total outstanding (greedy balance)
+                            target_agent = min(agent_workload.keys(), key=lambda a: agent_workload[a]['total_po'])
                             
-                            # Use new assignment system with rotation
-                            success, msg = assign_case_to_agent(agr, agent, by)
+                            # Try to assign
+                            success, msg = assign_case_to_agent(agr, target_agent, by)
                             if success:
                                 assigned += 1
+                                agent_workload[target_agent]['count'] += 1
+                                agent_workload[target_agent]['total_po'] += po
+                                agent_workload[target_agent]['cases'].append(agr)
                             else:
                                 if "frozen" in msg.lower():
                                     frozen_skips += 1
                                 elif "handle dulu" in msg.lower():
                                     rotation_blocked += 1
-                                
+                        
+                        # Show distribution summary
+                        st.markdown("---")
+                        st.markdown("### 📊 Hasil Distribusi Seimbang")
+                        
+                        summary_data = []
+                        for agent, wl in agent_workload.items():
+                            summary_data.append({
+                                'Agent': agent,
+                                'Jumlah Case': wl['count'],
+                                'Total Hutang (PO)': f"Rp {wl['total_po']:,.0f}",
+                                'Rata-rata per Case': f"Rp {(wl['total_po'] / wl['count']):,.0f}" if wl['count'] > 0 else "Rp 0"
+                            })
+                        
+                        summary_df = pd.DataFrame(summary_data)
+                        st.dataframe(summary_df, use_container_width=True, hide_index=True)
+                        
+                        # Calculate balance metrics
+                        case_counts = [wl['count'] for wl in agent_workload.values()]
+                        po_totals = [wl['total_po'] for wl in agent_workload.values()]
+                        
+                        if case_counts and max(case_counts) > 0:
+                            case_variance = max(case_counts) - min(case_counts)
+                            po_variance = max(po_totals) - min(po_totals)
+                            
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                st.metric("📈 Variance Case", f"{case_variance} case", 
+                                         help="Selisih jumlah case terbanyak - tersedikit")
+                            with col2:
+                                st.metric("💰 Variance Hutang", f"Rp {po_variance:,.0f}",
+                                         help="Selisih total hutang terbesar - terkecil")
+                            with col3:
+                                balance_score = "⭐⭐⭐ Excellent" if po_variance < (sum(po_totals)/len(po_totals) * 0.1) else \
+                                              "⭐⭐ Good" if po_variance < (sum(po_totals)/len(po_totals) * 0.2) else \
+                                              "⭐ Fair"
+                                st.metric("⚖️ Balance Score", balance_score,
+                                         help="Excellent: variance < 10% avg | Good: < 20% avg")
+                        
                         # Audit
                         try:
+                            summary_str = " | ".join([f"{a}: {wl['count']} case (Rp {wl['total_po']:,.0f})" 
+                                                     for a, wl in agent_workload.items()])
                             execute(
                                 "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
-                                (u.get('id') if u else None, "AGENT_ASSIGN_RANDOM_FROM_SUP_TABLE", f"Assigned {assigned} among {len(sel_agents)} agents; frozen: {frozen_skips}; tracer: {already_tracer}; rotation_blocked: {rotation_blocked}")
+                                (u.get('id') if u else None, "AGENT_ASSIGN_BALANCED_FROM_SUP_TABLE", 
+                                 f"Assigned {assigned} among {len(sel_agents)} agents (BALANCED); frozen: {frozen_skips}; tracer: {already_tracer}; rotation_blocked: {rotation_blocked}; Distribution: {summary_str}")
                             )
                         except Exception:
                             pass
