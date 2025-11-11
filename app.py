@@ -506,7 +506,7 @@ def init_db():
     except Exception:
         pass
     # --- New foundational tables ---
-    # 1) Agent assignments (one agent per Agreement_No)
+    # 1) Agent assignments (one agent per Agreement_No) - ENHANCED WITH ROTATION TRACKING
     c.execute(
         """
         CREATE TABLE IF NOT EXISTS agent_assignments (
@@ -515,13 +515,58 @@ def init_db():
             Agent_Assigned_To TEXT,
             assigned_at TEXT DEFAULT CURRENT_TIMESTAMP,
             assigned_by TEXT,
-            active INTEGER DEFAULT 1
+            active INTEGER DEFAULT 1,
+            assignment_type TEXT DEFAULT 'agent',
+            auto_return_date TEXT,
+            completed_at TEXT,
+            completion_reason TEXT
         );
         """
     )
-    # Unique per loan for active assignment (soft-enforced via app; hard unique per Agreement_No)
+    
+    # Add new columns to existing agent_assignments table for rotation system
     try:
-        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_assignments_unique ON agent_assignments(Agreement_No)")
+        c.execute("ALTER TABLE agent_assignments ADD COLUMN assignment_type TEXT DEFAULT 'agent'")
+        c.execute("ALTER TABLE agent_assignments ADD COLUMN auto_return_date TEXT")
+        c.execute("ALTER TABLE agent_assignments ADD COLUMN completed_at TEXT")
+        c.execute("ALTER TABLE agent_assignments ADD COLUMN completion_reason TEXT")
+    except Exception:
+        pass
+    
+    # Remove old unique index (allow multiple assignments per Agreement_No for history)
+    try:
+        c.execute("DROP INDEX IF EXISTS idx_agent_assignments_unique")
+    except Exception:
+        pass
+    
+    # Create indexes for performance
+    try:
+        c.execute("CREATE INDEX IF NOT EXISTS idx_agent_assignments_agreement ON agent_assignments(Agreement_No)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_agent_assignments_active ON agent_assignments(active)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_agent_assignments_type ON agent_assignments(assignment_type)")
+    except Exception:
+        pass
+    
+    # 1b) Assignment history tracking table (who touched what, when)
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS assignment_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            Agreement_No TEXT NOT NULL,
+            assigned_to TEXT NOT NULL,
+            assignment_type TEXT DEFAULT 'agent',
+            assigned_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            completed_at TEXT,
+            assigned_by TEXT,
+            completion_notes TEXT
+        );
+        """
+    )
+    
+    try:
+        c.execute("CREATE INDEX IF NOT EXISTS idx_assignment_history_agreement ON assignment_history(Agreement_No)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_assignment_history_assigned_to ON assignment_history(assigned_to)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_assignment_history_type ON assignment_history(assignment_type)")
     except Exception:
         pass
     # 2) Trace results (touch logs/status)
@@ -857,6 +902,291 @@ def is_frozen_by_agreement(agreement_no: str) -> bool:
         return is_frozen_by_nik(nik)
     except Exception:
         return False
+
+# -------------------------
+# Assignment Rotation & Mutual Exclusion Helpers
+# -------------------------
+def get_active_assignment(agreement_no: str):
+    """Get current active assignment for a case (agent or tracer).
+    Returns dict with keys: Agreement_No, assigned_to, assignment_type, assigned_at, auto_return_date
+    or None if no active assignment.
+    """
+    try:
+        row = fetchone("""
+            SELECT Agreement_No, Agent_Assigned_To as assigned_to, assignment_type, 
+                   assigned_at, auto_return_date
+            FROM agent_assignments
+            WHERE Agreement_No=? AND active=1
+            LIMIT 1
+        """, (agreement_no,))
+        return row
+    except Exception:
+        return None
+
+def get_assignment_history(agreement_no: str, assignment_type: str = None):
+    """Get all historical assignments for a case.
+    If assignment_type is specified ('agent' or 'tracer'), filter by type.
+    Returns list of dicts with assigned_to names.
+    """
+    try:
+        if assignment_type:
+            rows = fetchall("""
+                SELECT assigned_to, assignment_type, assigned_at, completed_at
+                FROM assignment_history
+                WHERE Agreement_No=? AND assignment_type=?
+                ORDER BY assigned_at DESC
+            """, (agreement_no, assignment_type))
+        else:
+            rows = fetchall("""
+                SELECT assigned_to, assignment_type, assigned_at, completed_at
+                FROM assignment_history
+                WHERE Agreement_No=?
+                ORDER BY assigned_at DESC
+            """, (agreement_no,))
+        return rows
+    except Exception:
+        return []
+
+def get_agents_who_touched_case(agreement_no: str):
+    """Get list of all agent names who have ever been assigned this case.
+    Returns set of agent names.
+    """
+    try:
+        rows = fetchall("""
+            SELECT DISTINCT assigned_to
+            FROM assignment_history
+            WHERE Agreement_No=? AND assignment_type='agent'
+        """, (agreement_no,))
+        return set(r['assigned_to'] for r in rows if r.get('assigned_to'))
+    except Exception:
+        return set()
+
+def get_all_active_agents():
+    """Get list of all users with Agent role (approved and active).
+    Returns list of agent names (login_id or full_name).
+    """
+    try:
+        rows = fetchall("""
+            SELECT COALESCE(full_name, login_id) as agent_name
+            FROM users
+            WHERE role='Agent' AND approved=1
+            ORDER BY agent_name
+        """)
+        return [r['agent_name'] for r in rows if r.get('agent_name')]
+    except Exception:
+        return []
+
+def can_agent_take_case(agent_name: str, agreement_no: str) -> tuple:
+    """Check if agent can take this case based on rotation rules.
+    
+    Rules:
+    1. Case must not have active assignment
+    2. Case must not be frozen
+    3. Case must not have payment yet
+    4. Agent can only take case if ALL other agents have touched it (rotation complete)
+    
+    Returns: (can_take: bool, reason: str)
+    """
+    try:
+        # Check 1: Active assignment exists?
+        active = get_active_assignment(agreement_no)
+        if active:
+            assigned_type = active.get('assignment_type', 'agent')
+            assigned_to = active.get('assigned_to', 'Unknown')
+            return False, f"Case sedang di-assign ke {assigned_type}: {assigned_to}"
+        
+        # Check 2: Frozen?
+        if is_frozen_by_agreement(agreement_no):
+            return False, "Case ini frozen (diblokir)"
+        
+        # Check 3: Payment exists?
+        payment = fetchone("""
+            SELECT 1 as x FROM payments 
+            WHERE Agreement_No=? AND COALESCE(paid_amount,0) > 0 
+            LIMIT 1
+        """, (agreement_no,))
+        if payment:
+            return False, "Case sudah ada pembayaran"
+        
+        # Check 4: Rotation rule - all other agents must have touched this case
+        all_agents = set(get_all_active_agents())
+        if not all_agents:
+            return True, "OK (no other agents exist)"
+        
+        touched_agents = get_agents_who_touched_case(agreement_no)
+        
+        # If agent never touched: check if rotation complete
+        if agent_name not in touched_agents:
+            # Agent can take if: NO agents have touched yet, OR all OTHER agents have touched
+            other_agents = all_agents - {agent_name}
+            if not touched_agents:
+                # Fresh case, any agent can take
+                return True, "OK (fresh case)"
+            elif other_agents.issubset(touched_agents):
+                # All other agents have touched, rotation complete
+                return True, "OK (rotation complete)"
+            else:
+                untouched = other_agents - touched_agents
+                return False, f"Agent lain harus handle dulu: {', '.join(sorted(untouched))}"
+        else:
+            # Agent has touched before: check if ALL other agents have touched since then
+            other_agents = all_agents - {agent_name}
+            if not other_agents:
+                # Only one agent exists
+                return True, "OK (only agent)"
+            elif other_agents.issubset(touched_agents):
+                # All other agents have touched
+                return True, "OK (rotation complete)"
+            else:
+                untouched = other_agents - touched_agents
+                return False, f"Agent lain harus handle dulu: {', '.join(sorted(untouched))}"
+        
+    except Exception as e:
+        return False, f"Error checking: {str(e)}"
+
+def assign_case_to_agent(agreement_no: str, agent_name: str, assigned_by: str) -> tuple:
+    """Assign case to agent with 7-day auto-return.
+    
+    Returns: (success: bool, message: str)
+    """
+    try:
+        # Validate assignment
+        can_assign, reason = can_agent_take_case(agent_name, agreement_no)
+        if not can_assign:
+            return False, reason
+        
+        # Calculate auto-return date (7 days from now)
+        auto_return = (today_wib() + timedelta(days=7)).isoformat()
+        now_iso = now_wib().isoformat()
+        
+        # Create active assignment
+        execute("""
+            INSERT INTO agent_assignments 
+            (Agreement_No, Agent_Assigned_To, assigned_at, assigned_by, active, 
+             assignment_type, auto_return_date)
+            VALUES (?, ?, ?, ?, 1, 'agent', ?)
+        """, (agreement_no, agent_name, now_iso, assigned_by, auto_return))
+        
+        # Log to history
+        execute("""
+            INSERT INTO assignment_history
+            (Agreement_No, assigned_to, assignment_type, assigned_at, assigned_by)
+            VALUES (?, ?, 'agent', ?, ?)
+        """, (agreement_no, agent_name, now_iso, assigned_by))
+        
+        return True, f"Case berhasil di-assign ke Agent {agent_name} (auto-return: {auto_return})"
+        
+    except Exception as e:
+        return False, f"Error assigning case: {str(e)}"
+
+def assign_case_to_tracer(agreement_no: str, tracer_name: str, assigned_by: str) -> tuple:
+    """Assign case to tracer (no time limit, mutual exclusive with agent).
+    
+    Returns: (success: bool, message: str)
+    """
+    try:
+        # Check if already assigned
+        active = get_active_assignment(agreement_no)
+        if active:
+            assigned_type = active.get('assignment_type', 'agent')
+            assigned_to = active.get('assigned_to', 'Unknown')
+            return False, f"Case sedang di-assign ke {assigned_type}: {assigned_to}"
+        
+        # Check frozen
+        if is_frozen_by_agreement(agreement_no):
+            return False, "Case ini frozen (diblokir)"
+        
+        now_iso = now_wib().isoformat()
+        
+        # Create active assignment (no auto_return_date for tracer)
+        execute("""
+            INSERT INTO agent_assignments 
+            (Agreement_No, Agent_Assigned_To, assigned_at, assigned_by, active, assignment_type)
+            VALUES (?, ?, ?, ?, 1, 'tracer')
+        """, (agreement_no, tracer_name, now_iso, assigned_by))
+        
+        # Log to history
+        execute("""
+            INSERT INTO assignment_history
+            (Agreement_No, assigned_to, assignment_type, assigned_at, assigned_by)
+            VALUES (?, ?, 'tracer', ?, ?)
+        """, (agreement_no, tracer_name, now_iso, assigned_by))
+        
+        return True, f"Case berhasil di-assign ke Tracer {tracer_name}"
+        
+    except Exception as e:
+        return False, f"Error assigning case: {str(e)}"
+
+def unassign_case(agreement_no: str, reason: str = "Manual unassign") -> tuple:
+    """Remove active assignment and return case to database pool.
+    
+    Returns: (success: bool, message: str)
+    """
+    try:
+        # Get current active assignment
+        active = get_active_assignment(agreement_no)
+        if not active:
+            return False, "Case tidak memiliki assignment aktif"
+        
+        now_iso = now_wib().isoformat()
+        
+        # Deactivate assignment
+        execute("""
+            UPDATE agent_assignments
+            SET active=0, completed_at=?, completion_reason=?
+            WHERE Agreement_No=? AND active=1
+        """, (now_iso, reason, agreement_no))
+        
+        # Update history completion
+        execute("""
+            UPDATE assignment_history
+            SET completed_at=?, completion_notes=?
+            WHERE Agreement_No=? AND assigned_to=? AND assignment_type=? 
+            AND completed_at IS NULL
+        """, (now_iso, reason, agreement_no, active['assigned_to'], active['assignment_type']))
+        
+        return True, f"Case berhasil di-unassign (reason: {reason})"
+        
+    except Exception as e:
+        return False, f"Error unassigning case: {str(e)}"
+
+def check_and_auto_return_expired_assignments():
+    """Background task: Auto-return agent assignments that passed 7-day deadline WITHOUT payment.
+    Should be run periodically (e.g., on dashboard load).
+    
+    Returns: number of cases auto-returned
+    """
+    try:
+        today = today_wib().isoformat()
+        
+        # Find expired agent assignments without payment
+        expired = fetchall("""
+            SELECT aa.id, aa.Agreement_No, aa.Agent_Assigned_To
+            FROM agent_assignments aa
+            WHERE aa.active=1 
+            AND aa.assignment_type='agent'
+            AND aa.auto_return_date IS NOT NULL
+            AND DATE(aa.auto_return_date) <= DATE(?)
+            AND aa.Agreement_No NOT IN (
+                SELECT DISTINCT Agreement_No FROM payments 
+                WHERE COALESCE(paid_amount,0) > 0
+            )
+        """, (today,))
+        
+        count = 0
+        for row in expired:
+            success, msg = unassign_case(
+                row['Agreement_No'], 
+                f"Auto-return: 7 hari habis tanpa pembayaran"
+            )
+            if success:
+                count += 1
+        
+        return count
+        
+    except Exception as e:
+        st.warning(f"Error auto-returning cases: {str(e)}")
+        return 0
 
 # -------------------------
 # Backup helpers
@@ -4731,6 +5061,17 @@ def page_dashboard():
     """
     require_roles(ALL_ROLES)
     
+    # ========== AUTO-RETURN EXPIRED ASSIGNMENTS ==========
+    # Check for agent assignments that passed 7-day deadline without payment
+    if "auto_return_checked_today" not in st.session_state:
+        try:
+            returned_count = check_and_auto_return_expired_assignments()
+            if returned_count > 0:
+                st.toast(f"🔄 {returned_count} case otomatis kembali ke database (7 hari habis)", icon="🔄")
+            st.session_state['auto_return_checked_today'] = today_wib().isoformat()
+        except Exception as e:
+            st.warning(f"⚠️ Error checking auto-return: {str(e)}")
+    
     # Post-restore checkpoint backup (sekali per sesi, 15 menit setelah restore)
     if "post_restore_backup_done" not in st.session_state:
         try:
@@ -5704,6 +6045,70 @@ def page_supervisor():
             st.info("Tidak ada data supervisor ditemukan.")
         else:
             df = pd.DataFrame(rows)
+            
+            # === ADD ASSIGNMENT STATUS COLUMNS ===
+            # Add columns: "Status Assignment", "Currently Assigned To", "Assignment History"
+            assignment_statuses = []
+            for _, row in df.iterrows():
+                case_id = str(row.get('Case_ID', ''))
+                if not case_id:
+                    assignment_statuses.append({
+                        'Status_Assignment': '-',
+                        'Currently_Assigned_To': '-',
+                        'Assignment_History': '-'
+                    })
+                    continue
+                
+                # Get active assignment
+                active = get_active_assignment(case_id)
+                if active:
+                    assign_type = active.get('assignment_type', 'agent').upper()
+                    assigned_to = active.get('assigned_to', 'Unknown')
+                    auto_return = active.get('auto_return_date', '')
+                    
+                    if assign_type == 'AGENT':
+                        status = f"🎯 Agent Active (Return: {auto_return[:10] if auto_return else 'N/A'})"
+                    else:
+                        status = f"🔍 Tracer Active"
+                    
+                    # Get history
+                    history = get_assignment_history(case_id)
+                    history_str = ""
+                    if history:
+                        history_names = [f"{h.get('assigned_to', '?')} ({h.get('assignment_type', '?')})" 
+                                       for h in history[:5]]  # Show last 5
+                        history_str = " → ".join(history_names)
+                    else:
+                        history_str = "First assignment"
+                    
+                    assignment_statuses.append({
+                        'Status_Assignment': status,
+                        'Currently_Assigned_To': f"{assign_type}: {assigned_to}",
+                        'Assignment_History': history_str
+                    })
+                else:
+                    # Not assigned - check history
+                    history = get_assignment_history(case_id)
+                    if history:
+                        history_names = [f"{h.get('assigned_to', '?')} ({h.get('assignment_type', '?')})" 
+                                       for h in history[:5]]
+                        history_str = " → ".join(history_names)
+                        assignment_statuses.append({
+                            'Status_Assignment': '📂 Available (Returned)',
+                            'Currently_Assigned_To': '-',
+                            'Assignment_History': history_str
+                        })
+                    else:
+                        assignment_statuses.append({
+                            'Status_Assignment': '📂 Available (Fresh)',
+                            'Currently_Assigned_To': '-',
+                            'Assignment_History': 'Never assigned'
+                        })
+            
+            # Add status columns to dataframe
+            status_df = pd.DataFrame(assignment_statuses)
+            df = pd.concat([df, status_df], axis=1)
+            
             # Optional small caption to indicate filtered vs total
         
             # Pastikan kolom id ada untuk identifikasi & hapus
@@ -6886,7 +7291,7 @@ def page_supervisor():
                 prefix = 'TRC'
             return f"TRC-{now_wib().strftime('%y%m%d')}-{prefix}"
 
-        # Process single assign
+        # Process single assign - USE NEW SYSTEM
         if btn_assign_single:
             # Avoid ambiguous truth-value of DataFrame; use explicit None check
             sel = [r for _, r in ((edited if edited is not None else _pd.DataFrame())).iterrows() if bool(r.get("Selected"))]
@@ -6896,67 +7301,63 @@ def page_supervisor():
                 st.warning("Pilih tracer terlebih dahulu.")
             else:
                 try:
-                    import sqlite3 as _sql
-                    conn = _sql.connect(DB_PATH, timeout=30)
-                    conn.row_factory = sqlite3.Row
-                    cur = conn.cursor()
-                    inserted = 0; updated = 0; frozen = 0; already_agent = 0
+                    u = current_user() or {}
+                    by = (u.get('full_name') or u.get('login_id') or '-')
+                    inserted = 0; frozen = 0; already_assigned = 0
+                    
                     for _, r in (edited[edited["Selected"] == True]).iterrows():
                         agr = str(r.get("Case_ID") or "").strip()
                         if not agr:
                             continue
                         nik_val = str(r.get("NIK_KTP") or "").strip() or None
-                        
-                        # VALIDASI: Cek apakah sudah di-assign ke Agent
-                        check_agent = cur.execute("SELECT COUNT(*) as cnt FROM agent_assignments WHERE Agreement_No=? AND IFNULL(active,1)=1", (agr,)).fetchone()
-                        if check_agent and check_agent['cnt'] > 0:
-                            already_agent += 1
-                            continue
-                        
-                        # Freeze checks
-                        if is_frozen_by_agreement(agr) or (nik_val and is_frozen_by_nik(nik_val)):
-                            frozen += 1
-                            continue
                         debtor_nm = r.get("Customer_name")
-                        # Upsert into assign_tracer
-                        trc_code = _gen_trc_code_for(target_tracer_tbl)
-                        try:
-                            cur.execute(
-                                """
-                                INSERT INTO assign_tracer (TRC_Code, Agreement_No, Debtor_Name, NIK_KTP, Assigned_To)
-                                VALUES (?,?,?,?,?)
-                                ON CONFLICT(Agreement_No) DO UPDATE SET
-                                  Assigned_To=excluded.Assigned_To,
-                                  Debtor_Name=COALESCE(excluded.Debtor_Name, assign_tracer.Debtor_Name),
-                                  NIK_KTP=COALESCE(excluded.NIK_KTP, assign_tracer.NIK_KTP),
-                                  TRC_Code=COALESCE(NULLIF(assign_tracer.TRC_Code, ''), excluded.TRC_Code)
-                                """,
-                                (trc_code, agr, debtor_nm, nik_val, target_tracer_tbl)
-                            )
-                            # Detect insert vs update by changes? Simpler: try fetch existing before insert
-                            # For accuracy, check changes() but SQLite python API may not expose easily; skip granularity here
-                            updated += 1
-                        except Exception:
-                            pass
-                    conn.commit(); conn.close()
+                        
+                        # Use new assignment system
+                        success, msg = assign_case_to_tracer(agr, target_tracer_tbl, by)
+                        
+                        if success:
+                            # Still need to populate assign_tracer table for compatibility
+                            trc_code = _gen_trc_code_for(target_tracer_tbl)
+                            try:
+                                execute(
+                                    """
+                                    INSERT INTO assign_tracer (TRC_Code, Agreement_No, Debtor_Name, NIK_KTP, Assigned_To)
+                                    VALUES (?,?,?,?,?)
+                                    ON CONFLICT(Agreement_No) DO UPDATE SET
+                                      Assigned_To=excluded.Assigned_To,
+                                      Debtor_Name=COALESCE(excluded.Debtor_Name, assign_tracer.Debtor_Name),
+                                      NIK_KTP=COALESCE(excluded.NIK_KTP, assign_tracer.NIK_KTP),
+                                      TRC_Code=COALESCE(NULLIF(assign_tracer.TRC_Code, ''), excluded.TRC_Code)
+                                    """,
+                                    (trc_code, agr, debtor_nm, nik_val, target_tracer_tbl)
+                                )
+                            except Exception:
+                                pass
+                            inserted += 1
+                        else:
+                            if "frozen" in msg.lower():
+                                frozen += 1
+                            elif "di-assign" in msg.lower():
+                                already_assigned += 1
                     done = (len(sel) - frozen - already_agent)
                     msg = f"Assign selesai. Diproses: {done}."
                     if frozen > 0:
                         msg += f" Dilewati karena Freeze: {frozen}."
-                    if already_agent > 0:
-                        msg += f" Dilewati karena sudah di-assign ke Agent: {already_agent}."
-                    st.success(msg)
-                    # Audit
+                    # Show summary
                     u = current_user() or {}
                     try:
-                        execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (u.get('id'), "TRACE_ASSIGN_FROM_SUP_TABLE", f"{done} rows to {target_tracer_tbl}; frozen {frozen}; already_agent {already_agent}"))
+                        execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", 
+                               (u.get('id'), "TRACE_ASSIGN_FROM_SUP_TABLE", 
+                                f"{inserted} rows to {target_tracer_tbl}; frozen {frozen}; already_assigned {already_assigned}"))
                     except Exception:
                         pass
+                    
+                    st.success(f"✅ Berhasil assign: {inserted} case. ❄️ Frozen: {frozen}. 🔒 Already assigned: {already_assigned}.")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Gagal assign: {e}")
 
-        # Process multi assign (random/round-robin)
+        # Process multi assign (random/round-robin) - USE NEW SYSTEM
         if btn_assign_multi:
             sel_df = edited[edited["Selected"] == True] if isinstance(edited, _pd.DataFrame) else _pd.DataFrame()
             if sel_df.empty:
@@ -6965,64 +7366,69 @@ def page_supervisor():
                 st.warning("Pilih minimal satu tracer untuk distribusi.")
             else:
                 try:
-                    import random, sqlite3 as _sql
+                    import random
+                    u = current_user() or {}
+                    by = (u.get('full_name') or u.get('login_id') or '-')
                     rows_to_assign = sel_df.to_dict(orient="records")
                     # Shuffle for random distribution
                     random.shuffle(rows_to_assign)
-                    conn = _sql.connect(DB_PATH, timeout=30)
-                    conn.row_factory = sqlite3.Row
-                    cur = conn.cursor()
+                    
                     counts = {t: 0 for t in tracers_multi}
-                    frozen = 0; done = 0; already_agent = 0
+                    frozen = 0; done = 0; already_assigned = 0
+                    
                     for i, r in enumerate(rows_to_assign):
                         agr = str(r.get("Case_ID") or "").strip()
                         if not agr:
                             continue
                         nik_val = str(r.get("NIK_KTP") or "").strip() or None
-                        
-                        # VALIDASI: Cek apakah sudah di-assign ke Agent
-                        check_agent = cur.execute("SELECT COUNT(*) as cnt FROM agent_assignments WHERE Agreement_No=? AND IFNULL(active,1)=1", (agr,)).fetchone()
-                        if check_agent and check_agent['cnt'] > 0:
-                            already_agent += 1
-                            continue
-                        
-                        if is_frozen_by_agreement(agr) or (nik_val and is_frozen_by_nik(nik_val)):
-                            frozen += 1
-                            continue
-                        assignee = tracers_multi[i % len(tracers_multi)]
                         debtor_nm = r.get("Customer_name")
-                        trc_code = _gen_trc_code_for(assignee)
-                        try:
-                            cur.execute(
-                                """
-                                INSERT INTO assign_tracer (TRC_Code, Agreement_No, Debtor_Name, NIK_KTP, Assigned_To)
-                                VALUES (?,?,?,?,?)
-                                ON CONFLICT(Agreement_No) DO UPDATE SET
-                                  Assigned_To=excluded.Assigned_To,
-                                  Debtor_Name=COALESCE(excluded.Debtor_Name, assign_tracer.Debtor_Name),
-                                  NIK_KTP=COALESCE(excluded.NIK_KTP, assign_tracer.NIK_KTP),
-                                  TRC_Code=COALESCE(NULLIF(assign_tracer.TRC_Code, ''), excluded.TRC_Code)
-                                """,
-                                (trc_code, agr, debtor_nm, nik_val, assignee)
-                            )
+                        
+                        assignee = tracers_multi[i % len(tracers_multi)]
+                        
+                        # Use new assignment system
+                        success, msg = assign_case_to_tracer(agr, assignee, by)
+                        
+                        if success:
+                            # Populate assign_tracer table for compatibility
+                            trc_code = _gen_trc_code_for(assignee)
+                            try:
+                                execute(
+                                    """
+                                    INSERT INTO assign_tracer (TRC_Code, Agreement_No, Debtor_Name, NIK_KTP, Assigned_To)
+                                    VALUES (?,?,?,?,?)
+                                    ON CONFLICT(Agreement_No) DO UPDATE SET
+                                      Assigned_To=excluded.Assigned_To,
+                                      Debtor_Name=COALESCE(excluded.Debtor_Name, assign_tracer.Debtor_Name),
+                                      NIK_KTP=COALESCE(excluded.NIK_KTP, assign_tracer.NIK_KTP),
+                                      TRC_Code=COALESCE(NULLIF(assign_tracer.TRC_Code, ''), excluded.TRC_Code)
+                                    """,
+                                    (trc_code, agr, debtor_nm, nik_val, assignee)
+                                )
+                            except Exception:
+                                pass
                             counts[assignee] += 1
                             done += 1
-                        except Exception:
-                            pass
-                    conn.commit(); conn.close()
+                        else:
+                            if "frozen" in msg.lower():
+                                frozen += 1
+                            elif "di-assign" in msg.lower():
+                                already_assigned += 1
+                    
                     # Summary
                     summary = ", ".join([f"{k}:{v}" for k,v in counts.items()])
-                    msg = f"Distribusi selesai. Diproses: {done}."
+                    msg = f"✅ Distribusi selesai. Berhasil: {done}."
                     if frozen > 0:
-                        msg += f" Freeze: {frozen}."
-                    if already_agent > 0:
-                        msg += f" Sudah di-assign ke Agent: {already_agent}."
-                    msg += f" Rincian: {summary}"
+                        msg += f" ❄️ Frozen: {frozen}."
+                    if already_assigned > 0:
+                        msg += f" 🔒 Already assigned: {already_assigned}."
+                    msg += f" 📊 Rincian: {summary}"
                     st.success(msg)
+                    
                     # Audit
-                    u = current_user() or {}
                     try:
-                        execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (u.get('id'), "TRACE_ASSIGN_RANDOM_FROM_SUP_TABLE", f"done {done}; frozen {frozen}; already_agent {already_agent}; {summary}"))
+                        execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", 
+                               (u.get('id'), "TRACE_ASSIGN_RANDOM_FROM_SUP_TABLE", 
+                                f"done {done}; frozen {frozen}; already_assigned {already_assigned}; {summary}"))
                     except Exception:
                         pass
                     st.rerun()
@@ -7281,22 +7687,16 @@ def page_supervisor():
                                 conn_check.close()
                             except Exception:
                                 pass
-                            try:
-                                execute(
-                                    """
-                                    INSERT INTO agent_assignments (Agreement_No, Agent_Assigned_To, assigned_by, active)
-                                    VALUES (?,?,?,1)
-                                    ON CONFLICT(Agreement_No) DO UPDATE SET
-                                        Agent_Assigned_To=excluded.Agent_Assigned_To,
-                                        assigned_at=CURRENT_TIMESTAMP,
-                                        assigned_by=excluded.assigned_by,
-                                        active=1
-                                    """,
-                                    (agr, sel_agent, by)
-                                )
+                            
+                            # Use new assignment system with rotation
+                            success, msg = assign_case_to_agent(agr, sel_agent, by)
+                            if success:
                                 assigned += 1
-                            except Exception:
-                                pass
+                            else:
+                                # Count specific rejection reasons
+                                if "frozen" in msg.lower():
+                                    frozen_skips += 1
+                                
                         # Audit
                         try:
                             execute(
@@ -7305,7 +7705,7 @@ def page_supervisor():
                             )
                         except Exception:
                             pass
-                        st.success(f"Diproses: {assigned}. Freeze: {frozen_skips}. Sudah di-assign ke Tracer: {already_tracer}.")
+                        st.success(f"✅ Berhasil assign: {assigned} case. ❄️ Frozen: {frozen_skips}. 🔍 Sudah di tracer: {already_tracer}.")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Gagal assign: {e}")
@@ -7329,6 +7729,8 @@ def page_supervisor():
                         assigned = 0
                         frozen_skips = 0
                         already_tracer = 0
+                        rotation_blocked = 0
+                        
                         for i, agr in enumerate(ids):
                             try:
                                 if is_frozen_by_agreement(agr):
@@ -7348,32 +7750,28 @@ def page_supervisor():
                                 conn_check2.close()
                             except Exception:
                                 pass
+                            
                             agent = sel_agents[i % len(sel_agents)]
-                            try:
-                                execute(
-                                    """
-                                    INSERT INTO agent_assignments (Agreement_No, Agent_Assigned_To, assigned_by, active)
-                                    VALUES (?,?,?,1)
-                                    ON CONFLICT(Agreement_No) DO UPDATE SET
-                                        Agent_Assigned_To=excluded.Agent_Assigned_To,
-                                        assigned_at=CURRENT_TIMESTAMP,
-                                        assigned_by=excluded.assigned_by,
-                                        active=1
-                                    """,
-                                    (agr, agent, by)
-                                )
+                            
+                            # Use new assignment system with rotation
+                            success, msg = assign_case_to_agent(agr, agent, by)
+                            if success:
                                 assigned += 1
-                            except Exception:
-                                pass
+                            else:
+                                if "frozen" in msg.lower():
+                                    frozen_skips += 1
+                                elif "handle dulu" in msg.lower():
+                                    rotation_blocked += 1
+                                
                         # Audit
                         try:
                             execute(
                                 "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
-                                (u.get('id') if u else None, "AGENT_ASSIGN_RANDOM_FROM_SUP_TABLE", f"Assigned {assigned} among {len(sel_agents)} agents; frozen: {frozen_skips}; already_tracer: {already_tracer}")
+                                (u.get('id') if u else None, "AGENT_ASSIGN_RANDOM_FROM_SUP_TABLE", f"Assigned {assigned} among {len(sel_agents)} agents; frozen: {frozen_skips}; tracer: {already_tracer}; rotation_blocked: {rotation_blocked}")
                             )
                         except Exception:
                             pass
-                        st.success(f"Diproses: {assigned}. Freeze: {frozen_skips}. Sudah di-assign ke Tracer: {already_tracer}.")
+                        st.success(f"✅ Berhasil assign: {assigned} case. ❄️ Frozen: {frozen_skips}. 🔍 Sudah di tracer: {already_tracer}. 🔄 Rotation blocked: {rotation_blocked}.")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Gagal melakukan distribusi: {e}")
