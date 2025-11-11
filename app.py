@@ -4787,12 +4787,23 @@ def page_dashboard():
         WHERE DATE(paid_date) >= DATE(?)
     """, (start_of_month.isoformat(),)) or {}).get('total', 0)
 
-    # B) Last Month Total = Total paid_amount bulan lalu
+    # B) Last Month Saving = Total paid_amount dari tanggal 1 bulan lalu sampai tanggal yang sama dengan hari ini
+    # Contoh: Jika hari ini 11 November, maka hitung 1-11 Oktober
+    # Jika hari ini 31 Maret tapi Februari hanya 28 hari, gunakan 28 Februari
+    current_day = today.day
+    # Tentukan hari terakhir bulan lalu yang valid (handle bulan dengan jumlah hari berbeda)
+    try:
+        last_month_same_day = last_month_start.replace(day=current_day)
+    except ValueError:
+        # Jika current_day tidak valid di bulan lalu (misal 31 tapi bulan lalu hanya 30 hari)
+        # Gunakan hari terakhir bulan lalu
+        last_month_same_day = last_month_end
+    
     last_month_saving = (fetchone("""
         SELECT COALESCE(SUM(paid_amount), 0) as total
         FROM payments
         WHERE DATE(paid_date) BETWEEN DATE(?) AND DATE(?)
-    """, (last_month_start.isoformat(), last_month_end.isoformat())) or {}).get('total', 0)
+    """, (last_month_start.isoformat(), last_month_same_day.isoformat())) or {}).get('total', 0)
     
     # Comparison: hijau jika running month > last month, merah jika lebih kecil
     saving_trend = "up" if running_month_saving >= last_month_saving else "down"
