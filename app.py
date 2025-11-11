@@ -3391,6 +3391,7 @@ def page_agent():
         # 1. Tabel payments dengan approval_status='approved'
         # 2. Tabel agent_results dengan approval_status='approved'
         # Note: Gunakan IFNULL untuk backward compatibility jika kolom belum ada
+        # CRITICAL: Filter ONLY assignment_type='agent' to exclude tracer assignments
         rows = fetchall("""
             SELECT 
                 aa.Agreement_No AS Case_ID, 
@@ -3417,6 +3418,8 @@ def page_agent():
                 ON sd.Case_ID = aa.Agreement_No 
                 OR sd.Virtual_Account_Number = aa.Agreement_No
                 OR sd.Third_Uid = aa.Agreement_No
+            WHERE aa.active = 1 
+              AND IFNULL(aa.assignment_type, 'agent') = 'agent'
             ORDER BY aa.assigned_at DESC 
             LIMIT 500
         """)
@@ -3492,8 +3495,16 @@ def page_agent():
         if count_ptp and count_ptp > 0:
             st.success(f"Hai {agent_name}, hari ini kamu ada {count_ptp} PTP. Klik di bawah untuk lihat daftar.")
         
-        # Agent's assigned loans
-        rows = fetchall("SELECT Agreement_No AS Case_ID, Agent_Assigned_To, assigned_at FROM agent_assignments WHERE Agent_Assigned_To=? ORDER BY assigned_at DESC LIMIT 500", (agent_name,))
+        # Agent's assigned loans - ONLY show agent assignments, NOT tracer
+        rows = fetchall("""
+            SELECT Agreement_No AS Case_ID, Agent_Assigned_To, assigned_at 
+            FROM agent_assignments 
+            WHERE Agent_Assigned_To=? 
+              AND active = 1
+              AND IFNULL(assignment_type, 'agent') = 'agent'
+            ORDER BY assigned_at DESC 
+            LIMIT 500
+        """, (agent_name,))
     
     if not rows:
         st.info("Belum ada assignment.")
@@ -7356,7 +7367,7 @@ def page_supervisor():
                                 frozen += 1
                             elif "di-assign" in msg.lower():
                                 already_assigned += 1
-                    done = (len(sel) - frozen - already_agent)
+                    done = (len(sel) - frozen - already_assigned)
                     msg = f"Assign selesai. Diproses: {done}."
                     if frozen > 0:
                         msg += f" Dilewati karena Freeze: {frozen}."
