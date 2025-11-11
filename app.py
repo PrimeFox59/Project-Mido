@@ -4787,23 +4787,12 @@ def page_dashboard():
         WHERE DATE(paid_date) >= DATE(?)
     """, (start_of_month.isoformat(),)) or {}).get('total', 0)
 
-    # B) Last Month Saving = Total paid_amount dari tanggal 1 bulan lalu sampai tanggal yang sama dengan hari ini
-    # Contoh: Jika hari ini 11 November, maka hitung 1-11 Oktober
-    # Jika hari ini 31 Maret tapi Februari hanya 28 hari, gunakan 28 Februari
-    current_day = today.day
-    # Tentukan hari terakhir bulan lalu yang valid (handle bulan dengan jumlah hari berbeda)
-    try:
-        last_month_same_day = last_month_start.replace(day=current_day)
-    except ValueError:
-        # Jika current_day tidak valid di bulan lalu (misal 31 tapi bulan lalu hanya 30 hari)
-        # Gunakan hari terakhir bulan lalu
-        last_month_same_day = last_month_end
-    
+    # B) Last Month Total = Total paid_amount bulan lalu
     last_month_saving = (fetchone("""
         SELECT COALESCE(SUM(paid_amount), 0) as total
         FROM payments
         WHERE DATE(paid_date) BETWEEN DATE(?) AND DATE(?)
-    """, (last_month_start.isoformat(), last_month_same_day.isoformat())) or {}).get('total', 0)
+    """, (last_month_start.isoformat(), last_month_end.isoformat())) or {}).get('total', 0)
     
     # Comparison: hijau jika running month > last month, merah jika lebih kecil
     saving_trend = "up" if running_month_saving >= last_month_saving else "down"
@@ -4839,110 +4828,99 @@ def page_dashboard():
     
     forecast_closing = running_month_saving + ptp_this_month
 
-    # -------- Enhanced KPI cards (Exact Mockup Match) --------
+    # -------- Enhanced KPI cards (Financial Dashboard) --------
     st.markdown(
         """
         <style>
-        /* Clean minimal KPI cards - exact mockup match */
-        .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 20px 0 12px 0; }
-        @media (max-width: 1200px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); gap: 16px; } }
+        /* Enhanced KPI cards with modern financial dashboard aesthetic */
+        .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin: 16px 0 8px 0; }
+        @media (max-width: 1200px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); gap: 14px; } }
         @media (max-width: 700px) { .kpi-grid { grid-template-columns: 1fr; } }
         
-        /* Clean card with solid pastel background */
+        /* Financial KPI card with gradient background */
         .kpi-card { 
-            background: var(--card-bg);
-            border: none;
-            border-radius: 12px; 
-            padding: 18px 20px; 
-            box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-            transition: all 0.2s ease;
-            min-height: 110px;
+            position: relative; 
+            overflow: hidden; 
+            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+            border: 1px solid #E5E7EB; 
+            border-radius: 20px; 
+            padding: 24px 20px; 
+            box-shadow: 0 4px 12px rgba(16,24,40,0.08), 0 1px 3px rgba(16,24,40,0.05);
+            transition: all 0.3s ease;
         }
-        
         .kpi-card:hover {
-            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-            transform: translateY(-1px);
+            box-shadow: 0 8px 24px rgba(16,24,40,0.12), 0 2px 6px rgba(16,24,40,0.08);
+            transform: translateY(-2px);
         }
         
-        /* Icon and title row */
-        .kpi-header {
+        /* Accent circle (decorative element) */
+        .kpi-card::after { 
+            content:""; 
+            position:absolute; 
+            right:-40px; 
+            top:-50px; 
+            width:200px; 
+            height:200px; 
+            border-radius: 50%; 
+            background: radial-gradient(circle at center, var(--accent-light, #EEF4FF), rgba(255,255,255,0) 60%); 
+            opacity:.5;
+            z-index: 0;
+        }
+        
+        /* Content layer above decoration */
+        .kpi-card > * { position: relative; z-index: 1; }
+        
+        /* Title with icon support */
+        .kpi-title { 
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            letter-spacing: .5px; 
+            text-transform: uppercase; 
+            font-size: 11px; 
+            font-weight: 700;
+            color: #6B7280; 
+            margin-bottom: 12px;
+        }
+        
+        /* Large value with currency formatting */
+        .kpi-value { 
+            font-size: 32px; 
+            font-weight: 800; 
+            color: var(--accent, #111827); 
+            line-height: 1.1;
+            margin-bottom: 8px;
+            letter-spacing: -0.5px;
+        }
+        
+        /* Subtitle with trend indicators */
+        .kpi-sub { 
+            font-size: 13px; 
+            color: #9CA3AF; 
+            margin-top: 4px;
             display: flex;
             align-items: center;
             gap: 6px;
-            margin-bottom: 10px;
         }
         
-        /* Simple icon */
-        .kpi-icon {
-            font-size: 14px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        /* Title */
-        .kpi-title { 
-            font-size: 10px; 
-            font-weight: 700;
-            color: var(--title-color);
-            text-transform: uppercase;
-            letter-spacing: 0.3px;
-        }
-        
-        /* Large value */
-        .kpi-value { 
-            font-size: 26px; 
-            font-weight: 700; 
-            color: var(--value-color);
-            line-height: 1.1;
-            margin-bottom: 6px;
-        }
-        
-        /* Subtitle */
-        .kpi-sub { 
-            font-size: 11px; 
-            color: var(--sub-color);
-            line-height: 1.3;
-            font-weight: 400;
-        }
-        
-        /* Trend indicator */
-        .trend-indicator {
+        /* Trend badge */
+        .trend-badge {
             display: inline-flex;
             align-items: center;
-            gap: 3px;
-            font-size: 10px;
-            font-weight: 700;
-            margin-right: 4px;
+            gap: 4px;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
         }
-        .trend-up { color: #059669; }
-        .trend-down { color: #DC2626; }
+        .trend-up { background: #ECFDF3; color: #047857; }
+        .trend-down { background: #FEF2F2; color: #DC2626; }
         
-        /* Color variants - solid pastel matching mockup exactly */
-        .card-cyan-light { 
-            --card-bg: #E0F7FA; 
-            --title-color: #0E7490;
-            --value-color: #047857;
-            --sub-color: #475569;
-        }
-        .card-cyan { 
-            --card-bg: #B2EBF2; 
-            --title-color: #0E7490;
-            --value-color: #047857;
-            --sub-color: #475569;
-        }
-        .card-orange { 
-            --card-bg: #FFE0B2; 
-            --title-color: #C2410C;
-            --value-color: #EA580C;
-            --sub-color: #78350F;
-        }
-        .card-purple { 
-            --card-bg: #E1BEE7; 
-            --title-color: #7C3AED;
-            --value-color: #7C3AED;
-            --sub-color: #6B21A8;
-        }
+        /* Color variants for different metrics */
+        .accent-teal { --accent: #0D9488; --accent-light: #CCFBF1; }
+        .accent-emerald { --accent: #059669; --accent-light: #D1FAE5; }
+        .accent-amber { --accent: #F59E0B; --accent-light: #FEF3C7; }
+        .accent-violet { --accent: #7C3AED; --accent-light: #EDE9FE; }
         
         /* Approval banner */
         .approval-banner {
@@ -4963,17 +4941,14 @@ def page_dashboard():
         unsafe_allow_html=True,
     )
 
-    # Render KPI cards matching mockup exactly
+    # Render enhanced financial KPI cards
     kpi_cols = st.columns(4)
     
     with kpi_cols[0]:
         st.markdown(
             f"""
-            <div class='kpi-card card-cyan-light'>
-                <div class='kpi-header'>
-                    <div class='kpi-icon'>💰</div>
-                    <div class='kpi-title'>Running Month Saving</div>
-                </div>
+            <div class='kpi-card accent-teal'>
+                <div class='kpi-title'>💰 Running Month Saving</div>
                 <div class='kpi-value'>Rp {running_month_saving:,.0f}</div>
                 <div class='kpi-sub'>Total pembayaran bulan ini</div>
             </div>
@@ -4982,21 +4957,19 @@ def page_dashboard():
         )
     
     with kpi_cols[1]:
+        trend_color = "#059669" if saving_trend == "up" else "#DC2626"
         trend_icon = "↗" if saving_trend == "up" else "↘"
         trend_class = "trend-up" if saving_trend == "up" else "trend-down"
-        trend_text = f"↗ {abs(saving_pct):.1f}%" if saving_trend == "up" else f"↘ {abs(saving_pct):.1f}%"
-        comparison_text = "Lebih tinggi" if saving_trend == "up" else "Lebih rendah"
         st.markdown(
             f"""
-            <div class='kpi-card card-cyan'>
-                <div class='kpi-header'>
-                    <div class='kpi-icon'>📊</div>
-                    <div class='kpi-title'>Last Month</div>
-                </div>
+            <div class='kpi-card accent-emerald'>
+                <div class='kpi-title'>📊 Last Month</div>
                 <div class='kpi-value'>Rp {last_month_saving:,.0f}</div>
                 <div class='kpi-sub'>
-                    <span class='trend-indicator {trend_class}'>{trend_text}</span>
-                    {comparison_text}
+                    <span class='trend-badge {trend_class}'>{trend_icon} {abs(saving_pct):.1f}%</span>
+                    <span style='color: {trend_color}; font-weight: 600;'>
+                        {"Lebih tinggi" if saving_trend == "up" else "Lebih rendah"}
+                    </span>
                 </div>
             </div>
             """,
@@ -5006,11 +4979,8 @@ def page_dashboard():
     with kpi_cols[2]:
         st.markdown(
             f"""
-            <div class='kpi-card card-orange'>
-                <div class='kpi-header'>
-                    <div class='kpi-icon'>🎯</div>
-                    <div class='kpi-title'>Stock PTP</div>
-                </div>
+            <div class='kpi-card accent-amber'>
+                <div class='kpi-title'>🎯 Stock PTP</div>
                 <div class='kpi-value'>Rp {stock_ptp:,.0f}</div>
                 <div class='kpi-sub'>Total janji bayar aktif</div>
             </div>
@@ -5021,11 +4991,8 @@ def page_dashboard():
     with kpi_cols[3]:
         st.markdown(
             f"""
-            <div class='kpi-card card-purple'>
-                <div class='kpi-header'>
-                    <div class='kpi-icon'>🚀</div>
-                    <div class='kpi-title'>Forecast Closing</div>
-                </div>
+            <div class='kpi-card accent-violet'>
+                <div class='kpi-title'>🚀 Forecast Closing</div>
                 <div class='kpi-value'>Rp {forecast_closing:,.0f}</div>
                 <div class='kpi-sub'>Saving + Prospect bulan ini</div>
             </div>
