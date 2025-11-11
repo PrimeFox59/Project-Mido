@@ -5790,37 +5790,44 @@ def page_supervisor():
                         agent_assign = fetchone("SELECT Agent_Assigned_To, assigned_at FROM agent_assignments WHERE Agreement_No = ? AND active = 1", (detail_row.get('Case_ID', ''),))
                         agent_name = agent_assign.get('Agent_Assigned_To', 'N/A') if agent_assign else 'N/A'
                         
-                        # Header and Handling Agent Info Box (Top Section)
-                        col_header, col_agent_top = st.columns([3, 1])
-                        
-                        with col_header:
-                            # Header with styling similar to the image
-                            st.markdown(f"""
-                            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                                        padding: 30px; border-radius: 16px; color: white;">
-                                <h2 style="margin: 0 0 10px 0; color: white;">Here's your Contract Details</h2>
-                                <p style="margin: 0; font-style: italic; opacity: 0.9;">We are happy to help with any settlement scheme of your choosing!</p>
+                        # Top Info Card - Handling Agent Details
+                        st.markdown(f"""
+                        <div style="background: linear-gradient(135deg, #1e293b 0%, #334155 100%); 
+                                    padding: 20px; border-radius: 12px; color: white; margin-bottom: 20px;
+                                    box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px;">
+                                <div>
+                                    <div style="font-size: 11px; opacity: 0.7; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">Handling Agent</div>
+                                    <div style="font-weight: 700; font-size: 16px;">{agent_name}</div>
+                                </div>
+                                <div>
+                                    <div style="font-size: 11px; opacity: 0.7; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">Agent Phone Number</div>
+                                    <div style="font-weight: 700; font-size: 16px;">-</div>
+                                </div>
+                                <div>
+                                    <div style="font-size: 11px; opacity: 0.7; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">Loan ID</div>
+                                    <div style="font-weight: 700; font-size: 16px;">{detail_row.get('Case_ID', '#N/A')}</div>
+                                </div>
+                                <div>
+                                    <div style="font-size: 11px; opacity: 0.7; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">Product</div>
+                                    <div style="font-weight: 700; font-size: 16px;">{detail_row.get('Product', '#N/A')}</div>
+                                </div>
                             </div>
-                            """, unsafe_allow_html=True)
-                        
-                        with col_agent_top:
-                            st.markdown(f"""
-                            <div style="background: #2D1810; padding: 15px; border-radius: 8px; color: white;">
-                                <div style="font-size: 12px; margin-bottom: 5px;">Handling Agent</div>
-                                <div style="font-weight: bold; margin-bottom: 10px;">{agent_name}</div>
-                                <div style="font-size: 12px; margin-bottom: 3px;">Agent Phone Number</div>
-                                <div style="font-weight: bold; margin-bottom: 10px;">-</div>
-                                <div style="font-size: 12px; margin-bottom: 3px;">Loan ID</div>
-                                <div style="font-weight: bold; margin-bottom: 10px;">{detail_row.get('Case_ID', '#N/A')}</div>
-                                <div style="font-size: 12px; margin-bottom: 3px;">Product</div>
-                                <div style="font-weight: bold; margin-bottom: 10px;">{detail_row.get('Product', '#N/A')}</div>
-                                <div style="font-size: 12px; margin-bottom: 3px;">NIK</div>
-                                <div style="font-weight: bold;">#N/A</div>
+                            <div style="margin-top: 12px;">
+                                <div style="font-size: 11px; opacity: 0.7; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;">NIK</div>
+                                <div style="font-weight: 700; font-size: 16px;">#N/A</div>
                             </div>
-                            """, unsafe_allow_html=True)
+                        </div>
+                        """, unsafe_allow_html=True)
                         
-                        # Spacing between header and main content
-                        st.markdown("<br>", unsafe_allow_html=True)
+                        # Header with styling - Here's your Contract Details
+                        st.markdown(f"""
+                        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                                    padding: 30px; border-radius: 16px; color: white;">
+                            <h2 style="margin: 0 0 10px 0; color: white;">Here's your Contract Details</h2>
+                            <p style="margin: 0; font-style: italic; opacity: 0.9;">We are happy to help with any settlement scheme of your choosing!</p>
+                        </div>
+                        """, unsafe_allow_html=True)
                         
                         # Helper function to display info rows with modern styling
                         def display_info_section(title, data_list, bg_header="#2D1810"):
