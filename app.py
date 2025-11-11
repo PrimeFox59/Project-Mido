@@ -4839,44 +4839,42 @@ def page_dashboard():
     
     forecast_closing = running_month_saving + ptp_this_month
 
-    # -------- Enhanced KPI cards (Clean Minimal Style) --------
+    # -------- Enhanced KPI cards (Exact Mockup Match) --------
     st.markdown(
         """
         <style>
-        /* Clean minimal KPI cards matching mockup design */
+        /* Clean minimal KPI cards - exact mockup match */
         .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 20px 0 12px 0; }
         @media (max-width: 1200px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); gap: 16px; } }
         @media (max-width: 700px) { .kpi-grid { grid-template-columns: 1fr; } }
         
-        /* Clean card with subtle background */
+        /* Clean card with solid pastel background */
         .kpi-card { 
             background: var(--card-bg);
-            border: 1px solid var(--card-border);
-            border-radius: 16px; 
-            padding: 20px; 
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-            transition: all 0.3s ease;
-            min-height: 120px;
+            border: none;
+            border-radius: 12px; 
+            padding: 18px 20px; 
+            box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+            transition: all 0.2s ease;
+            min-height: 110px;
         }
         
         .kpi-card:hover {
-            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-            transform: translateY(-2px);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            transform: translateY(-1px);
         }
         
         /* Icon and title row */
         .kpi-header {
             display: flex;
             align-items: center;
-            gap: 8px;
-            margin-bottom: 12px;
+            gap: 6px;
+            margin-bottom: 10px;
         }
         
         /* Simple icon */
         .kpi-icon {
-            font-size: 16px;
-            width: 20px;
-            height: 20px;
+            font-size: 14px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -4884,82 +4882,79 @@ def page_dashboard():
         
         /* Title */
         .kpi-title { 
-            font-size: 11px; 
-            font-weight: 600;
+            font-size: 10px; 
+            font-weight: 700;
             color: var(--title-color);
             text-transform: uppercase;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.3px;
         }
         
         /* Large value */
         .kpi-value { 
-            font-size: 28px; 
+            font-size: 26px; 
             font-weight: 700; 
             color: var(--value-color);
-            line-height: 1.2;
-            margin-bottom: 8px;
+            line-height: 1.1;
+            margin-bottom: 6px;
         }
         
         /* Subtitle */
         .kpi-sub { 
-            font-size: 12px; 
+            font-size: 11px; 
             color: var(--sub-color);
             line-height: 1.3;
+            font-weight: 400;
         }
         
         /* Trend indicator */
         .trend-indicator {
             display: inline-flex;
             align-items: center;
-            gap: 4px;
-            font-size: 11px;
-            font-weight: 600;
-            margin-top: 4px;
+            gap: 3px;
+            font-size: 10px;
+            font-weight: 700;
+            margin-right: 4px;
         }
         .trend-up { color: #059669; }
         .trend-down { color: #DC2626; }
         
-        /* Color variants matching mockup */
-        .card-yellow { 
-            --card-bg: linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%); 
-            --card-border: #FCD34D;
-            --title-color: #92400E;
-            --value-color: #78350F;
-            --sub-color: #92400E;
+        /* Color variants - solid pastel matching mockup exactly */
+        .card-cyan-light { 
+            --card-bg: #E0F7FA; 
+            --title-color: #0E7490;
+            --value-color: #047857;
+            --sub-color: #475569;
         }
         .card-cyan { 
-            --card-bg: linear-gradient(135deg, #CFFAFE 0%, #A5F3FC 100%); 
-            --card-border: #67E8F9;
-            --title-color: #155E75;
-            --value-color: #0E7490;
-            --sub-color: #155E75;
+            --card-bg: #B2EBF2; 
+            --title-color: #0E7490;
+            --value-color: #047857;
+            --sub-color: #475569;
         }
         .card-orange { 
-            --card-bg: linear-gradient(135deg, #FED7AA 0%, #FDBA74 100%); 
-            --card-border: #FB923C;
-            --title-color: #9A3412;
-            --value-color: #7C2D12;
-            --sub-color: #9A3412;
+            --card-bg: #FFE0B2; 
+            --title-color: #C2410C;
+            --value-color: #EA580C;
+            --sub-color: #78350F;
         }
         .card-purple { 
-            --card-bg: linear-gradient(135deg, #E9D5FF 0%, #D8B4FE 100%); 
-            --card-border: #C084FC;
-            --title-color: #6B21A8;
-            --value-color: #581C87;
+            --card-bg: #E1BEE7; 
+            --title-color: #7C3AED;
+            --value-color: #7C3AED;
             --sub-color: #6B21A8;
         }
         
-        /* Approval banner with subtle gradient */
+        /* Approval banner */
         .approval-banner {
-            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
-            border: 1px solid #e5e7eb;
-            border-radius: 16px;
-            padding: 16px 20px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+            background: #FFFFFF;
+            border: 1px solid #E5E7EB;
+            border-radius: 12px;
+            padding: 14px 18px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.06);
         }
         
-        /* Pills (approval banner) */
-        .pill { display:inline-flex; align-items:center; gap:6px; padding:4px 12px; border-radius: 999px; font-size:13px; font-weight: 700; }
+        /* Pills */
+        .pill { display:inline-flex; align-items:center; gap:4px; padding:3px 10px; border-radius: 999px; font-size:12px; font-weight: 700; }
         .pill-warning { background:#FFF7ED; color:#C2410C; }
         .pill-success { background:#ECFDF3; color:#027A48; }
         .pill-info { background:#EEF4FF; color:#3538CD; }
@@ -4968,13 +4963,13 @@ def page_dashboard():
         unsafe_allow_html=True,
     )
 
-    # Render clean minimal KPI cards matching mockup
+    # Render KPI cards matching mockup exactly
     kpi_cols = st.columns(4)
     
     with kpi_cols[0]:
         st.markdown(
             f"""
-            <div class='kpi-card card-yellow'>
+            <div class='kpi-card card-cyan-light'>
                 <div class='kpi-header'>
                     <div class='kpi-icon'>💰</div>
                     <div class='kpi-title'>Running Month Saving</div>
@@ -4989,7 +4984,7 @@ def page_dashboard():
     with kpi_cols[1]:
         trend_icon = "↗" if saving_trend == "up" else "↘"
         trend_class = "trend-up" if saving_trend == "up" else "trend-down"
-        trend_text = f"{trend_icon} {abs(saving_pct):.1f}%"
+        trend_text = f"↗ {abs(saving_pct):.1f}%" if saving_trend == "up" else f"↘ {abs(saving_pct):.1f}%"
         comparison_text = "Lebih tinggi" if saving_trend == "up" else "Lebih rendah"
         st.markdown(
             f"""
