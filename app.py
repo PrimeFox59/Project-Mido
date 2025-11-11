@@ -7119,7 +7119,16 @@ def page_supervisor():
                                 saved = 0
                                 skipped = 0
                                 replaced = 0
-                                for _, row in df_full.iterrows():
+                                
+                                # Create progress tracking UI
+                                total_rows = len(df_full)
+                                st.info(f"🚀 Memulai upload {total_rows:,} baris data...")
+                                progress_bar = st.progress(0)
+                                status_text = st.empty()
+                                
+                                # Process rows with progress updates
+                                for idx, row in enumerate(df_full.iterrows(), 1):
+                                    _, row = row  # unpack tuple (index, row)
                                     try:
                                         # Replace-by-Case_ID: if Case_ID already exists, delete then insert
                                         case_id_raw = row.get('Case_ID') if isinstance(row, dict) else None
@@ -7151,6 +7160,16 @@ def page_supervisor():
                                         saved += 1
                                     except Exception as e:
                                         skipped += 1
+                                    
+                                    # Update progress every 10 rows or on last row
+                                    if idx % 10 == 0 or idx == total_rows:
+                                        progress = idx / total_rows
+                                        progress_bar.progress(progress)
+                                        status_text.text(f"📊 Progress: {idx:,}/{total_rows:,} baris | ✅ Tersimpan: {saved:,} | 🔄 Replace: {replaced:,} | ⚠️ Dilewati: {skipped:,}")
+                                
+                                # Clear progress UI
+                                progress_bar.empty()
+                                status_text.empty()
                                 # Simpan pesan hasil agar tampil sekali setelah rerun
                                 st.session_state['sup_upload_result'] = f"Upload selesai. Disimpan baru: {saved:,}. Replace: {replaced:,}. Dilewati: {skipped:,}."
                                 # Audit log
