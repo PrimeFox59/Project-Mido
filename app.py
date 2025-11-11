@@ -4839,135 +4839,115 @@ def page_dashboard():
     
     forecast_closing = running_month_saving + ptp_this_month
 
-    # -------- Enhanced KPI cards (Modern Gradient Dashboard) --------
+    # -------- Enhanced KPI cards (Clean Minimal Style) --------
     st.markdown(
         """
         <style>
-        /* Modern gradient KPI cards inspired by professional dashboards */
-        .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin: 20px 0 12px 0; }
+        /* Clean minimal KPI cards matching mockup design */
+        .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 20px 0 12px 0; }
         @media (max-width: 1200px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); gap: 16px; } }
         @media (max-width: 700px) { .kpi-grid { grid-template-columns: 1fr; } }
         
-        /* Modern gradient card with animated background */
+        /* Clean card with subtle background */
         .kpi-card { 
-            position: relative; 
-            overflow: hidden; 
-            background: var(--card-gradient);
-            border: none;
-            border-radius: 24px; 
-            padding: 28px 24px; 
-            box-shadow: 0 8px 24px rgba(0,0,0,0.12), 0 2px 6px rgba(0,0,0,0.04);
-            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-            min-height: 160px;
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 16px; 
+            padding: 20px; 
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            transition: all 0.3s ease;
+            min-height: 120px;
         }
         
         .kpi-card:hover {
-            box-shadow: 0 16px 48px rgba(0,0,0,0.18), 0 4px 12px rgba(0,0,0,0.08);
-            transform: translateY(-4px) scale(1.02);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            transform: translateY(-2px);
         }
         
-        /* Decorative gradient overlay */
-        .kpi-card::before { 
-            content: ""; 
-            position: absolute; 
-            top: 0; 
-            left: 0; 
-            right: 0; 
-            bottom: 0; 
-            background: linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0) 100%);
-            z-index: 1;
-        }
-        
-        /* Animated circle decoration */
-        .kpi-card::after { 
-            content:""; 
-            position:absolute; 
-            right:-60px; 
-            top:-60px; 
-            width:240px; 
-            height:240px; 
-            border-radius: 50%; 
-            background: radial-gradient(circle, rgba(255,255,255,0.25) 0%, rgba(255,255,255,0) 70%); 
-            z-index: 1;
-            animation: pulse 3s ease-in-out infinite;
-        }
-        
-        @keyframes pulse {
-            0%, 100% { transform: scale(1); opacity: 0.6; }
-            50% { transform: scale(1.1); opacity: 0.8; }
-        }
-        
-        /* Content layer above decorations */
-        .kpi-card > * { position: relative; z-index: 2; }
-        
-        /* Icon badge at top */
-        .kpi-icon {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            width: 48px;
-            height: 48px;
-            border-radius: 14px;
-            background: rgba(255, 255, 255, 0.25);
-            font-size: 24px;
-            margin-bottom: 14px;
-            backdrop-filter: blur(10px);
-        }
-        
-        /* Title with better contrast */
-        .kpi-title { 
-            display: block;
-            letter-spacing: 0.8px; 
-            text-transform: uppercase; 
-            font-size: 12px; 
-            font-weight: 700;
-            color: rgba(255, 255, 255, 0.85);
-            margin-bottom: 10px;
-            text-shadow: 0 1px 2px rgba(0,0,0,0.1);
-        }
-        
-        /* Large white value */
-        .kpi-value { 
-            font-size: 36px; 
-            font-weight: 900; 
-            color: #FFFFFF;
-            line-height: 1;
-            margin-bottom: 10px;
-            letter-spacing: -1px;
-            text-shadow: 0 2px 4px rgba(0,0,0,0.15);
-        }
-        
-        /* Subtitle with better contrast */
-        .kpi-sub { 
-            font-size: 13px; 
-            color: rgba(255, 255, 255, 0.75);
-            line-height: 1.4;
+        /* Icon and title row */
+        .kpi-header {
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: 8px;
+            margin-bottom: 12px;
         }
         
-        /* Trend badge on white cards */
-        .trend-badge {
+        /* Simple icon */
+        .kpi-icon {
+            font-size: 16px;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        /* Title */
+        .kpi-title { 
+            font-size: 11px; 
+            font-weight: 600;
+            color: var(--title-color);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        /* Large value */
+        .kpi-value { 
+            font-size: 28px; 
+            font-weight: 700; 
+            color: var(--value-color);
+            line-height: 1.2;
+            margin-bottom: 8px;
+        }
+        
+        /* Subtitle */
+        .kpi-sub { 
+            font-size: 12px; 
+            color: var(--sub-color);
+            line-height: 1.3;
+        }
+        
+        /* Trend indicator */
+        .trend-indicator {
             display: inline-flex;
             align-items: center;
             gap: 4px;
-            padding: 4px 10px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: 700;
-            backdrop-filter: blur(10px);
+            font-size: 11px;
+            font-weight: 600;
+            margin-top: 4px;
         }
-        .trend-up { background: rgba(255, 255, 255, 0.3); color: #FFFFFF; }
-        .trend-down { background: rgba(255, 255, 255, 0.3); color: #FFFFFF; }
+        .trend-up { color: #059669; }
+        .trend-down { color: #DC2626; }
         
-        /* Gradient variants - vibrant & modern */
-        .accent-purple { --card-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
-        .accent-pink { --card-gradient: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
-        .accent-blue { --card-gradient: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
-        .accent-green { --card-gradient: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); }
-        .accent-orange { --card-gradient: linear-gradient(135deg, #fa709a 0%, #fee140 100%); }
-        .accent-teal { --card-gradient: linear-gradient(135deg, #0ba360 0%, #3cba92 100%); }
+        /* Color variants matching mockup */
+        .card-yellow { 
+            --card-bg: linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%); 
+            --card-border: #FCD34D;
+            --title-color: #92400E;
+            --value-color: #78350F;
+            --sub-color: #92400E;
+        }
+        .card-cyan { 
+            --card-bg: linear-gradient(135deg, #CFFAFE 0%, #A5F3FC 100%); 
+            --card-border: #67E8F9;
+            --title-color: #155E75;
+            --value-color: #0E7490;
+            --sub-color: #155E75;
+        }
+        .card-orange { 
+            --card-bg: linear-gradient(135deg, #FED7AA 0%, #FDBA74 100%); 
+            --card-border: #FB923C;
+            --title-color: #9A3412;
+            --value-color: #7C2D12;
+            --sub-color: #9A3412;
+        }
+        .card-purple { 
+            --card-bg: linear-gradient(135deg, #E9D5FF 0%, #D8B4FE 100%); 
+            --card-border: #C084FC;
+            --title-color: #6B21A8;
+            --value-color: #581C87;
+            --sub-color: #6B21A8;
+        }
         
         /* Approval banner with subtle gradient */
         .approval-banner {
@@ -4988,15 +4968,17 @@ def page_dashboard():
         unsafe_allow_html=True,
     )
 
-    # Render modern gradient KPI cards with icons
+    # Render clean minimal KPI cards matching mockup
     kpi_cols = st.columns(4)
     
     with kpi_cols[0]:
         st.markdown(
             f"""
-            <div class='kpi-card accent-purple'>
-                <div class='kpi-icon'>💰</div>
-                <div class='kpi-title'>Running Month Saving</div>
+            <div class='kpi-card card-yellow'>
+                <div class='kpi-header'>
+                    <div class='kpi-icon'>💰</div>
+                    <div class='kpi-title'>Running Month Saving</div>
+                </div>
                 <div class='kpi-value'>Rp {running_month_saving:,.0f}</div>
                 <div class='kpi-sub'>Total pembayaran bulan ini</div>
             </div>
@@ -5005,17 +4987,20 @@ def page_dashboard():
         )
     
     with kpi_cols[1]:
-        trend_icon = "📈" if saving_trend == "up" else "📉"
+        trend_icon = "↗" if saving_trend == "up" else "↘"
+        trend_class = "trend-up" if saving_trend == "up" else "trend-down"
         trend_text = f"{trend_icon} {abs(saving_pct):.1f}%"
-        comparison_text = "Lebih tinggi dari bulan lalu" if saving_trend == "up" else "Lebih rendah dari bulan lalu"
+        comparison_text = "Lebih tinggi" if saving_trend == "up" else "Lebih rendah"
         st.markdown(
             f"""
-            <div class='kpi-card accent-pink'>
-                <div class='kpi-icon'>📊</div>
-                <div class='kpi-title'>Last Month Saving</div>
+            <div class='kpi-card card-cyan'>
+                <div class='kpi-header'>
+                    <div class='kpi-icon'>📊</div>
+                    <div class='kpi-title'>Last Month</div>
+                </div>
                 <div class='kpi-value'>Rp {last_month_saving:,.0f}</div>
                 <div class='kpi-sub'>
-                    <span class='trend-badge'>{trend_text}</span>
+                    <span class='trend-indicator {trend_class}'>{trend_text}</span>
                     {comparison_text}
                 </div>
             </div>
@@ -5026,9 +5011,11 @@ def page_dashboard():
     with kpi_cols[2]:
         st.markdown(
             f"""
-            <div class='kpi-card accent-blue'>
-                <div class='kpi-icon'>🎯</div>
-                <div class='kpi-title'>Stock PTP</div>
+            <div class='kpi-card card-orange'>
+                <div class='kpi-header'>
+                    <div class='kpi-icon'>🎯</div>
+                    <div class='kpi-title'>Stock PTP</div>
+                </div>
                 <div class='kpi-value'>Rp {stock_ptp:,.0f}</div>
                 <div class='kpi-sub'>Total janji bayar aktif</div>
             </div>
@@ -5039,11 +5026,13 @@ def page_dashboard():
     with kpi_cols[3]:
         st.markdown(
             f"""
-            <div class='kpi-card accent-green'>
-                <div class='kpi-icon'>🚀</div>
-                <div class='kpi-title'>Forecast Closing</div>
+            <div class='kpi-card card-purple'>
+                <div class='kpi-header'>
+                    <div class='kpi-icon'>🚀</div>
+                    <div class='kpi-title'>Forecast Closing</div>
+                </div>
                 <div class='kpi-value'>Rp {forecast_closing:,.0f}</div>
-                <div class='kpi-sub'>Saving + PTP bulan ini</div>
+                <div class='kpi-sub'>Saving + Prospect bulan ini</div>
             </div>
             """,
             unsafe_allow_html=True,
