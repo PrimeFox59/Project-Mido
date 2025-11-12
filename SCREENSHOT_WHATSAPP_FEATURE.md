@@ -67,14 +67,25 @@ Jika auto-screenshot tidak bekerja di browser Anda:
 
 ### Dependencies Baru
 ```
-pillow        # Untuk image processing
-pyperclip     # Untuk clipboard operations (optional, pakai Windows Snipping Tool)
+pillow        # Untuk image processing (optional, for future enhancements)
+```
+
+### JavaScript Libraries (CDN)
+```
+html2canvas v1.4.1  # Auto-screenshot HTML to canvas
+Clipboard API       # Native browser API for clipboard access
 ```
 
 ### Fungsi Utama
 
-#### `generate_contract_detail_html(case_data: dict) -> str`
+#### `generate_contract_detail_html(case_data: dict, include_screenshot_js: bool = False) -> str`
 - Generate HTML contract detail dengan styling yang menarik
+- **Parameter baru:** `include_screenshot_js` - jika True, menyertakan JavaScript auto-screenshot
+- **JavaScript Features:**
+  - `html2canvas` - Capture HTML element ke canvas
+  - `captureAndCopyToClipboard()` - Function untuk screenshot dan copy ke clipboard
+  - Automatic status updates (capturing, success, error)
+  - Button hide/show logic
 - Input: Dictionary dengan data case
 - Output: String HTML yang siap di-render
 
@@ -116,36 +127,53 @@ Mengambil data dari tabel:
 
 ## Keunggulan Fitur Ini
 
-1. **No Download Required**: Screenshot langsung ke clipboard, tidak perlu simpan file
-2. **One-Click WhatsApp**: Otomatis buka WhatsApp dengan nomor yang benar
-3. **Beautiful Design**: Contract detail tampil profesional dan menarik
-4. **Easy to Use**: Hanya 3 klik untuk kirim contract detail ke debtor
-5. **Fast Workflow**: Menghemat waktu agent dalam komunikasi dengan debtor
+1. **No Manual Screenshot Required** ⭐ - Satu klik untuk screenshot, tidak perlu Windows Snipping Tool!
+2. **Auto Copy to Clipboard** - Screenshot langsung masuk clipboard, siap paste
+3. **No Download Required** - Tidak ada file yang disimpan, lebih cepat dan bersih
+4. **One-Click WhatsApp** - Otomatis buka WhatsApp dengan nomor yang benar
+5. **Beautiful Design** - Contract detail tampil profesional dan menarik
+6. **Easy to Use** - Hanya 3 klik untuk kirim contract detail ke debtor
+7. **Fast Workflow** - Menghemat waktu agent dalam komunikasi dengan debtor
+8. **Visual Feedback** - Status message real-time untuk setiap action
 
 ## Browser Compatibility
-- ✅ Chrome (Recommended)
-- ✅ Edge
-- ✅ Firefox
-- ⚠️ Safari (WhatsApp Web might have limitations)
+
+### Auto-Screenshot Feature:
+- ✅ **Chrome (Recommended)** - Full support for Clipboard API & html2canvas
+- ✅ **Edge** - Full support for Clipboard API & html2canvas
+- ⚠️ **Firefox** - May require clipboard permissions prompt
+- ⚠️ **Safari** - Limited Clipboard API support, use manual screenshot fallback
+
+### WhatsApp Web:
+- ✅ Chrome, Edge, Firefox
+- ⚠️ Safari (may have limitations)
 
 ## Future Enhancements (Optional)
-- [ ] Auto-screenshot tanpa manual Snipping Tool
+- [x] Auto-screenshot tanpa manual Snipping Tool ✅ DONE!
 - [ ] Template pesan WhatsApp otomatis
 - [ ] Bulk screenshot untuk multiple cases
 - [ ] Export to PDF option
 - [ ] Custom branding/logo di contract detail
+- [ ] Watermark on screenshot
 
 ## Troubleshooting
 
-### WhatsApp tidak terbuka?
-- Pastikan popup blocker tidak aktif
-- Coba refresh halaman
-- Gunakan browser Chrome/Edge
+### Auto-Screenshot tidak bekerja?
+**Possible Causes:**
+1. Browser tidak support Clipboard API (Safari/older browsers)
+2. HTTPS required untuk Clipboard API
+3. User belum memberikan clipboard permission
 
-### Screenshot tidak masuk ke clipboard?
-- Pastikan menggunakan Windows 10/11
-- Coba Windows + Shift + S lagi
-- Alternatif: Gunakan Snipping Tool app langsung
+**Solutions:**
+- Gunakan Chrome atau Edge browser (recommended)
+- Pastikan akses via HTTPS (bukan HTTP)
+- Klik "Allow" saat browser meminta clipboard permission
+- Fallback: Gunakan Windows + Shift + S manual
+
+### Screenshot quality rendah?
+- html2canvas menggunakan scale: 2 untuk high quality
+- Pastikan zoom browser 100%
+- Gunakan browser dengan hardware acceleration enabled
 
 ### Nomor WhatsApp salah?
 - Cek format nomor di database

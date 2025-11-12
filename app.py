@@ -813,159 +813,324 @@ def generate_contract_detail_html(case_data: dict, include_screenshot_js: bool =
         <meta charset="UTF-8">
         {screenshot_js}
         <style>
+            * {{
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }}
+            
             body {{
                 font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                padding: 0;
                 margin: 0;
-                padding: 20px;
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
             }}
+            
+            .wrapper {{
+                width: 100%;
+                padding: 20px;
+                display: flex;
+                justify-content: center;
+            }}
+            
             .container {{
-                max-width: 800px;
-                margin: 0 auto;
+                max-width: 850px;
+                width: 100%;
                 background: white;
-                border-radius: 16px;
-                box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                border-radius: 20px;
+                box-shadow: 0 25px 70px rgba(0,0,0,0.35);
                 overflow: hidden;
+                animation: fadeInUp 0.5s ease-out;
             }}
+            
+            @keyframes fadeInUp {{
+                from {{
+                    opacity: 0;
+                    transform: translateY(30px);
+                }}
+                to {{
+                    opacity: 1;
+                    transform: translateY(0);
+                }}
+            }}
+            
             .header {{
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                 color: white;
-                padding: 40px 30px;
+                padding: 45px 35px;
                 text-align: left;
+                position: relative;
+                overflow: hidden;
             }}
+            
+            .header::before {{
+                content: '';
+                position: absolute;
+                top: 0;
+                right: 0;
+                width: 300px;
+                height: 300px;
+                background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
+                border-radius: 50%;
+                transform: translate(50%, -50%);
+            }}
+            
             .header h1 {{
-                margin: 0 0 10px 0;
-                font-size: 32px;
-                font-weight: 600;
+                margin: 0 0 12px 0;
+                font-size: 34px;
+                font-weight: 700;
+                letter-spacing: -0.5px;
+                position: relative;
+                z-index: 1;
             }}
+            
             .header p {{
                 margin: 0;
                 font-size: 16px;
-                opacity: 0.9;
+                opacity: 0.95;
                 font-style: italic;
+                font-weight: 400;
+                position: relative;
+                z-index: 1;
             }}
+            
             .content {{
-                padding: 30px;
+                padding: 35px;
+                background: linear-gradient(to bottom, #ffffff 0%, #f8f9fa 100%);
             }}
+            
             .detail-row {{
                 display: flex;
-                padding: 15px 0;
-                border-bottom: 1px solid #f0f0f0;
+                padding: 16px 20px;
+                border-bottom: 1px solid #e9ecef;
+                transition: background 0.2s ease;
+                border-radius: 8px;
+                margin-bottom: 2px;
             }}
+            
+            .detail-row:hover {{
+                background: rgba(102, 126, 234, 0.04);
+            }}
+            
             .detail-row:last-child {{
                 border-bottom: none;
+                margin-bottom: 0;
             }}
+            
             .detail-label {{
-                flex: 0 0 250px;
+                flex: 0 0 260px;
                 font-weight: 600;
-                color: #666;
+                color: #495057;
                 font-size: 14px;
+                display: flex;
+                align-items: center;
             }}
+            
             .detail-value {{
                 flex: 1;
-                color: #333;
+                color: #212529;
                 font-size: 14px;
+                line-height: 1.5;
+                word-break: break-word;
             }}
+            
             .detail-value.highlight {{
                 color: #667eea;
-                font-weight: 600;
+                font-weight: 700;
+                font-size: 15px;
             }}
+            
             .detail-value.na {{
                 color: #e74c3c;
                 font-weight: 600;
+                font-style: italic;
             }}
+            
             .screenshot-controls {{
                 text-align: center;
-                padding: 20px;
-                background: #f9fafb;
-                border-top: 2px solid #e5e7eb;
+                padding: 30px 35px;
+                background: linear-gradient(135deg, 
+                    rgba(102, 126, 234, 0.05) 0%, 
+                    rgba(118, 75, 162, 0.05) 100%);
+                border-top: 2px solid rgba(102, 126, 234, 0.15);
             }}
+            
             #screenshotBtn {{
                 background: linear-gradient(135deg, #10b981 0%, #059669 100%);
                 color: white;
                 border: none;
-                padding: 12px 30px;
+                padding: 14px 36px;
                 font-size: 16px;
-                font-weight: 600;
-                border-radius: 10px;
+                font-weight: 700;
+                border-radius: 12px;
                 cursor: pointer;
-                box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
-                transition: all 0.3s ease;
+                box-shadow: 0 6px 20px rgba(16, 185, 129, 0.35);
+                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                letter-spacing: 0.3px;
+                position: relative;
+                overflow: hidden;
             }}
+            
+            #screenshotBtn::before {{
+                content: '';
+                position: absolute;
+                top: 0;
+                left: -100%;
+                width: 100%;
+                height: 100%;
+                background: linear-gradient(90deg, 
+                    transparent, 
+                    rgba(255,255,255,0.3), 
+                    transparent);
+                transition: left 0.5s ease;
+            }}
+            
+            #screenshotBtn:hover::before {{
+                left: 100%;
+            }}
+            
             #screenshotBtn:hover {{
-                transform: translateY(-2px);
-                box-shadow: 0 6px 16px rgba(16, 185, 129, 0.4);
+                transform: translateY(-3px);
+                box-shadow: 0 10px 30px rgba(16, 185, 129, 0.45);
             }}
+            
+            #screenshotBtn:active {{
+                transform: translateY(-1px);
+                box-shadow: 0 4px 15px rgba(16, 185, 129, 0.35);
+            }}
+            
             #status {{
-                margin-top: 12px;
+                margin-top: 16px;
                 font-size: 14px;
                 font-weight: 600;
-                min-height: 20px;
+                min-height: 22px;
+                padding: 8px 16px;
+                border-radius: 8px;
+                display: inline-block;
+                transition: all 0.3s ease;
+            }}
+            
+            #status:empty {{
+                padding: 0;
+                margin: 0;
+            }}
+            
+            /* Responsive adjustments */
+            @media (max-width: 768px) {{
+                .container {{
+                    border-radius: 15px;
+                    margin: 10px;
+                }}
+                
+                .header {{
+                    padding: 30px 25px;
+                }}
+                
+                .header h1 {{
+                    font-size: 28px;
+                }}
+                
+                .content {{
+                    padding: 25px 20px;
+                }}
+                
+                .detail-row {{
+                    flex-direction: column;
+                    gap: 6px;
+                    padding: 14px 16px;
+                }}
+                
+                .detail-label {{
+                    flex: none;
+                    font-size: 13px;
+                }}
+                
+                .detail-value {{
+                    font-size: 13px;
+                }}
+                
+                .screenshot-controls {{
+                    padding: 25px 20px;
+                }}
+                
+                #screenshotBtn {{
+                    padding: 12px 28px;
+                    font-size: 15px;
+                }}
             }}
         </style>
     </head>
     <body>
-        <div class="container">
-            <div class="header">
-                <h1>Here's your Contract Details</h1>
-                <p>We are happy to help with any settlement scheme of your choosing!</p>
-            </div>
-            <div class="content">
-                <div class="detail-row">
-                    <div class="detail-label">Debtor Name</div>
-                    <div class="detail-value highlight">: {case_data.get('Debtor_Name', 'N/A')}</div>
+        <div class="wrapper">
+            <div class="container">
+                <div class="header">
+                    <h1>Here's your Contract Details</h1>
+                    <p>We are happy to help with any settlement scheme of your choosing!</p>
                 </div>
-                <div class="detail-row">
-                    <div class="detail-label">PhoneNumber</div>
-                    <div class="detail-value highlight">: {case_data.get('PhoneNumber', 'N/A')}</div>
+                <div class="content">
+                    <div class="detail-row">
+                        <div class="detail-label">Debtor Name</div>
+                        <div class="detail-value highlight">: {case_data.get('Debtor_Name', 'N/A')}</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">PhoneNumber</div>
+                        <div class="detail-value highlight">: {case_data.get('PhoneNumber', 'N/A')}</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">Gender</div>
+                        <div class="detail-value">: {case_data.get('Gender', 'N/A')}</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">Legal Address</div>
+                        <div class="detail-value">: {case_data.get('Legal_Address', 'N/A')}</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">DOB</div>
+                        <div class="detail-value">: {case_data.get('DOB', 'N/A')}</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">Email</div>
+                        <div class="detail-value">: {case_data.get('Email', 'N/A')}</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">Last known Office Name</div>
+                        <div class="detail-value">: {case_data.get('Last_Known_Office_Name', '')}</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">Last Known Job Position</div>
+                        <div class="detail-value">: {case_data.get('Last_Known_Job_Position', 'N/A')}</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">Last Known Work Phone</div>
+                        <div class="detail-value">: {case_data.get('Last_Known_Work_Phone', 'None')}</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">Debtor Phone Number II</div>
+                        <div class="detail-value">: {case_data.get('Debtor_Phone_Number_II', 'None')}</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">Debtor Other Phone Number(s)</div>
+                        <div class="detail-value na">: {case_data.get('Debtor_Other_Phone_Numbers', '#N/A')}</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">Date of Contract</div>
+                        <div class="detail-value">: {case_data.get('Date_of_Contract', 'N/A')}</div>
+                    </div>
+                    <div class="detail-row">
+                        <div class="detail-label">DPD</div>
+                        <div class="detail-value">: {case_data.get('DPD', 'N/A')}</div>
+                    </div>
                 </div>
-                <div class="detail-row">
-                    <div class="detail-label">Gender</div>
-                    <div class="detail-value">: {case_data.get('Gender', 'N/A')}</div>
-                </div>
-                <div class="detail-row">
-                    <div class="detail-label">Legal Address</div>
-                    <div class="detail-value">: {case_data.get('Legal_Address', 'N/A')}</div>
-                </div>
-                <div class="detail-row">
-                    <div class="detail-label">DOB</div>
-                    <div class="detail-value">: {case_data.get('DOB', 'N/A')}</div>
-                </div>
-                <div class="detail-row">
-                    <div class="detail-label">Email</div>
-                    <div class="detail-value">: {case_data.get('Email', 'N/A')}</div>
-                </div>
-                <div class="detail-row">
-                    <div class="detail-label">Last known Office Name</div>
-                    <div class="detail-value">: {case_data.get('Last_Known_Office_Name', '')}</div>
-                </div>
-                <div class="detail-row">
-                    <div class="detail-label">Last Known Job Position</div>
-                    <div class="detail-value">: {case_data.get('Last_Known_Job_Position', 'N/A')}</div>
-                </div>
-                <div class="detail-row">
-                    <div class="detail-label">Last Known Work Phone</div>
-                    <div class="detail-value">: {case_data.get('Last_Known_Work_Phone', 'None')}</div>
-                </div>
-                <div class="detail-row">
-                    <div class="detail-label">Debtor Phone Number II</div>
-                    <div class="detail-value">: {case_data.get('Debtor_Phone_Number_II', 'None')}</div>
-                </div>
-                <div class="detail-row">
-                    <div class="detail-label">Debtor Other Phone Number(s)</div>
-                    <div class="detail-value na">: {case_data.get('Debtor_Other_Phone_Numbers', '#N/A')}</div>
-                </div>
-                <div class="detail-row">
-                    <div class="detail-label">Date of Contract</div>
-                    <div class="detail-value">: {case_data.get('Date_of_Contract', 'N/A')}</div>
-                </div>
-                <div class="detail-row">
-                    <div class="detail-label">DPD</div>
-                    <div class="detail-value">: {case_data.get('DPD', 'N/A')}</div>
-                </div>
+                {'<div class="screenshot-controls"><button id="screenshotBtn" onclick="captureAndCopyToClipboard()">📸 Copy Screenshot to Clipboard</button><div id="status"></div></div>' if include_screenshot_js else ''}
             </div>
         </div>
-        {'<div class="screenshot-controls"><button id="screenshotBtn" onclick="captureAndCopyToClipboard()">📸 Copy Screenshot to Clipboard</button><div id="status"></div></div>' if include_screenshot_js else ''}
     </body>
     </html>
     """
