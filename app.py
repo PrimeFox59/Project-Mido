@@ -4137,21 +4137,7 @@ def page_agent():
             
             # Info message untuk fitur auto-screenshot
             if not st.session_state.get(f"show_contract_html_{sel}", False):
-                st.info("""
-                🚀 **NEW! Auto-Screenshot Feature**
-                
-                Tidak perlu lagi tekan **Windows + Shift + S** secara manual!
-                
-                **Langkah mudah:**
-                1. Klik **'Show Contract Detail'** di atas
-                2. Scroll ke bawah contract detail yang muncul
-                3. Klik tombol **'📸 Copy Screenshot to Clipboard'** 
-                4. Screenshot otomatis masuk ke clipboard
-                5. Klik **'Open WhatsApp'** dan paste dengan **Ctrl + V**
-                
-                ✨ Satu klik untuk screenshot - No manual snipping tool needed!
-                """)
-            
+
             # Display Contract Detail HTML jika tombol diklik
             if st.session_state.get(f"show_contract_html_{sel}", False):
                 st.markdown("---")
