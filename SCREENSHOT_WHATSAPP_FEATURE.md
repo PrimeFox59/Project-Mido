@@ -1,9 +1,11 @@
-# 📸 Contract Detail Screenshot & WhatsApp Feature
+# 📸 Contract Detail Auto-Screenshot & WhatsApp Feature
 
 ## Overview
-Fitur ini memungkinkan Agent untuk dengan mudah menampilkan Contract Detail dalam format yang menarik dan mengirimnya ke WhatsApp debtor menggunakan screenshot ke clipboard (seperti Ctrl+C).
+Fitur ini memungkinkan Agent untuk dengan mudah menampilkan Contract Detail dalam format yang menarik dan mengirimnya ke WhatsApp debtor menggunakan **AUTO-SCREENSHOT** ke clipboard (tidak perlu Windows + Shift + S lagi!).
 
-## Fitur Utama
+## ✨ NEW! Auto-Screenshot Feature
+
+### Fitur Utama
 
 ### 1. **Show Contract Detail**
 - Menampilkan detail kontrak dalam format HTML yang indah
@@ -28,29 +30,38 @@ Fitur ini memungkinkan Agent untuk dengan mudah menampilkan Contract Detail dala
 - Otomatis mengkonversi nomor lokal (08xx) ke format internasional (628xx)
 - Membuka di tab baru browser
 
-### 3. **Screenshot to Clipboard**
-- Menggunakan Windows Snipping Tool (Windows + Shift + S)
-- Screenshot langsung masuk ke clipboard
+### 3. **Auto-Screenshot to Clipboard** ⭐ NEW!
+- **Tombol auto-screenshot** langsung di dalam Contract Detail HTML
+- Menggunakan **html2canvas** library untuk capture HTML ke image
+- Screenshot otomatis masuk ke clipboard menggunakan **Clipboard API**
 - Tidak perlu download file
+- Tidak perlu tekan Windows + Shift + S manual!
 - Siap paste (Ctrl+V) langsung ke WhatsApp
 
 ## Cara Penggunaan
 
-### Langkah-langkah:
+### Langkah-langkah (Updated - No Manual Screenshot Needed!):
 
 1. **Pilih Case ID** dari tabel Assignment
 2. **Klik tombol "📋 Show Contract Detail"**
    - Contract Detail akan muncul di bawah dengan desain yang menarik
-3. **Klik tombol "💬 Open WhatsApp"**
+3. **Scroll ke bawah** Contract Detail yang muncul
+4. **Klik tombol "� Copy Screenshot to Clipboard"** yang ada di bawah contract detail
+   - Tombol ini akan mengambil screenshot dan menyalin ke clipboard secara otomatis
+   - Status akan muncul: "✅ Screenshot copied to clipboard!"
+5. **Klik tombol "�💬 Open WhatsApp"**
    - WhatsApp Web akan terbuka di tab baru dengan nomor debtor
-4. **Screenshot Contract Detail:**
-   - Tekan **Windows + Shift + S** (Snipping Tool)
-   - Pilih area Contract Detail untuk di-screenshot
-   - Screenshot otomatis masuk ke Clipboard
-5. **Paste di WhatsApp:**
+6. **Paste di WhatsApp:**
    - Kembali ke tab WhatsApp yang sudah terbuka
    - Tekan **Ctrl + V** untuk paste screenshot
    - Kirim ke debtor
+
+### Alternative (Manual - If Auto-Screenshot Fails):
+Jika auto-screenshot tidak bekerja di browser Anda:
+1. Tekan **Windows + Shift + S** (Snipping Tool)
+2. Pilih area Contract Detail untuk di-screenshot
+3. Screenshot otomatis masuk ke Clipboard
+4. Paste dengan **Ctrl + V** di WhatsApp
 
 ## Technical Details
 

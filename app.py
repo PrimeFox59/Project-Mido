@@ -748,13 +748,70 @@ def current_user():
 # -------------------------
 # Contract Detail Screenshot & WhatsApp Helper
 # -------------------------
-def generate_contract_detail_html(case_data: dict) -> str:
-    """Generate beautiful HTML for contract detail that matches the image style."""
+def generate_contract_detail_html(case_data: dict, include_screenshot_js: bool = False) -> str:
+    """Generate beautiful HTML for contract detail that matches the image style.
+    
+    Args:
+        case_data: Dictionary containing contract details
+        include_screenshot_js: If True, includes JavaScript for auto-screenshot to clipboard
+    """
+    # JavaScript untuk auto-screenshot ke clipboard (jika diminta)
+    screenshot_js = ""
+    if include_screenshot_js:
+        screenshot_js = """
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+        <script>
+        function captureAndCopyToClipboard() {
+            const container = document.querySelector('.container');
+            const button = document.getElementById('screenshotBtn');
+            const statusDiv = document.getElementById('status');
+            
+            // Hide button before screenshot
+            button.style.display = 'none';
+            statusDiv.textContent = '📸 Capturing screenshot...';
+            
+            html2canvas(container, {
+                scale: 2,
+                useCORS: true,
+                backgroundColor: null,
+                logging: false
+            }).then(canvas => {
+                // Convert canvas to blob
+                canvas.toBlob(blob => {
+                    // Copy to clipboard using Clipboard API
+                    const item = new ClipboardItem({'image/png': blob});
+                    navigator.clipboard.write([item]).then(() => {
+                        statusDiv.textContent = '✅ Screenshot copied to clipboard! Paste (Ctrl+V) in WhatsApp';
+                        statusDiv.style.color = '#10b981';
+                        button.style.display = 'block';
+                        
+                        // Reset message after 5 seconds
+                        setTimeout(() => {
+                            statusDiv.textContent = '';
+                        }, 5000);
+                    }).catch(err => {
+                        statusDiv.textContent = '❌ Failed to copy. Please use Windows + Shift + S manually';
+                        statusDiv.style.color = '#e74c3c';
+                        button.style.display = 'block';
+                        console.error('Clipboard error:', err);
+                    });
+                }, 'image/png');
+            }).catch(err => {
+                statusDiv.textContent = '❌ Screenshot failed. Please use Windows + Shift + S manually';
+                statusDiv.style.color = '#e74c3c';
+                button.style.display = 'block';
+                console.error('Screenshot error:', err);
+            });
+        }
+        </script>
+        """
+    
     html = f"""
     <!DOCTYPE html>
     <html>
     <head>
         <meta charset="UTF-8">
+        {screenshot_js}
         <style>
             body {{
                 font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -816,6 +873,34 @@ def generate_contract_detail_html(case_data: dict) -> str:
             .detail-value.na {{
                 color: #e74c3c;
                 font-weight: 600;
+            }}
+            .screenshot-controls {{
+                text-align: center;
+                padding: 20px;
+                background: #f9fafb;
+                border-top: 2px solid #e5e7eb;
+            }}
+            #screenshotBtn {{
+                background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+                color: white;
+                border: none;
+                padding: 12px 30px;
+                font-size: 16px;
+                font-weight: 600;
+                border-radius: 10px;
+                cursor: pointer;
+                box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+                transition: all 0.3s ease;
+            }}
+            #screenshotBtn:hover {{
+                transform: translateY(-2px);
+                box-shadow: 0 6px 16px rgba(16, 185, 129, 0.4);
+            }}
+            #status {{
+                margin-top: 12px;
+                font-size: 14px;
+                font-weight: 600;
+                min-height: 20px;
             }}
         </style>
     </head>
@@ -880,6 +965,7 @@ def generate_contract_detail_html(case_data: dict) -> str:
                 </div>
             </div>
         </div>
+        {'<div class="screenshot-controls"><button id="screenshotBtn" onclick="captureAndCopyToClipboard()">📸 Copy Screenshot to Clipboard</button><div id="status"></div></div>' if include_screenshot_js else ''}
     </body>
     </html>
     """
@@ -3830,13 +3916,24 @@ def page_agent():
                     st.button("💬 WhatsApp Unavailable", key=f"open_wa_disabled_{sel}", use_container_width=True, disabled=True)
             
             with col_btn3:
-                st.caption("🎯 Klik 'Show Contract Detail' untuk tampilkan detail, lalu 'Open WhatsApp' untuk membuka WA dan screenshot manual menggunakan Windows Snipping Tool")
+                st.caption("🎯 Klik 'Show Contract Detail' untuk tampilkan detail dengan tombol auto-screenshot")
             
-            # Info message untuk cara penggunaan
-            if phone:
-                st.info("💡 **Cara Screenshot ke Clipboard:**\n\n1. Klik 'Show Contract Detail' di atas\n2. Klik 'Open WhatsApp' (akan buka di tab baru)\n3. Tekan **Windows + Shift + S** (Snipping Tool)\n4. Screenshot area Contract Detail\n5. Kembali ke tab WhatsApp dan **Ctrl + V**")
-            else:
-                st.warning("⚠️ Nomor telepon tidak tersedia untuk case ini")
+            # Info message untuk fitur auto-screenshot
+            if not st.session_state.get(f"show_contract_html_{sel}", False):
+                st.info("""
+                🚀 **NEW! Auto-Screenshot Feature**
+                
+                Tidak perlu lagi tekan **Windows + Shift + S** secara manual!
+                
+                **Langkah mudah:**
+                1. Klik **'Show Contract Detail'** di atas
+                2. Scroll ke bawah contract detail yang muncul
+                3. Klik tombol **'📸 Copy Screenshot to Clipboard'** 
+                4. Screenshot otomatis masuk ke clipboard
+                5. Klik **'Open WhatsApp'** dan paste dengan **Ctrl + V**
+                
+                ✨ Satu klik untuk screenshot - No manual snipping tool needed!
+                """)
             
             # Display Contract Detail HTML jika tombol diklik
             if st.session_state.get(f"show_contract_html_{sel}", False):
@@ -3859,12 +3956,24 @@ def page_agent():
                     'DPD': sup_data.get('DPD', 'N/A') or 'N/A',
                 }
                 
-                # Generate HTML
-                contract_html = generate_contract_detail_html(contract_data)
+                # Generate HTML dengan auto-screenshot JavaScript
+                contract_html = generate_contract_detail_html(contract_data, include_screenshot_js=True)
                 
-                # Display dengan component HTML
-                st.components.v1.html(contract_html, height=900, scrolling=True)
-
+                # Display dengan component HTML (tinggi lebih besar untuk tombol screenshot)
+                st.components.v1.html(contract_html, height=1200, scrolling=True)
+                
+                st.success("""
+                ✅ **Auto-Screenshot Aktif!**
+                
+                **Cara Pakai:**
+                1. Scroll ke bawah Contract Detail di atas
+                2. Klik tombol **"📸 Copy Screenshot to Clipboard"** di bawah contract detail
+                3. Screenshot otomatis masuk ke clipboard
+                4. Buka WhatsApp (klik 'Open WhatsApp' di atas)
+                5. **Ctrl + V** untuk paste di chat
+                
+                **No need to press Windows + Shift + S!** 🎉
+                """)
                 
                 # Tombol untuk hide contract detail
                 if st.button("❌ Hide Contract Detail", key=f"hide_contract_{sel}"):
