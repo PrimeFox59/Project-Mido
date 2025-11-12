@@ -4137,8 +4137,7 @@ def page_agent():
             
             # Info message untuk fitur auto-screenshot
             if not st.session_state.get(f"show_contract_html_{sel}", False):
-
-            # Display Contract Detail HTML jika tombol diklik
+                st.markdown("---")            # Display Contract Detail HTML jika tombol diklik
             if st.session_state.get(f"show_contract_html_{sel}", False):
                 st.markdown("---")
                 
