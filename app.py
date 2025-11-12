@@ -6339,33 +6339,33 @@ def page_supervisor():
                         </div>
                         <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
                         <script>
-                        async function captureAndDownload(openWA){
-                            const el = document.getElementById('contract-screenshot-area');
-                            if(!el){ alert('Area kontrak tidak ditemukan untuk di-screenshot'); return; }
-                            try{
-                                const canvas = await html2canvas(el, {scale:1.5, useCORS:true, backgroundColor:'#ffffff'});
-                                canvas.toBlob(function(blob){
-                                    const url = URL.createObjectURL(blob);
-                                    const a = document.createElement('a');
-                                    a.href = url;
-                                    a.download = 'contract_{case_id}.png';
-                                    document.body.appendChild(a);
-                                    a.click();
-                                    a.remove();
-                                    if(openWA){
-                                        const wa = document.getElementById('waLink').href;
-                                        window.open(wa, '_blank');
-                                        // Open image in new tab so user can easily attach it in WhatsApp Web
-                                        window.open(url, '_blank');
-                                    }
-                                }, 'image/png');
-                            }catch(err){
-                                alert('Gagal melakukan screenshot: ' + err);
-                            }
-                        }
+                        async function captureAndDownload(openWA){{
+                        const el = document.getElementById('contract-screenshot-area');
+                        if(!el){{ alert('Area kontrak tidak ditemukan untuk di-screenshot'); return; }}
+                        try{{
+                            const canvas = await html2canvas(el, {{scale:1.5, useCORS:true, backgroundColor:'#ffffff'}});
+                            canvas.toBlob(function(blob){{
+                                const url = URL.createObjectURL(blob);
+                                const a = document.createElement('a');
+                                a.href = url;
+                                a.download = 'contract_{case_id}.png';
+                                document.body.appendChild(a);
+                                a.click();
+                                a.remove();
+                                if(openWA){{
+                                    const wa = document.getElementById('waLink').href;
+                                    window.open(wa, '_blank');
+                                    // Open image in new tab so user can easily attach it in WhatsApp Web
+                                    window.open(url, '_blank');
+                                }}
+                            }}, 'image/png');
+                        }}catch(err){{
+                            alert('Gagal melakukan screenshot: ' + err);
+                        }}
+                    }}
 
-                        document.getElementById('captureBtn').addEventListener('click', function(){ captureAndDownload(false); });
-                        document.getElementById('captureSendBtn').addEventListener('click', function(){ captureAndDownload(true); });
+                        document.getElementById('captureBtn').addEventListener('click', function(){{ captureAndDownload(false); }});
+                        document.getElementById('captureSendBtn').addEventListener('click', function(){{ captureAndDownload(true); }});
                         </script>
                         """
 
@@ -6483,12 +6483,12 @@ def page_supervisor():
                         </div>
                         <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
                         <script>
-                        async function captureAndDownload(openWA){{
+                        async function captureAndDownload(openWA){{{{
                             const el = document.getElementById('contract-screenshot-area');
-                            if(!el){{ alert('Area kontrak tidak ditemukan untuk di-screenshot'); return; }}
-                            try{{
-                                const canvas = await html2canvas(el, {{scale:1.5, useCORS:true, backgroundColor:'#ffffff'}});
-                                canvas.toBlob(function(blob){{
+                            if(!el){{{{ alert('Area kontrak tidak ditemukan untuk di-screenshot'); return; }}}}
+                            try{{{{
+                                const canvas = await html2canvas(el, {{{{scale:1.5, useCORS:true, backgroundColor:'#ffffff'}}}});
+                                canvas.toBlob(function(blob){{{{
                                     const url = URL.createObjectURL(blob);
                                     const a = document.createElement('a');
                                     a.href = url;
@@ -6496,20 +6496,20 @@ def page_supervisor():
                                     document.body.appendChild(a);
                                     a.click();
                                     a.remove();
-                                    if(openWA){{
+                                    if(openWA){{{{
                                         const wa = document.getElementById('waLink').href;
                                         window.open(wa, '_blank');
                                         // Open image in new tab so user can easily attach it in WhatsApp Web
                                         window.open(url, '_blank');
-                                    }}
-                                }}, 'image/png');
-                            }}catch(err){{
+                                    }}}}
+                                }}}}, 'image/png');
+                            }}}}catch(err){{{{
                                 alert('Gagal melakukan screenshot: ' + err);
-                            }}
-                        }}
+                            }}}}
+                        }}}}
 
-                        document.getElementById('captureBtn').addEventListener('click', function(){{ captureAndDownload(false); }});
-                        document.getElementById('captureSendBtn').addEventListener('click', function(){{ captureAndDownload(true); }});
+                        document.getElementById('captureBtn').addEventListener('click', function(){{{{ captureAndDownload(false); }}}});
+                        document.getElementById('captureSendBtn').addEventListener('click', function(){{{{ captureAndDownload(true); }}}});
                         </script>
                         """
 
