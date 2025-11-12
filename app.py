@@ -3862,17 +3862,7 @@ def page_agent():
                 # Generate HTML
                 contract_html = generate_contract_detail_html(contract_data)
                 
-                # Display dengan component HTML
-                st.components.v1.html(contract_html, height=900, scrolling=True)
-                
-                st.info("""
-                **📸 Cara Screenshot ke Clipboard:**
-                1. Tekan **Windows + Shift + S** untuk membuka Snipping Tool
-                2. Pilih area Contract Detail di atas untuk di-screenshot
-                3. Screenshot otomatis masuk ke Clipboard
-                4. Buka WhatsApp (klik tombol 'Open WhatsApp' di atas)
-                5. **Ctrl + V** untuk paste screenshot di chat
-                """)
+
                 
                 # Tombol untuk hide contract detail
                 if st.button("❌ Hide Contract Detail", key=f"hide_contract_{sel}"):
