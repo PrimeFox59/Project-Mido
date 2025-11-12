@@ -6293,86 +6293,86 @@ def page_supervisor():
                         
                         st.markdown(rows_html + "</div>", unsafe_allow_html=True)
 
-                                                # --- Screenshot + WhatsApp quick action ---
-                                                try:
-                                                        phone_raw = str(detail_row.get('Phone_Number_1', '') or '').strip()
-                                                except Exception:
-                                                        phone_raw = ''
+                        # --- Screenshot + WhatsApp quick action ---
+                        try:
+                                phone_raw = str(detail_row.get('Phone_Number_1', '') or '').strip()
+                        except Exception:
+                                phone_raw = ''
 
-                                                def _normalize_phone_for_wa(p: str) -> str:
-                                                        """Normalize phone number to international format for wa.me links.
-                                                        Simple heuristic: remove non-digits, remove leading +,
-                                                        replace leading 0 with 62 (Indonesia) if present.
-                                                        If this doesn't match your country, you can edit logic.
-                                                        """
-                                                        if not p:
-                                                                return ''
-                                                        s = ''.join(ch for ch in p if ch.isdigit() or ch == '+')
-                                                        if s.startswith('+'):
-                                                                s = s[1:]
-                                                        if s.startswith('0'):
-                                                                s = '62' + s[1:]
-                                                        return s
+                        def _normalize_phone_for_wa(p: str) -> str:
+                                """Normalize phone number to international format for wa.me links.
+                                Simple heuristic: remove non-digits, remove leading +,
+                                replace leading 0 with 62 (Indonesia) if present.
+                                If this doesn't match your country, you can edit logic.
+                                """
+                                if not p:
+                                        return ''
+                                s = ''.join(ch for ch in p if ch.isdigit() or ch == '+')
+                                if s.startswith('+'):
+                                        s = s[1:]
+                                if s.startswith('0'):
+                                        s = '62' + s[1:]
+                                return s
 
-                                                phone_for_wa = _normalize_phone_for_wa(phone_raw)
-                                                debtor_name = detail_row.get('Customer_name', '')
-                                                case_id = detail_row.get('Case_ID', '')
+                        phone_for_wa = _normalize_phone_for_wa(phone_raw)
+                        debtor_name = detail_row.get('Customer_name', '')
+                        case_id = detail_row.get('Case_ID', '')
 
-                                                # Build a client-side HTML widget that can capture the contract card
-                                                # using html2canvas, auto-download the PNG, and open WhatsApp web
-                                                # (wa.me) in a new tab with a prefilled message. Note: attaching
-                                                # the image to WhatsApp must be done manually by the user (browser
-                                                # security prevents auto-attaching files to another site).
-                                                try:
-                                                        encoded_text = urllib.parse.quote(f"Berikut detail kontrak {case_id} untuk {debtor_name}")
-                                                except Exception:
-                                                        encoded_text = urllib.parse.quote("Berikut detail kontrak untuk Anda")
+                        # Build a client-side HTML widget that can capture the contract card
+                        # using html2canvas, auto-download the PNG, and open WhatsApp web
+                        # (wa.me) in a new tab with a prefilled message. Note: attaching
+                        # the image to WhatsApp must be done manually by the user (browser
+                        # security prevents auto-attaching files to another site).
+                        try:
+                                encoded_text = urllib.parse.quote(f"Berikut detail kontrak {case_id} untuk {debtor_name}")
+                        except Exception:
+                                encoded_text = urllib.parse.quote("Berikut detail kontrak untuk Anda")
 
-                                                component_html = f"""
-                                                <div id="contract-screenshot-area" style="max-width:100%;">
-                                                {rows_html}
-                                                </div>
-                                                <div style="margin-top:12px; display:flex; gap:8px;">
-                                                    <button id="captureBtn" style="padding:8px 12px; background:#10B981;color:#fff;border:none;border-radius:8px; cursor:pointer;">Capture Screenshot</button>
-                                                    <button id="captureSendBtn" style="padding:8px 12px; background:#0ea5e9;color:#fff;border:none;border-radius:8px; cursor:pointer;">Capture & Open WhatsApp</button>
-                                                    <a id="waLink" href="https://wa.me/{phone_for_wa}?text={encoded_text}" target="_blank" style="display:none;">Open WA</a>
-                                                </div>
-                                                <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-                                                <script>
-                                                async function captureAndDownload(openWA){
-                                                    const el = document.getElementById('contract-screenshot-area');
-                                                    if(!el){ alert('Area kontrak tidak ditemukan untuk di-screenshot'); return; }
-                                                    try{
-                                                        const canvas = await html2canvas(el, {scale:1.5, useCORS:true, backgroundColor:'#ffffff'});
-                                                        canvas.toBlob(function(blob){
-                                                            const url = URL.createObjectURL(blob);
-                                                            const a = document.createElement('a');
-                                                            a.href = url;
-                                                            a.download = 'contract_{case_id}.png';
-                                                            document.body.appendChild(a);
-                                                            a.click();
-                                                            a.remove();
-                                                            if(openWA){
-                                                                const wa = document.getElementById('waLink').href;
-                                                                window.open(wa, '_blank');
-                                                                // Open image in new tab so user can easily attach it in WhatsApp Web
-                                                                window.open(url, '_blank');
-                                                            }
-                                                        }, 'image/png');
-                                                    }catch(err){
-                                                        alert('Gagal melakukan screenshot: ' + err);
-                                                    }
-                                                }
+                        component_html = f"""
+                        <div id="contract-screenshot-area" style="max-width:100%;">
+                        {rows_html}
+                        </div>
+                        <div style="margin-top:12px; display:flex; gap:8px;">
+                            <button id="captureBtn" style="padding:8px 12px; background:#10B981;color:#fff;border:none;border-radius:8px; cursor:pointer;">Capture Screenshot</button>
+                            <button id="captureSendBtn" style="padding:8px 12px; background:#0ea5e9;color:#fff;border:none;border-radius:8px; cursor:pointer;">Capture & Open WhatsApp</button>
+                            <a id="waLink" href="https://wa.me/{phone_for_wa}?text={encoded_text}" target="_blank" style="display:none;">Open WA</a>
+                        </div>
+                        <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+                        <script>
+                        async function captureAndDownload(openWA){
+                            const el = document.getElementById('contract-screenshot-area');
+                            if(!el){ alert('Area kontrak tidak ditemukan untuk di-screenshot'); return; }
+                            try{
+                                const canvas = await html2canvas(el, {scale:1.5, useCORS:true, backgroundColor:'#ffffff'});
+                                canvas.toBlob(function(blob){
+                                    const url = URL.createObjectURL(blob);
+                                    const a = document.createElement('a');
+                                    a.href = url;
+                                    a.download = 'contract_{case_id}.png';
+                                    document.body.appendChild(a);
+                                    a.click();
+                                    a.remove();
+                                    if(openWA){
+                                        const wa = document.getElementById('waLink').href;
+                                        window.open(wa, '_blank');
+                                        // Open image in new tab so user can easily attach it in WhatsApp Web
+                                        window.open(url, '_blank');
+                                    }
+                                }, 'image/png');
+                            }catch(err){
+                                alert('Gagal melakukan screenshot: ' + err);
+                            }
+                        }
 
-                                                document.getElementById('captureBtn').addEventListener('click', function(){ captureAndDownload(false); });
-                                                document.getElementById('captureSendBtn').addEventListener('click', function(){ captureAndDownload(true); });
-                                                </script>
-                                                """
+                        document.getElementById('captureBtn').addEventListener('click', function(){ captureAndDownload(false); });
+                        document.getElementById('captureSendBtn').addEventListener('click', function(){ captureAndDownload(true); });
+                        </script>
+                        """
 
-                                                try:
-                                                        st.components.v1.html(component_html, height=640, scrolling=True)
-                                                except Exception as e:
-                                                        st.warning(f"Fitur screenshot tidak tersedia: {e}")
+                        try:
+                                st.components.v1.html(component_html, height=640, scrolling=True)
+                        except Exception as e:
+                                st.warning(f"Fitur screenshot tidak tersedia: {e}")
                         
                         # Additional sections in expander
                         with st.expander("📞 Contact Person Details"):
@@ -6436,6 +6436,87 @@ def page_supervisor():
                                 st.dataframe(payment_df, use_container_width=True, hide_index=True)
                             else:
                                 st.info("Belum ada riwayat pembayaran")
+                        
+                        # --- Screenshot + WhatsApp quick action ---
+                        try:
+                            phone_raw = str(detail_row.get('Phone_Number_1', '') or '').strip()
+                        except Exception:
+                            phone_raw = ''
+
+                        def _normalize_phone_for_wa(p: str) -> str:
+                            """Normalize phone number to international format for wa.me links.
+                            Simple heuristic: remove non-digits, remove leading +,
+                            replace leading 0 with 62 (Indonesia) if present.
+                            If this doesn't match your country, you can edit logic.
+                            """
+                            if not p:
+                                return ''
+                            s = ''.join(ch for ch in p if ch.isdigit() or ch == '+')
+                            if s.startswith('+'):
+                                s = s[1:]
+                            if s.startswith('0'):
+                                s = '62' + s[1:]
+                            return s
+
+                        phone_for_wa = _normalize_phone_for_wa(phone_raw)
+                        debtor_name = detail_row.get('Customer_name', '')
+                        case_id = detail_row.get('Case_ID', '')
+
+                        # Build a client-side HTML widget that can capture the contract card
+                        # using html2canvas, auto-download the PNG, and open WhatsApp web
+                        # (wa.me) in a new tab with a prefilled message. Note: attaching
+                        # the image to WhatsApp must be done manually by the user (browser
+                        # security prevents auto-attaching files to another site).
+                        try:
+                            encoded_text = urllib.parse.quote(f"Berikut detail kontrak {case_id} untuk {debtor_name}")
+                        except Exception:
+                            encoded_text = urllib.parse.quote("Berikut detail kontrak untuk Anda")
+
+                        component_html = f"""
+                        <div id="contract-screenshot-area" style="max-width:100%;">
+                        {rows_html}
+                        </div>
+                        <div style="margin-top:12px; display:flex; gap:8px;">
+                            <button id="captureBtn" style="padding:8px 12px; background:#10B981;color:#fff;border:none;border-radius:8px; cursor:pointer;">Capture Screenshot</button>
+                            <button id="captureSendBtn" style="padding:8px 12px; background:#0ea5e9;color:#fff;border:none;border-radius:8px; cursor:pointer;">Capture & Open WhatsApp</button>
+                            <a id="waLink" href="https://wa.me/{phone_for_wa}?text={encoded_text}" target="_blank" style="display:none;">Open WA</a>
+                        </div>
+                        <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+                        <script>
+                        async function captureAndDownload(openWA){{
+                            const el = document.getElementById('contract-screenshot-area');
+                            if(!el){{ alert('Area kontrak tidak ditemukan untuk di-screenshot'); return; }}
+                            try{{
+                                const canvas = await html2canvas(el, {{scale:1.5, useCORS:true, backgroundColor:'#ffffff'}});
+                                canvas.toBlob(function(blob){{
+                                    const url = URL.createObjectURL(blob);
+                                    const a = document.createElement('a');
+                                    a.href = url;
+                                    a.download = 'contract_{case_id}.png';
+                                    document.body.appendChild(a);
+                                    a.click();
+                                    a.remove();
+                                    if(openWA){{
+                                        const wa = document.getElementById('waLink').href;
+                                        window.open(wa, '_blank');
+                                        // Open image in new tab so user can easily attach it in WhatsApp Web
+                                        window.open(url, '_blank');
+                                    }}
+                                }}, 'image/png');
+                            }}catch(err){{
+                                alert('Gagal melakukan screenshot: ' + err);
+                            }}
+                        }}
+
+                        document.getElementById('captureBtn').addEventListener('click', function(){{ captureAndDownload(false); }});
+                        document.getElementById('captureSendBtn').addEventListener('click', function(){{ captureAndDownload(true); }});
+                        </script>
+                        """
+
+                        try:
+                            st.components.v1.html(component_html, height=640, scrolling=True)
+                        except Exception as e:
+                            st.warning(f"Fitur screenshot tidak tersedia: {e}")
                     
                     else:
                         st.warning("Data detail tidak ditemukan.")
