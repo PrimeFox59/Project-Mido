@@ -3801,18 +3801,22 @@ def page_agent():
     # Jika Agent: hanya tampilkan assignment untuk dirinya sendiri
     if user_role in ("Superuser", "Supervisor"):
         st.caption(f"Mode: **{user_role}** — Melihat semua assignment agent")
-        # JOIN dengan supervisor_data untuk mendapatkan Principle_Outstanding
-        # dan hitung total pembayaran dari 2 sumber (HANYA yang sudah approved):
-        # 1. Tabel payments dengan approval_status='approved'
-        # 2. Tabel agent_results dengan approval_status='approved'
-        # Note: Gunakan IFNULL untuk backward compatibility jika kolom belum ada
-        # CRITICAL: Filter ONLY assignment_type='agent' to exclude tracer assignments
+        # Enhanced query dengan kolom tambahan:
+        # - Assignment Date (dari agent_assignments)
+        # - Status (dari supervisor_data)
+        # - Employment Update & Employer (dari assign_tracer - hasil trace)
+        # - Updated Company Contacts (placeholder untuk hasil googling)
+        # - Work status indicator (sudah dikerjakan atau belum)
         rows = fetchall("""
             SELECT 
                 aa.Agreement_No AS Case_ID, 
                 aa.Agent_Assigned_To, 
-                aa.assigned_at,
+                aa.assigned_at AS Assignment_Date,
                 CAST(COALESCE(sd.Principle_Outstanding, '0') AS REAL) AS Principle_Outstanding,
+                COALESCE(sd.STATUS, '-') AS Status,
+                COALESCE(at.EMPLOYMENT_UPDATE, '-') AS Employment_Update,
+                COALESCE(at.EMPLOYER, '-') AS Employer,
+                COALESCE(sd.Additional_Contacts, '-') AS Updated_Company_Contacts,
                 (
                     COALESCE(
                         (SELECT SUM(paid_amount) 
@@ -3827,12 +3831,24 @@ def page_agent():
                          AND IFNULL(ar.approval_status, 'approved') = 'approved'),
                         0
                     )
-                ) AS Total_Approved_Payment
+                ) AS Total_Approved_Payment,
+                CASE 
+                    WHEN EXISTS (
+                        SELECT 1 FROM trace_results tr 
+                        WHERE tr.Agreement_No = aa.Agreement_No
+                    ) OR EXISTS (
+                        SELECT 1 FROM agent_results ar2 
+                        WHERE ar2.Agreement_No = aa.Agreement_No
+                    ) THEN 1
+                    ELSE 0
+                END AS Is_Worked_On
             FROM agent_assignments aa
             LEFT JOIN supervisor_data sd 
                 ON sd.Case_ID = aa.Agreement_No 
                 OR sd.Virtual_Account_Number = aa.Agreement_No
                 OR sd.Third_Uid = aa.Agreement_No
+            LEFT JOIN assign_tracer at
+                ON at.Agreement_No = aa.Agreement_No
             WHERE aa.active = 1 
               AND IFNULL(aa.assignment_type, 'agent') = 'agent'
             ORDER BY aa.assigned_at DESC 
@@ -3910,14 +3926,37 @@ def page_agent():
         if count_ptp and count_ptp > 0:
             st.success(f"Hai {agent_name}, hari ini kamu ada {count_ptp} PTP. Klik di bawah untuk lihat daftar.")
         
-        # Agent's assigned loans - ONLY show agent assignments, NOT tracer
+        # Agent's assigned loans - Enhanced dengan kolom tambahan
         rows = fetchall("""
-            SELECT Agreement_No AS Case_ID, Agent_Assigned_To, assigned_at 
-            FROM agent_assignments 
-            WHERE Agent_Assigned_To=? 
-              AND active = 1
-              AND IFNULL(assignment_type, 'agent') = 'agent'
-            ORDER BY assigned_at DESC 
+            SELECT 
+                aa.Agreement_No AS Case_ID, 
+                aa.Agent_Assigned_To, 
+                aa.assigned_at AS Assignment_Date,
+                COALESCE(sd.STATUS, '-') AS Status,
+                COALESCE(at.EMPLOYMENT_UPDATE, '-') AS Employment_Update,
+                COALESCE(at.EMPLOYER, '-') AS Employer,
+                COALESCE(sd.Additional_Contacts, '-') AS Updated_Company_Contacts,
+                CASE 
+                    WHEN EXISTS (
+                        SELECT 1 FROM trace_results tr 
+                        WHERE tr.Agreement_No = aa.Agreement_No
+                    ) OR EXISTS (
+                        SELECT 1 FROM agent_results ar2 
+                        WHERE ar2.Agreement_No = aa.Agreement_No
+                    ) THEN 1
+                    ELSE 0
+                END AS Is_Worked_On
+            FROM agent_assignments aa
+            LEFT JOIN supervisor_data sd 
+                ON sd.Case_ID = aa.Agreement_No 
+                OR sd.Virtual_Account_Number = aa.Agreement_No
+                OR sd.Third_Uid = aa.Agreement_No
+            LEFT JOIN assign_tracer at
+                ON at.Agreement_No = aa.Agreement_No
+            WHERE aa.Agent_Assigned_To=? 
+              AND aa.active = 1
+              AND IFNULL(aa.assignment_type, 'agent') = 'agent'
+            ORDER BY aa.assigned_at DESC 
             LIMIT 500
         """, (agent_name,))
     
@@ -3951,33 +3990,38 @@ def page_agent():
         filtered = [r for r in rows if (not q_ag or q_ag.strip() in str(r.get('Case_ID') or ''))]
 
         st.subheader("Assignments")
-        # Build a monitoring-style selectable table
-        data = [
-            {
+        
+        # Build enhanced table dengan kolom baru
+        data = []
+        for r in filtered:
+            row_data = {
                 "Case_ID": r.get("Case_ID"),
-                "Agent": r.get("Agent_Assigned_To"),
-                "Principle_Outstanding": r.get("Principle_Outstanding") if user_role in ("Superuser", "Supervisor") else None,
-                "Total_Approved_Payment": r.get("Total_Approved_Payment") if user_role in ("Superuser", "Supervisor") else None,
-                "assigned_at": r.get("assigned_at"),
+                "Assignment_Date": r.get("Assignment_Date", "-"),
+                "Status": r.get("Status", "-"),
+                "Employment_Update": r.get("Employment_Update", "-"),
+                "Employer": r.get("Employer", "-"),
+                "Updated_Company_Contacts": r.get("Updated_Company_Contacts", "-"),
+                "Work_Status": "✅ Dikerjakan" if r.get("Is_Worked_On") == 1 else "⏳ Belum",
             }
-            for r in filtered
-        ]
-        # Remove None values for Agent view
-        if user_role not in ("Superuser", "Supervisor"):
-            for d in data:
-                if "Principle_Outstanding" in d:
-                    del d["Principle_Outstanding"]
-                if "Total_Approved_Payment" in d:
-                    del d["Total_Approved_Payment"]
+            
+            # Tambahkan kolom khusus Supervisor
+            if user_role in ("Superuser", "Supervisor"):
+                row_data["Agent"] = r.get("Agent_Assigned_To")
+                row_data["Principle_Outstanding"] = r.get("Principle_Outstanding")
+                row_data["Total_Approved_Payment"] = r.get("Total_Approved_Payment")
+            
+            data.append(row_data)
         
         df = pd.DataFrame(data)
         prev_selected = set(st.session_state.get("agent_selected_list", []) or [])
+        
         # Select-all / clear options
         col_sa, col_cl = st.columns([1, 1])
         with col_sa:
             select_all = st.checkbox("Pilih semua", key="ag_select_all")
         with col_cl:
             clear_all = st.checkbox("Kosongkan pilihan", key="ag_clear_all")
+        
         if not df.empty:
             if select_all:
                 df.insert(0, "Selected", True)
@@ -3988,25 +4032,33 @@ def page_agent():
         else:
             df["Selected"] = []
 
-        # Column config dengan conditional Agent column
+        # Enhanced column config dengan kolom baru
         col_config = {
             "Selected": st.column_config.CheckboxColumn("Selected", help="Centang untuk memilih Case_ID"),
-            "Case_ID": st.column_config.TextColumn("Case_ID"),
-            "assigned_at": st.column_config.TextColumn("assigned_at"),
+            "Case_ID": st.column_config.TextColumn("Case ID", width="medium"),
+            "Assignment_Date": st.column_config.TextColumn("Assignment Date", width="medium"),
+            "Status": st.column_config.TextColumn("Status", width="small"),
+            "Employment_Update": st.column_config.TextColumn("Employment Update", width="medium"),
+            "Employer": st.column_config.TextColumn("Employer", width="medium"),
+            "Updated_Company_Contacts": st.column_config.TextColumn("Updated Company Contacts", width="large"),
+            "Work_Status": st.column_config.TextColumn("Work Status", width="small", help="Sudah dikerjakan atau belum"),
         }
-        disabled_cols = ["Case_ID", "assigned_at"]
+        
+        disabled_cols = ["Case_ID", "Assignment_Date", "Status", "Employment_Update", "Employer", "Updated_Company_Contacts", "Work_Status"]
         
         if user_role in ("Superuser", "Supervisor"):
-            col_config["Agent"] = st.column_config.TextColumn("Agent")
+            col_config["Agent"] = st.column_config.TextColumn("Agent", width="medium")
             col_config["Principle_Outstanding"] = st.column_config.NumberColumn(
                 "Principle Outstanding",
                 help="Sisa pokok pinjaman yang belum dibayar",
-                format="Rp %.0f"
+                format="Rp %.0f",
+                width="medium"
             )
             col_config["Total_Approved_Payment"] = st.column_config.NumberColumn(
                 "Total Approved Payment",
                 help="Total pembayaran cicilan yang sudah di-approve",
-                format="Rp %.0f"
+                format="Rp %.0f",
+                width="medium"
             )
             disabled_cols.extend(["Agent", "Principle_Outstanding", "Total_Approved_Payment"])
 
