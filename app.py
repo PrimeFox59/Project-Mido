@@ -12,10 +12,13 @@ import time
 import os
 import re
 import requests
-import urllib.parse
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
+from PIL import Image
+import base64
+import webbrowser
+import urllib.parse
 
 # Google Drive Config
 SCOPES = ["https://www.googleapis.com/auth/drive"]
@@ -741,6 +744,166 @@ def verify_password(pw: str, h: str):
 
 def current_user():
     return st.session_state.get("user")
+
+# -------------------------
+# Contract Detail Screenshot & WhatsApp Helper
+# -------------------------
+def generate_contract_detail_html(case_data: dict) -> str:
+    """Generate beautiful HTML for contract detail that matches the image style."""
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            body {{
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                margin: 0;
+                padding: 20px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            }}
+            .container {{
+                max-width: 800px;
+                margin: 0 auto;
+                background: white;
+                border-radius: 16px;
+                box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                overflow: hidden;
+            }}
+            .header {{
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                padding: 40px 30px;
+                text-align: left;
+            }}
+            .header h1 {{
+                margin: 0 0 10px 0;
+                font-size: 32px;
+                font-weight: 600;
+            }}
+            .header p {{
+                margin: 0;
+                font-size: 16px;
+                opacity: 0.9;
+                font-style: italic;
+            }}
+            .content {{
+                padding: 30px;
+            }}
+            .detail-row {{
+                display: flex;
+                padding: 15px 0;
+                border-bottom: 1px solid #f0f0f0;
+            }}
+            .detail-row:last-child {{
+                border-bottom: none;
+            }}
+            .detail-label {{
+                flex: 0 0 250px;
+                font-weight: 600;
+                color: #666;
+                font-size: 14px;
+            }}
+            .detail-value {{
+                flex: 1;
+                color: #333;
+                font-size: 14px;
+            }}
+            .detail-value.highlight {{
+                color: #667eea;
+                font-weight: 600;
+            }}
+            .detail-value.na {{
+                color: #e74c3c;
+                font-weight: 600;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>Here's your Contract Details</h1>
+                <p>We are happy to help with any settlement scheme of your choosing!</p>
+            </div>
+            <div class="content">
+                <div class="detail-row">
+                    <div class="detail-label">Debtor Name</div>
+                    <div class="detail-value highlight">: {case_data.get('Debtor_Name', 'N/A')}</div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">PhoneNumber</div>
+                    <div class="detail-value highlight">: {case_data.get('PhoneNumber', 'N/A')}</div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">Gender</div>
+                    <div class="detail-value">: {case_data.get('Gender', 'N/A')}</div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">Legal Address</div>
+                    <div class="detail-value">: {case_data.get('Legal_Address', 'N/A')}</div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">DOB</div>
+                    <div class="detail-value">: {case_data.get('DOB', 'N/A')}</div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">Email</div>
+                    <div class="detail-value">: {case_data.get('Email', 'N/A')}</div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">Last known Office Name</div>
+                    <div class="detail-value">: {case_data.get('Last_Known_Office_Name', '')}</div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">Last Known Job Position</div>
+                    <div class="detail-value">: {case_data.get('Last_Known_Job_Position', 'N/A')}</div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">Last Known Work Phone</div>
+                    <div class="detail-value">: {case_data.get('Last_Known_Work_Phone', 'None')}</div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">Debtor Phone Number II</div>
+                    <div class="detail-value">: {case_data.get('Debtor_Phone_Number_II', 'None')}</div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">Debtor Other Phone Number(s)</div>
+                    <div class="detail-value na">: {case_data.get('Debtor_Other_Phone_Numbers', '#N/A')}</div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">Date of Contract</div>
+                    <div class="detail-value">: {case_data.get('Date_of_Contract', 'N/A')}</div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">DPD</div>
+                    <div class="detail-value">: {case_data.get('DPD', 'N/A')}</div>
+                </div>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    return html
+
+def open_whatsapp_with_clipboard_instruction(phone_number: str):
+    """Open WhatsApp with the given phone number and show clipboard instruction."""
+    # Clean phone number
+    phone = str(phone_number).strip()
+    # Remove non-digits
+    phone = re.sub(r'\D', '', phone)
+    
+    # Convert to international format if needed
+    if phone.startswith('08'):
+        phone = '62' + phone[1:]  # 08xxx -> 628xxx
+    elif phone.startswith('8'):
+        phone = '62' + phone  # 8xxx -> 628xxx
+    elif not phone.startswith('62'):
+        phone = '62' + phone
+    
+    # WhatsApp Web URL
+    wa_url = f"https://wa.me/{phone}"
+    
+    return wa_url
 
 def login_user(user_row):
     st.session_state["user"] = dict(user_row)
@@ -3622,9 +3785,11 @@ def page_agent():
             st.subheader(f"Case Details: {sel}")
             info = fetchone("SELECT Debtor_Name, NIK_KTP FROM assign_tracer WHERE Agreement_No=?", (sel,)) or {}
             
-            # Ambil data dari supervisor_data untuk Principle_Outstanding
+            # Ambil data lengkap dari supervisor_data untuk Contract Detail
             sup_data = fetchone("""
-                SELECT Phone_Number_1, Principle_Outstanding 
+                SELECT Phone_Number_1, Phone_Number_2, Principle_Outstanding, 
+                       Customer_name, email, Gender, Home_Address, 
+                       Customer_Occupation, DPD, Assignment_Date
                 FROM supervisor_data 
                 WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=? 
                 LIMIT 1
@@ -3644,6 +3809,74 @@ def page_agent():
             
             if phone:
                 st.markdown(f"[Click to call]({'tel:'+str(phone)})  |  [SIP]({'sip:'+str(phone)})")
+            
+            # ===== CONTRACT DETAIL SCREENSHOT & WHATSAPP FEATURE =====
+            st.markdown("---")
+            st.markdown("### 📸 Contract Detail Screenshot & WhatsApp")
+            
+            # Tombol untuk generate dan show contract detail
+            col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 2])
+            
+            with col_btn1:
+                if st.button("📋 Show Contract Detail", key=f"show_contract_{sel}", use_container_width=True):
+                    st.session_state[f"show_contract_html_{sel}"] = True
+            
+            with col_btn2:
+                if st.button("💬 Open WhatsApp", key=f"open_wa_{sel}", use_container_width=True, type="primary"):
+                    if phone:
+                        wa_url = open_whatsapp_with_clipboard_instruction(phone)
+                        st.markdown(f'<meta http-equiv="refresh" content="0; url={wa_url}" target="_blank">', unsafe_allow_html=True)
+                        js = f"window.open('{wa_url}', '_blank');"
+                        st.components.v1.html(f"<script>{js}</script>", height=0)
+                        st.success(f"✅ Opening WhatsApp for {phone}...")
+                        st.info("💡 **Cara Screenshot ke Clipboard:**\n\n1. Buka Contract Detail di bawah\n2. Tekan tombol **Windows + Shift + S** (Snipping Tool)\n3. Screenshot area Contract Detail\n4. Screenshot otomatis masuk ke Clipboard\n5. Paste (Ctrl+V) di WhatsApp yang sudah terbuka")
+                    else:
+                        st.warning("⚠️ Nomor telepon tidak tersedia untuk case ini")
+            
+            with col_btn3:
+                st.caption("🎯 Klik 'Show Contract Detail' untuk tampilkan detail, lalu 'Open WhatsApp' untuk membuka WA dan screenshot manual menggunakan Windows Snipping Tool")
+            
+            # Display Contract Detail HTML jika tombol diklik
+            if st.session_state.get(f"show_contract_html_{sel}", False):
+                st.markdown("---")
+                
+                # Prepare data untuk contract detail
+                contract_data = {
+                    'Debtor_Name': info.get('Debtor_Name', 'N/A') or sup_data.get('Customer_name', 'N/A'),
+                    'PhoneNumber': phone or 'N/A',
+                    'Gender': sup_data.get('Gender', 'N/A') or 'N/A',
+                    'Legal_Address': sup_data.get('Home_Address', 'N/A') or 'N/A',
+                    'DOB': '2025-10-24',  # Default, could be enhanced with actual DOB field
+                    'Email': sup_data.get('email', 'N/A') or 'N/A',
+                    'Last_Known_Office_Name': '',
+                    'Last_Known_Job_Position': sup_data.get('Customer_Occupation', 'N/A') or 'Lainnya',
+                    'Last_Known_Work_Phone': 'None',
+                    'Debtor_Phone_Number_II': sup_data.get('Phone_Number_2', 'None') or 'None',
+                    'Debtor_Other_Phone_Numbers': '#N/A',
+                    'Date_of_Contract': sup_data.get('Assignment_Date', 'N/A') or 'N/A',
+                    'DPD': sup_data.get('DPD', 'N/A') or 'N/A',
+                }
+                
+                # Generate HTML
+                contract_html = generate_contract_detail_html(contract_data)
+                
+                # Display dengan component HTML
+                st.components.v1.html(contract_html, height=900, scrolling=True)
+                
+                st.info("""
+                **📸 Cara Screenshot ke Clipboard:**
+                1. Tekan **Windows + Shift + S** untuk membuka Snipping Tool
+                2. Pilih area Contract Detail di atas untuk di-screenshot
+                3. Screenshot otomatis masuk ke Clipboard
+                4. Buka WhatsApp (klik tombol 'Open WhatsApp' di atas)
+                5. **Ctrl + V** untuk paste screenshot di chat
+                """)
+                
+                # Tombol untuk hide contract detail
+                if st.button("❌ Hide Contract Detail", key=f"hide_contract_{sel}"):
+                    st.session_state[f"show_contract_html_{sel}"] = False
+                    st.rerun()
+            
         else:
             st.info("Centang satu baris untuk melihat detail kasus.")
         
@@ -6272,7 +6505,7 @@ def page_supervisor():
                         
                         # Render main section without header
                         st.markdown("""
-                        <div id="contract-screenshot-area" style="border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden; 
+                        <div style="border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden; 
                                     box-shadow: 0 2px 8px rgba(0,0,0,0.05); margin-top: 5px;">
                         """, unsafe_allow_html=True)
                         
@@ -6292,84 +6525,6 @@ def page_supervisor():
                             """
                         
                         st.markdown(rows_html + "</div>", unsafe_allow_html=True)
-
-                        # --- Screenshot + WhatsApp quick action ---
-                        try:
-                                phone_raw = str(detail_row.get('Phone_Number_1', '') or '').strip()
-                        except Exception:
-                                phone_raw = ''
-
-                        def _normalize_phone_for_wa(p: str) -> str:
-                                """Normalize phone number to international format for wa.me links.
-                                Simple heuristic: remove non-digits, remove leading +,
-                                replace leading 0 with 62 (Indonesia) if present.
-                                If this doesn't match your country, you can edit logic.
-                                """
-                                if not p:
-                                        return ''
-                                s = ''.join(ch for ch in p if ch.isdigit() or ch == '+')
-                                if s.startswith('+'):
-                                        s = s[1:]
-                                if s.startswith('0'):
-                                        s = '62' + s[1:]
-                                return s
-
-                        phone_for_wa = _normalize_phone_for_wa(phone_raw)
-                        debtor_name = detail_row.get('Customer_name', '')
-                        case_id = detail_row.get('Case_ID', '')
-
-                        # Build a client-side HTML widget that can capture the contract card
-                        # using html2canvas, auto-download the PNG, and open WhatsApp web
-                        # (wa.me) in a new tab with a prefilled message. Note: attaching
-                        # the image to WhatsApp must be done manually by the user (browser
-                        # security prevents auto-attaching files to another site).
-                        try:
-                                encoded_text = urllib.parse.quote(f"Berikut detail kontrak {case_id} untuk {debtor_name}")
-                        except Exception:
-                                encoded_text = urllib.parse.quote("Berikut detail kontrak untuk Anda")
-
-                        component_html = f"""
-                        <div style="margin-top:12px; display:flex; gap:8px;">
-                            <button id="captureBtn" style="padding:8px 12px; background:#10B981;color:#fff;border:none;border-radius:8px; cursor:pointer;">Capture Screenshot</button>
-                            <button id="captureSendBtn" style="padding:8px 12px; background:#0ea5e9;color:#fff;border:none;border-radius:8px; cursor:pointer;">Capture & Open WhatsApp</button>
-                            <a id="waLink" href="https://wa.me/{phone_for_wa}?text={encoded_text}" target="_blank" style="display:none;">Open WA</a>
-                        </div>
-                        <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-                        <script>
-                        async function captureAndDownload(openWA){{
-                            const el = document.getElementById('contract-screenshot-area');
-                            if(!el){{ alert('Area kontrak tidak ditemukan untuk di-screenshot'); return; }}
-                            try{{
-                                const canvas = await html2canvas(el, {{scale:1.5, useCORS:true, backgroundColor:'#ffffff'}});
-                                canvas.toBlob(function(blob){{
-                                    const url = URL.createObjectURL(blob);
-                                    const a = document.createElement('a');
-                                    a.href = url;
-                                    a.download = 'contract_{case_id}.png';
-                                    document.body.appendChild(a);
-                                    a.click();
-                                    a.remove();
-                                    if(openWA){{
-                                        const wa = document.getElementById('waLink').href;
-                                        window.open(wa, '_blank');
-                                        // Open image in new tab so user can easily attach it in WhatsApp Web
-                                        window.open(url, '_blank');
-                                    }}
-                                }}, 'image/png');
-                            }}catch(err){{
-                                alert('Gagal melakukan screenshot: ' + err);
-                            }}
-                        }}
-
-                        document.getElementById('captureBtn').addEventListener('click', function(){{ captureAndDownload(false); }});
-                        document.getElementById('captureSendBtn').addEventListener('click', function(){{ captureAndDownload(true); }});
-                        </script>
-                        """
-
-                        try:
-                                st.components.v1.html(component_html, height=640, scrolling=True)
-                        except Exception as e:
-                                st.warning(f"Fitur screenshot tidak tersedia: {e}")
                         
                         # Additional sections in expander
                         with st.expander("📞 Contact Person Details"):
@@ -6433,87 +6588,6 @@ def page_supervisor():
                                 st.dataframe(payment_df, use_container_width=True, hide_index=True)
                             else:
                                 st.info("Belum ada riwayat pembayaran")
-                        
-                        # --- Screenshot + WhatsApp quick action ---
-                        try:
-                            phone_raw = str(detail_row.get('Phone_Number_1', '') or '').strip()
-                        except Exception:
-                            phone_raw = ''
-
-                        def _normalize_phone_for_wa(p: str) -> str:
-                            """Normalize phone number to international format for wa.me links.
-                            Simple heuristic: remove non-digits, remove leading +,
-                            replace leading 0 with 62 (Indonesia) if present.
-                            If this doesn't match your country, you can edit logic.
-                            """
-                            if not p:
-                                return ''
-                            s = ''.join(ch for ch in p if ch.isdigit() or ch == '+')
-                            if s.startswith('+'):
-                                s = s[1:]
-                            if s.startswith('0'):
-                                s = '62' + s[1:]
-                            return s
-
-                        phone_for_wa = _normalize_phone_for_wa(phone_raw)
-                        debtor_name = detail_row.get('Customer_name', '')
-                        case_id = detail_row.get('Case_ID', '')
-
-                        # Build a client-side HTML widget that can capture the contract card
-                        # using html2canvas, auto-download the PNG, and open WhatsApp web
-                        # (wa.me) in a new tab with a prefilled message. Note: attaching
-                        # the image to WhatsApp must be done manually by the user (browser
-                        # security prevents auto-attaching files to another site).
-                        try:
-                            encoded_text = urllib.parse.quote(f"Berikut detail kontrak {case_id} untuk {debtor_name}")
-                        except Exception:
-                            encoded_text = urllib.parse.quote("Berikut detail kontrak untuk Anda")
-
-                        component_html = f"""
-                        <div id="contract-screenshot-area" style="max-width:100%;">
-                        {rows_html}
-                        </div>
-                        <div style="margin-top:12px; display:flex; gap:8px;">
-                            <button id="captureBtn" style="padding:8px 12px; background:#10B981;color:#fff;border:none;border-radius:8px; cursor:pointer;">Capture Screenshot</button>
-                            <button id="captureSendBtn" style="padding:8px 12px; background:#0ea5e9;color:#fff;border:none;border-radius:8px; cursor:pointer;">Capture & Open WhatsApp</button>
-                            <a id="waLink" href="https://wa.me/{phone_for_wa}?text={encoded_text}" target="_blank" style="display:none;">Open WA</a>
-                        </div>
-                        <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-                        <script>
-                        async function captureAndDownload(openWA){{{{
-                            const el = document.getElementById('contract-screenshot-area');
-                            if(!el){{{{ alert('Area kontrak tidak ditemukan untuk di-screenshot'); return; }}}}
-                            try{{{{
-                                const canvas = await html2canvas(el, {{{{scale:1.5, useCORS:true, backgroundColor:'#ffffff'}}}});
-                                canvas.toBlob(function(blob){{{{
-                                    const url = URL.createObjectURL(blob);
-                                    const a = document.createElement('a');
-                                    a.href = url;
-                                    a.download = 'contract_{case_id}.png';
-                                    document.body.appendChild(a);
-                                    a.click();
-                                    a.remove();
-                                    if(openWA){{{{
-                                        const wa = document.getElementById('waLink').href;
-                                        window.open(wa, '_blank');
-                                        // Open image in new tab so user can easily attach it in WhatsApp Web
-                                        window.open(url, '_blank');
-                                    }}}}
-                                }}}}, 'image/png');
-                            }}}}catch(err){{{{
-                                alert('Gagal melakukan screenshot: ' + err);
-                            }}}}
-                        }}}}
-
-                        document.getElementById('captureBtn').addEventListener('click', function(){{{{ captureAndDownload(false); }}}});
-                        document.getElementById('captureSendBtn').addEventListener('click', function(){{{{ captureAndDownload(true); }}}});
-                        </script>
-                        """
-
-                        try:
-                            st.components.v1.html(component_html, height=640, scrolling=True)
-                        except Exception as e:
-                            st.warning(f"Fitur screenshot tidak tersedia: {e}")
                     
                     else:
                         st.warning("Data detail tidak ditemukan.")

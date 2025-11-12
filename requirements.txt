@@ -5,3 +5,6 @@ pandas
 python-dateutil
 altair
 openpyxl
+pillow
+playwright
+pyperclip
