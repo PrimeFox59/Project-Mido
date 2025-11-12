@@ -3862,6 +3862,8 @@ def page_agent():
                 # Generate HTML
                 contract_html = generate_contract_detail_html(contract_data)
                 
+                # Display dengan component HTML
+                st.components.v1.html(contract_html, height=900, scrolling=True)
 
                 
                 # Tombol untuk hide contract detail
