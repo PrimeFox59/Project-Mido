@@ -3822,19 +3822,21 @@ def page_agent():
                     st.session_state[f"show_contract_html_{sel}"] = True
             
             with col_btn2:
-                if st.button("💬 Open WhatsApp", key=f"open_wa_{sel}", use_container_width=True, type="primary"):
-                    if phone:
-                        wa_url = open_whatsapp_with_clipboard_instruction(phone)
-                        st.markdown(f'<meta http-equiv="refresh" content="0; url={wa_url}" target="_blank">', unsafe_allow_html=True)
-                        js = f"window.open('{wa_url}', '_blank');"
-                        st.components.v1.html(f"<script>{js}</script>", height=0)
-                        st.success(f"✅ Opening WhatsApp for {phone}...")
-                        st.info("💡 **Cara Screenshot ke Clipboard:**\n\n1. Buka Contract Detail di bawah\n2. Tekan tombol **Windows + Shift + S** (Snipping Tool)\n3. Screenshot area Contract Detail\n4. Screenshot otomatis masuk ke Clipboard\n5. Paste (Ctrl+V) di WhatsApp yang sudah terbuka")
-                    else:
-                        st.warning("⚠️ Nomor telepon tidak tersedia untuk case ini")
+                if phone:
+                    wa_url = open_whatsapp_with_clipboard_instruction(phone)
+                    # Gunakan link_button untuk membuka WhatsApp di tab baru
+                    st.link_button("💬 Open WhatsApp", wa_url, use_container_width=True, type="primary")
+                else:
+                    st.button("💬 WhatsApp Unavailable", key=f"open_wa_disabled_{sel}", use_container_width=True, disabled=True)
             
             with col_btn3:
                 st.caption("🎯 Klik 'Show Contract Detail' untuk tampilkan detail, lalu 'Open WhatsApp' untuk membuka WA dan screenshot manual menggunakan Windows Snipping Tool")
+            
+            # Info message untuk cara penggunaan
+            if phone:
+                st.info("💡 **Cara Screenshot ke Clipboard:**\n\n1. Klik 'Show Contract Detail' di atas\n2. Klik 'Open WhatsApp' (akan buka di tab baru)\n3. Tekan **Windows + Shift + S** (Snipping Tool)\n4. Screenshot area Contract Detail\n5. Kembali ke tab WhatsApp dan **Ctrl + V**")
+            else:
+                st.warning("⚠️ Nomor telepon tidak tersedia untuk case ini")
             
             # Display Contract Detail HTML jika tombol diklik
             if st.session_state.get(f"show_contract_html_{sel}", False):
