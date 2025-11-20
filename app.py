@@ -3913,16 +3913,23 @@ def main():
 # Audit Log Page
 # -------------------------
 def page_audit_log():
-    require_roles(("Superuser", "Supervisor"))
+    require_roles(("Superuser", "Supervisor", "Tracer", "Agent"))
     
     # Import dependencies at the top
     import pandas as pd
     from datetime import datetime, timedelta
     
+    # Get current user info
+    user_obj = current_user() or {}
+    user_role = user_obj.get("role", "")
+    user_id = user_obj.get("id")
+    is_supervisor = user_role in ("Superuser", "Supervisor")
+    
     # ========================================================================
     # HEADER WITH GLASSMORPHISM STYLE
     # ========================================================================
-    st.markdown("""
+    header_subtitle = "Semua aktivitas aplikasi direkam di sini. Waktu: GMT+07:00 (WIB)" if is_supervisor else "Aktivitas Anda direkam di sini. Waktu: GMT+07:00 (WIB)"
+    st.markdown(f"""
         <div style="background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(139, 92, 246, 0.1) 100%); 
                     backdrop-filter: blur(10px); 
                     border: 1px solid rgba(99, 102, 241, 0.2); 
@@ -3933,27 +3940,39 @@ def page_audit_log():
                 📋 Audit Log System
             </h1>
             <p style="margin: 8px 0 0 0; color: #6B7280; font-size: 14px;">
-                Semua aktivitas aplikasi direkam di sini. Waktu: GMT+07:00 (WIB)
+                {header_subtitle}
             </p>
         </div>
     """, unsafe_allow_html=True)
     
     # ========================================================================
-    # STATISTICS CARDS
+    # STATISTICS CARDS (filtered by user for non-supervisors)
     # ========================================================================
     stats_col1, stats_col2, stats_col3, stats_col4 = st.columns(4)
     
-    # Get statistics
-    total_logs = fetchone("SELECT COUNT(*) as count FROM audit_logs")['count']
-    total_users = fetchone("SELECT COUNT(DISTINCT user_id) as count FROM audit_logs WHERE user_id IS NOT NULL")['count']
-    today_logs = fetchone("""
-        SELECT COUNT(*) as count FROM audit_logs 
-        WHERE DATE(timestamp) = DATE('now', '+7 hours')
-    """)['count']
-    login_count = fetchone("""
-        SELECT COUNT(*) as count FROM audit_logs 
-        WHERE action = 'LOGIN' AND DATE(timestamp) = DATE('now', '+7 hours')
-    """)['count']
+    # Get statistics - filter by user_id for non-supervisors
+    if is_supervisor:
+        total_logs = fetchone("SELECT COUNT(*) as count FROM audit_logs")['count']
+        total_users = fetchone("SELECT COUNT(DISTINCT user_id) as count FROM audit_logs WHERE user_id IS NOT NULL")['count']
+        today_logs = fetchone("""
+            SELECT COUNT(*) as count FROM audit_logs 
+            WHERE DATE(timestamp) = DATE('now', '+7 hours')
+        """)['count']
+        login_count = fetchone("""
+            SELECT COUNT(*) as count FROM audit_logs 
+            WHERE action = 'LOGIN' AND DATE(timestamp) = DATE('now', '+7 hours')
+        """)['count']
+    else:
+        total_logs = fetchone("SELECT COUNT(*) as count FROM audit_logs WHERE user_id = ?", (user_id,))['count']
+        total_users = 1  # Only current user
+        today_logs = fetchone("""
+            SELECT COUNT(*) as count FROM audit_logs 
+            WHERE user_id = ? AND DATE(timestamp) = DATE('now', '+7 hours')
+        """, (user_id,))['count']
+        login_count = fetchone("""
+            SELECT COUNT(*) as count FROM audit_logs 
+            WHERE user_id = ? AND action = 'LOGIN' AND DATE(timestamp) = DATE('now', '+7 hours')
+        """, (user_id,))['count']
     
     with stats_col1:
         st.markdown("""
@@ -4016,21 +4035,27 @@ def page_audit_log():
         filter_col1, filter_col2, filter_col3 = st.columns([2, 2, 1])
         
         with filter_col1:
-            # Get all unique users
-            all_users = fetchall("""
-                SELECT DISTINCT COALESCE(users.full_name, users.name, users.login_id) AS user_name
-                FROM audit_logs
-                LEFT JOIN users ON audit_logs.user_id = users.id
-                WHERE users.id IS NOT NULL
-                ORDER BY user_name
-            """)
-            user_options = ["All Users"] + [u["user_name"] for u in all_users if u["user_name"]]
-            selected_user = st.selectbox(
-                "👤 Filter by User", 
-                options=user_options, 
-                key="audit_user_filter",
-                help="Pilih user untuk melihat aktivitas spesifik"
-            )
+            # User filter only visible for supervisors
+            if is_supervisor:
+                # Get all unique users
+                all_users = fetchall("""
+                    SELECT DISTINCT COALESCE(users.full_name, users.name, users.login_id) AS user_name
+                    FROM audit_logs
+                    LEFT JOIN users ON audit_logs.user_id = users.id
+                    WHERE users.id IS NOT NULL
+                    ORDER BY user_name
+                """)
+                user_options = ["All Users"] + [u["user_name"] for u in all_users if u["user_name"]]
+                selected_user = st.selectbox(
+                    "👤 Filter by User", 
+                    options=user_options, 
+                    key="audit_user_filter",
+                    help="Pilih user untuk melihat aktivitas spesifik"
+                )
+            else:
+                # Non-supervisors automatically filtered to their own activities
+                selected_user = user_obj.get("full_name") or user_obj.get("name") or user_obj.get("login_id")
+                st.info(f"👤 Menampilkan aktivitas Anda: **{selected_user}**")
         
         with filter_col2:
             # Date range filter
@@ -4078,8 +4103,13 @@ def page_audit_log():
     """
     params = []
     
-    # Apply user filter
-    if selected_user != "All Users":
+    # Auto-filter by user_id for non-supervisors
+    if not is_supervisor:
+        query += " AND audit_logs.user_id = ?"
+        params.append(user_id)
+    
+    # Apply user filter (for supervisors only)
+    if is_supervisor and selected_user != "All Users":
         query += " AND COALESCE(users.full_name, users.name, users.login_id) = ?"
         params.append(selected_user)
     
@@ -6323,18 +6353,40 @@ def page_dashboard():
     # -------- Bottom tables: Recent logs | Upcoming deadlines --------
     left, right = st.columns([3, 2])
 
-    # Recent Activity Logs
+    # Recent Activity Logs - filtered by user role
     with left:
         st.subheader("Recent Activity Logs 🧾")
-        logs = fetchall(
-            """
-            SELECT audit_logs.timestamp, COALESCE(users.full_name, users.name, users.login_id) AS user,
-                   audit_logs.action, audit_logs.details
-            FROM audit_logs
-            LEFT JOIN users ON users.id = audit_logs.user_id
-            ORDER BY audit_logs.id DESC LIMIT 10
-            """
-        )
+        
+        # Get current user info for filtering
+        user_obj = current_user() or {}
+        user_role = user_obj.get("role", "")
+        user_id = user_obj.get("id")
+        is_supervisor = user_role in ("Superuser", "Supervisor")
+        
+        # Query - supervisors see all, others see only their own
+        if is_supervisor:
+            logs = fetchall(
+                """
+                SELECT audit_logs.timestamp, COALESCE(users.full_name, users.name, users.login_id) AS user,
+                       audit_logs.action, audit_logs.details
+                FROM audit_logs
+                LEFT JOIN users ON users.id = audit_logs.user_id
+                ORDER BY audit_logs.id DESC LIMIT 10
+                """
+            )
+        else:
+            logs = fetchall(
+                """
+                SELECT audit_logs.timestamp, COALESCE(users.full_name, users.name, users.login_id) AS user,
+                       audit_logs.action, audit_logs.details
+                FROM audit_logs
+                LEFT JOIN users ON users.id = audit_logs.user_id
+                WHERE audit_logs.user_id = ?
+                ORDER BY audit_logs.id DESC LIMIT 10
+                """,
+                (user_id,)
+            )
+        
         if logs:
             # Format to local GMT+7 display similar to Audit page
             def _to_gmt7(ts):
