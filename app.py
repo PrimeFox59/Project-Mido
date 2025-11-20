@@ -2500,7 +2500,12 @@ def page_auth():
                     full_name = st.text_input("Full Name *", key="reg_full_name")
                     email_r = st.text_input("Email", key="reg_email")
                     work_email = st.text_input("Work Email", key="reg_work_email")
-                    division = st.text_input("Division *", key="reg_division", help="Divisi/Departemen Anda")
+                    division = st.selectbox(
+                        "Division *", 
+                        options=["Telecollection Officer", "Supervisor", "Skiptrace Officer"],
+                        key="reg_division", 
+                        help="Pilih divisi/departemen Anda"
+                    )
                 
                 with col2:
                     nik = st.text_input("NIK *", key="reg_nik", max_chars=16, help="Nomor Induk Kependudukan (max 16 karakter)")
@@ -6131,7 +6136,16 @@ def page_user_setting():
             full_name = st.text_input("Full Name", value=user_row.get('full_name') or "")
             email = st.text_input("Email", value=user_row.get('email') or "")
             work_email = st.text_input("Work Email", value=user_row.get('work_email') or "")
-            division = st.text_input("Division", value=user_row.get('division') or "", help="e.g., Collection, Recovery, Legal")
+            current_division = user_row.get('division') or "Telecollection Officer"
+            division_options = ["Telecollection Officer", "Supervisor", "Skiptrace Officer"]
+            # Set index based on current value, default to first option if not found
+            division_index = division_options.index(current_division) if current_division in division_options else 0
+            division = st.selectbox(
+                "Division", 
+                options=division_options,
+                index=division_index,
+                help="Pilih divisi/departemen Anda"
+            )
             
             st.markdown("**Change Password (Optional)**")
             pw1 = st.text_input("New Password", type="password", key="user_pw1", placeholder="Leave blank to keep current")
@@ -6507,7 +6521,10 @@ def page_user_setting():
                                     edit_email = st.text_input("Email", value=selected_user.get('email') or "")
                                     edit_role = st.selectbox("Role", ["Superuser", "Supervisor", "Tracer", "Agent"], 
                                                             index=["Superuser", "Supervisor", "Tracer", "Agent"].index(selected_user.get('role')) if selected_user.get('role') in ["Superuser", "Supervisor", "Tracer", "Agent"] else 0)
-                                    edit_division = st.text_input("Division", value=selected_user.get('division') or "")
+                                    current_edit_division = selected_user.get('division') or "Telecollection Officer"
+                                    division_opts = ["Telecollection Officer", "Supervisor", "Skiptrace Officer"]
+                                    edit_division_index = division_opts.index(current_edit_division) if current_edit_division in division_opts else 0
+                                    edit_division = st.selectbox("Division", options=division_opts, index=edit_division_index)
                                     edit_approved = st.checkbox("Approved", value=bool(selected_user.get('approved')))
                                     
                                     # Option to reset password
@@ -6593,7 +6610,7 @@ def page_user_setting():
                     new_password = st.text_input("Password *", type="password", key="new_password")
                     new_password_confirm = st.text_input("Confirm Password *", type="password", key="new_password_confirm")
                     new_role = st.selectbox("Role *", ["Supervisor", "Tracer", "Agent", "Superuser"], key="new_role")
-                    new_division = st.text_input("Division", key="new_division")
+                    new_division = st.selectbox("Division", options=["Telecollection Officer", "Supervisor", "Skiptrace Officer"], key="new_division")
                     
                     submitted_new = st.form_submit_button("➕ Create User")
                     
