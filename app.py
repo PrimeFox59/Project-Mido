@@ -9706,7 +9706,8 @@ def page_tracer():
             'Suggested_NIK': r.get('Remarks_Suggested_NIK_Prospect') or '',
             'EMPLOYMENT_UPDATE': r.get('EMPLOYMENT_UPDATE'),
             'EMPLOYER': r.get('EMPLOYER'),
-            'Decoded_Company': r.get('Decoded_Company_Name') or '-',
+            # Auto-decode for display: use saved value or auto-decode from EMPLOYER
+            'Decoded_Company': r.get('Decoded_Company_Name') or (decode_company_name(r.get('EMPLOYER', '')) if r.get('EMPLOYER') else '-'),
             'Debtor_Legal_Name': r.get('Debtor_Legal_Name'),
             'Employee_Name': r.get('Employee_Name'),
             'Employee_ID_Number': r.get('Employee_ID_Number'),
@@ -9803,19 +9804,19 @@ def page_tracer():
                 employer = st.text_input("EMPLOYER (Masked)", value=sel_row.get('EMPLOYER',''), key="tr_employer",
                                         help="Masukkan nama company yang ter-mask (e.g., VI****** CA** IN******* PT)")
                 
-                # Auto-decode preview
+                # Auto-decode preview - calculate decoded value for both new input and existing data
                 decoded_value = ""
-                if employer and employer.strip():
-                    decoded_preview = decode_company_name(employer.strip())
-                    decoded_value = decoded_preview
-                    if decoded_preview != employer.strip():
-                        st.success(f"🔓 Auto-Decoded: **{decoded_preview}**")
+                employer_value = employer.strip() if employer else ""
+                
+                if employer_value:
+                    decoded_value = decode_company_name(employer_value)
+                    if decoded_value != employer_value:
+                        st.success(f"🔓 Auto-Decoded: **{decoded_value}**")
                     else:
                         st.info("ℹ️ Belum ada di library. Decoded akan sama dengan Masked.")
                 
-                # Show decoded field (read-only display)
-                current_decoded = sel_row.get('Decoded_Company_Name','') or decoded_value
-                st.text_input("EMPLOYER (Decoded)", value=current_decoded, key="tr_employer_decoded", disabled=True,
+                # Show decoded field with auto-calculated value
+                st.text_input("EMPLOYER (Decoded)", value=decoded_value, key="tr_employer_decoded", disabled=True,
                             help="Otomatis terisi dari library saat save")
                 
                 debtor_legal = st.text_input("Debtor Legal Name", value=sel_row.get('Debtor_Legal_Name',''), key="tr_debtor_legal")
@@ -9875,7 +9876,12 @@ def page_tracer():
                     if nik_new and is_frozen_by_nik(nik_new):
                         st.toast("⚠️ Perhatian: NIK ini berada dalam daftar freeze!", icon="⚠️")
                     
-                    st.toast("✅ Data berhasil diperbarui!", icon="✅")
+                    # Show success message with decode info
+                    if decoded_company and employer and decoded_company != employer.strip():
+                        st.success(f"✅ Data berhasil diperbarui! EMPLOYER decoded: **{decoded_company}**")
+                    else:
+                        st.success("✅ Data berhasil diperbarui!")
+                    
                     st.rerun()
                 except Exception as e:
                     st.toast(f"❌ Gagal update: {e}", icon="❌")
