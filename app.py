@@ -9634,6 +9634,8 @@ def page_supervisor():
         st.markdown("""
         Gunakan tab ini untuk migrasi data dari Excel lama ke sistem baru.
         
+        **PENTING:** `Agreement_No` = `Case_ID` (sama, hanya beda nama kolom)
+        
         **Cara menggunakan:**
         1. Download template Excel yang sesuai
         2. Isi data historical Anda ke template (jangan ubah nama kolom!)
@@ -9655,6 +9657,8 @@ def page_supervisor():
             - `DPD`, `Principle_Outstanding`, `Phone_Number_1`, dll.
             
             **Kolom wajib minimal:** Case_ID, Customer_name, Virtual_Account_Number
+            
+            ℹ️ **Note:** `Case_ID` di sini akan menjadi `Agreement_No` di tabel lainnya
             """)
             
             # Generate template button
@@ -9789,11 +9793,13 @@ def page_supervisor():
             st.markdown("""
             **Template kolom yang diperlukan:**
             - `TRC_Code` (opsional, kode tracer)
-            - `Agreement_No` (wajib, harus sesuai dengan Case_ID di Supervisor Data)
+            - `Agreement_No` (wajib, **sama dengan Case_ID** di Supervisor Data)
             - `Debtor_Name` (wajib)
             - `NIK_KTP`, `EMPLOYMENT_UPDATE`, `EMPLOYER`, dll.
             
             **Kolom wajib minimal:** Agreement_No, Debtor_Name
+            
+            ℹ️ **Note:** `Agreement_No` = `Case_ID` (pastikan isi sesuai dengan Case_ID di Supervisor Data)
             """)
             
             # Generate template button
@@ -9910,12 +9916,14 @@ def page_supervisor():
             
             st.markdown("""
             **Template kolom yang diperlukan:**
-            - `Agreement_No` (wajib)
+            - `Agreement_No` (wajib, **sama dengan Case_ID**)
             - `agent` (nama agent)
             - `agent_status` (status handling: PTP, Broken Promise, dll)
             - `agent_ptp_amount`, `agent_ptp_date`, `agent_notes`
             
             **Kolom wajib minimal:** Agreement_No, agent
+            
+            ℹ️ **Note:** `Agreement_No` = `Case_ID` (gunakan Case_ID yang sama dari Supervisor Data)
             """)
             
             # Generate template button
@@ -10020,13 +10028,15 @@ def page_supervisor():
             
             st.markdown("""
             **Template kolom yang diperlukan:**
-            - `Agreement_No` (wajib)
+            - `Agreement_No` (wajib, **sama dengan Case_ID**)
             - `paid_amount` (jumlah pembayaran, wajib)
             - `paid_date` (tanggal bayar, wajib)
             - `status` (misal: Confirmed, Pending)
             - `source_file`, `uploaded_by`
             
             **Kolom wajib minimal:** Agreement_No, paid_amount, paid_date
+            
+            ℹ️ **Note:** `Agreement_No` = `Case_ID` (gunakan Case_ID yang sama dari Supervisor Data)
             """)
             
             # Generate template button
