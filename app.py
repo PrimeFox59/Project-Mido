@@ -703,11 +703,9 @@ def init_db():
         c.execute("CREATE INDEX IF NOT EXISTS idx_frozen_active ON frozen_entities(active)")
     except Exception:
         pass
-    # ensure assign_tracer has optional masked company name field
+    # ensure assign_tracer has decoded company name field for auto-decode feature
     try:
         cols = [r['name'] for r in c.execute("PRAGMA table_info(assign_tracer)").fetchall()]
-        if 'Masked_Company_Name' not in cols:
-            c.execute("ALTER TABLE assign_tracer ADD COLUMN Masked_Company_Name TEXT")
         if 'Decoded_Company_Name' not in cols:
             c.execute("ALTER TABLE assign_tracer ADD COLUMN Decoded_Company_Name TEXT")
     except Exception:
@@ -9652,7 +9650,7 @@ def page_tracer():
             SELECT at.id, at.TRC_Code, at.Agreement_No, at.Debtor_Name, at.NIK_KTP, 
                    at.EMPLOYMENT_UPDATE, at.EMPLOYER, at.Decoded_Company_Name, at.Debtor_Legal_Name, 
                    at.Employee_Name, at.Employee_ID_Number, at.Debtor_Relation_to_Employee, 
-                   at.Masked_Company_Name, at.Assigned_To, at.created_at,
+                   at.Assigned_To, at.created_at,
                    sd.Remarks_Suggested_NIK_Prospect
             FROM assign_tracer at
             LEFT JOIN supervisor_data sd ON at.Agreement_No = sd.Case_ID
@@ -9666,7 +9664,7 @@ def page_tracer():
             SELECT at.id, at.TRC_Code, at.Agreement_No, at.Debtor_Name, at.NIK_KTP, 
                    at.EMPLOYMENT_UPDATE, at.EMPLOYER, at.Decoded_Company_Name, at.Debtor_Legal_Name, 
                    at.Employee_Name, at.Employee_ID_Number, at.Debtor_Relation_to_Employee, 
-                   at.Masked_Company_Name, at.Assigned_To, at.created_at,
+                   at.Assigned_To, at.created_at,
                    sd.Remarks_Suggested_NIK_Prospect
             FROM assign_tracer at
             LEFT JOIN supervisor_data sd ON at.Agreement_No = sd.Case_ID
@@ -9747,7 +9745,7 @@ def page_tracer():
         'Suggested_NIK': st.column_config.TextColumn('Suggested NIK (by Agent)', help='NIK yang disarankan oleh Agent'),
         'EMPLOYMENT_UPDATE': st.column_config.TextColumn('EMPLOYMENT UPDATE'),
         'EMPLOYER': st.column_config.TextColumn('EMPLOYER (Masked)'),
-        'Decoded_Company': st.column_config.TextColumn('🔓 Decoded Company', help='Auto-decoded from library'),
+        'Decoded_Company': st.column_config.TextColumn('EMPLOYER (Decoded)', help='Auto-decoded from library'),
         'Debtor_Legal_Name': st.column_config.TextColumn('Debtor Legal Name'),
         'Employee_Name': st.column_config.TextColumn('Employee Name'),
         'Employee_ID_Number': st.column_config.TextColumn('Employee ID Number'),
@@ -9806,33 +9804,24 @@ def page_tracer():
                                         help="Masukkan nama company yang ter-mask (e.g., VI****** CA** IN******* PT)")
                 
                 # Auto-decode preview
+                decoded_value = ""
                 if employer and employer.strip():
                     decoded_preview = decode_company_name(employer.strip())
+                    decoded_value = decoded_preview
                     if decoded_preview != employer.strip():
-                        st.success(f"🔓 Decoded: **{decoded_preview}**")
+                        st.success(f"🔓 Auto-Decoded: **{decoded_preview}**")
                     else:
-                        st.caption("ℹ️ Belum ada di library. Silakan tambahkan di menu Supervisor > Company Library")
+                        st.info("ℹ️ Belum ada di library. Decoded akan sama dengan Masked.")
+                
+                # Show decoded field (read-only display)
+                current_decoded = sel_row.get('Decoded_Company_Name','') or decoded_value
+                st.text_input("EMPLOYER (Decoded)", value=current_decoded, key="tr_employer_decoded", disabled=True,
+                            help="Otomatis terisi dari library saat save")
                 
                 debtor_legal = st.text_input("Debtor Legal Name", value=sel_row.get('Debtor_Legal_Name',''), key="tr_debtor_legal")
                 employee_name = st.text_input("Employee Name", value=sel_row.get('Employee_Name',''), key="tr_employee_name")
                 employee_id = st.text_input("Employee ID Number", value=sel_row.get('Employee_ID_Number',''), key="tr_employee_id")
                 relation = st.text_input("Debtor Relation to Employee", value=sel_row.get('Debtor_Relation_to_Employee',''), key="tr_relation")
-
-            st.markdown("---")
-            st.subheader("Masked Company")
-            dict_rows = fetchall("SELECT masked_name, canonical_name FROM masked_companies ORDER BY masked_name ASC")
-            options = [d['masked_name'] for d in dict_rows]
-            current_masked = sel_row.get('Masked_Company_Name') or ""
-            masked_sel = st.selectbox("Pilih Masked Company (opsional)", ["(ketik manual)"] + options, index=0, key="tr_mask_sel")
-            if masked_sel == "(ketik manual)":
-                masked_manual = st.text_input("Masked Company Name", value=current_masked, key="tr_mask_manual")
-                masked_value = masked_manual.strip()
-            else:
-                masked_value = masked_sel
-            if masked_value:
-                canon = next((d['canonical_name'] for d in dict_rows if d['masked_name'] == masked_value), None)
-                if canon:
-                    st.caption(f"Canonical: {canon}")
 
             submitted = st.form_submit_button("Simpan Perubahan")
             if submitted:
@@ -9848,7 +9837,7 @@ def page_tracer():
                         decoded_company = decode_company_name(employer.strip())
 
                     execute(
-                        "UPDATE assign_tracer SET NIK_KTP=?, EMPLOYMENT_UPDATE=?, EMPLOYER=?, Debtor_Legal_Name=?, Employee_Name=?, Employee_ID_Number=?, Debtor_Relation_to_Employee=?, Masked_Company_Name=?, Decoded_Company_Name=? WHERE id=? AND IFNULL(Assigned_To,'')=?",
+                        "UPDATE assign_tracer SET NIK_KTP=?, EMPLOYMENT_UPDATE=?, EMPLOYER=?, Debtor_Legal_Name=?, Employee_Name=?, Employee_ID_Number=?, Debtor_Relation_to_Employee=?, Decoded_Company_Name=? WHERE id=? AND IFNULL(Assigned_To,'')=?",
                         (
                             nik_new,
                             (emp_update.strip() if emp_update is not None else None),
@@ -9857,7 +9846,6 @@ def page_tracer():
                             (employee_name.strip() if employee_name is not None else None),
                             (employee_id.strip() if employee_id is not None else None),
                             (relation.strip() if relation is not None else None),
-                            (masked_value if masked_value else None),
                             decoded_company,
                             sel_id, tracer_name
                         )
