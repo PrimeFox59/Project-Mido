@@ -3914,13 +3914,105 @@ def main():
 # -------------------------
 def page_audit_log():
     require_roles(("Superuser", "Supervisor"))
-    st.title("📋 Audit Log")
-    st.caption("Semua aktivitas aplikasi direkam di sini. Waktu: GMT+07:00 (WIB)")
+    
+    # Import dependencies at the top
+    import pandas as pd
+    from datetime import datetime, timedelta
     
     # ========================================================================
-    # FILTERS
+    # HEADER WITH GLASSMORPHISM STYLE
     # ========================================================================
-    with st.expander("🔍 Filter & Search", expanded=True):
+    st.markdown("""
+        <div style="background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(139, 92, 246, 0.1) 100%); 
+                    backdrop-filter: blur(10px); 
+                    border: 1px solid rgba(99, 102, 241, 0.2); 
+                    border-radius: 16px; 
+                    padding: 24px; 
+                    margin-bottom: 24px;">
+            <h1 style="margin: 0; color: #1F2937; font-size: 32px; font-weight: 700;">
+                📋 Audit Log System
+            </h1>
+            <p style="margin: 8px 0 0 0; color: #6B7280; font-size: 14px;">
+                Semua aktivitas aplikasi direkam di sini. Waktu: GMT+07:00 (WIB)
+            </p>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    # ========================================================================
+    # STATISTICS CARDS
+    # ========================================================================
+    stats_col1, stats_col2, stats_col3, stats_col4 = st.columns(4)
+    
+    # Get statistics
+    total_logs = fetchone("SELECT COUNT(*) as count FROM audit_logs")['count']
+    total_users = fetchone("SELECT COUNT(DISTINCT user_id) as count FROM audit_logs WHERE user_id IS NOT NULL")['count']
+    today_logs = fetchone("""
+        SELECT COUNT(*) as count FROM audit_logs 
+        WHERE DATE(timestamp) = DATE('now', '+7 hours')
+    """)['count']
+    login_count = fetchone("""
+        SELECT COUNT(*) as count FROM audit_logs 
+        WHERE action = 'LOGIN' AND DATE(timestamp) = DATE('now', '+7 hours')
+    """)['count']
+    
+    with stats_col1:
+        st.markdown("""
+            <div style="background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(37, 99, 235, 0.1) 100%); 
+                        backdrop-filter: blur(10px); 
+                        border: 1px solid rgba(59, 130, 246, 0.2); 
+                        border-radius: 12px; 
+                        padding: 16px; 
+                        text-align: center;">
+                <div style="font-size: 14px; color: #6B7280; margin-bottom: 8px;">Total Logs</div>
+                <div style="font-size: 28px; font-weight: 700; color: #3B82F6;">""" + f"{total_logs:,}" + """</div>
+            </div>
+        """, unsafe_allow_html=True)
+    
+    with stats_col2:
+        st.markdown("""
+            <div style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(5, 150, 105, 0.1) 100%); 
+                        backdrop-filter: blur(10px); 
+                        border: 1px solid rgba(16, 185, 129, 0.2); 
+                        border-radius: 12px; 
+                        padding: 16px; 
+                        text-align: center;">
+                <div style="font-size: 14px; color: #6B7280; margin-bottom: 8px;">Active Users</div>
+                <div style="font-size: 28px; font-weight: 700; color: #10B981;">""" + f"{total_users}" + """</div>
+            </div>
+        """, unsafe_allow_html=True)
+    
+    with stats_col3:
+        st.markdown("""
+            <div style="background: linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, rgba(217, 119, 6, 0.1) 100%); 
+                        backdrop-filter: blur(10px); 
+                        border: 1px solid rgba(245, 158, 11, 0.2); 
+                        border-radius: 12px; 
+                        padding: 16px; 
+                        text-align: center;">
+                <div style="font-size: 14px; color: #6B7280; margin-bottom: 8px;">Today's Logs</div>
+                <div style="font-size: 28px; font-weight: 700; color: #F59E0B;">""" + f"{today_logs}" + """</div>
+            </div>
+        """, unsafe_allow_html=True)
+    
+    with stats_col4:
+        st.markdown("""
+            <div style="background: linear-gradient(135deg, rgba(139, 92, 246, 0.1) 0%, rgba(124, 58, 237, 0.1) 100%); 
+                        backdrop-filter: blur(10px); 
+                        border: 1px solid rgba(139, 92, 246, 0.2); 
+                        border-radius: 12px; 
+                        padding: 16px; 
+                        text-align: center;">
+                <div style="font-size: 14px; color: #6B7280; margin-bottom: 8px;">Today's Logins</div>
+                <div style="font-size: 28px; font-weight: 700; color: #8B5CF6;">""" + f"{login_count}" + """</div>
+            </div>
+        """, unsafe_allow_html=True)
+    
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    # ========================================================================
+    # FILTERS WITH ENHANCED UI
+    # ========================================================================
+    with st.expander("🔍 Filter & Search Options", expanded=True):
         filter_col1, filter_col2, filter_col3 = st.columns([2, 2, 1])
         
         with filter_col1:
@@ -3933,7 +4025,12 @@ def page_audit_log():
                 ORDER BY user_name
             """)
             user_options = ["All Users"] + [u["user_name"] for u in all_users if u["user_name"]]
-            selected_user = st.selectbox("👤 Filter by User", options=user_options, key="audit_user_filter")
+            selected_user = st.selectbox(
+                "👤 Filter by User", 
+                options=user_options, 
+                key="audit_user_filter",
+                help="Pilih user untuk melihat aktivitas spesifik"
+            )
         
         with filter_col2:
             # Date range filter
@@ -3942,25 +4039,39 @@ def page_audit_log():
                 value=(today_wib() - timedelta(days=7), today_wib()),
                 max_value=today_wib(),
                 key="audit_date_range",
-                help="Pilih rentang tanggal untuk filter log"
+                help="Pilih rentang tanggal untuk filter log (default: 7 hari terakhir)"
             )
         
         with filter_col3:
             st.markdown("<br>", unsafe_allow_html=True)
-            clear_filter = st.button("🔄 Reset Filter", use_container_width=True)
+            clear_filter = st.button("🔄 Reset Filter", use_container_width=True, type="secondary")
             if clear_filter:
                 st.rerun()
+        
+        # Action filter
+        st.markdown("---")
+        action_col1, action_col2 = st.columns([3, 1])
+        with action_col1:
+            all_actions = fetchall("SELECT DISTINCT action FROM audit_logs WHERE action IS NOT NULL ORDER BY action")
+            action_options = ["All Actions"] + [a["action"] for a in all_actions]
+            selected_action = st.selectbox(
+                "⚡ Filter by Action Type",
+                options=action_options,
+                key="audit_action_filter",
+                help="Filter berdasarkan jenis aktivitas (LOGIN, LOGOUT, UPDATE, dll)"
+            )
+        
+        with action_col2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            limit = st.number_input("📊 Limit Records", min_value=10, max_value=1000, value=100, step=10)
     
     # ========================================================================
     # BUILD QUERY WITH FILTERS
     # ========================================================================
-    import pandas as pd
-    from datetime import datetime, timedelta
-    
     # Base query
     query = """
         SELECT audit_logs.timestamp, COALESCE(users.full_name, users.name, users.login_id) AS user, 
-               audit_logs.action, audit_logs.details
+               audit_logs.action, audit_logs.details, audit_logs.user_id
         FROM audit_logs
         LEFT JOIN users ON audit_logs.user_id = users.id
         WHERE 1=1
@@ -3971,6 +4082,11 @@ def page_audit_log():
     if selected_user != "All Users":
         query += " AND COALESCE(users.full_name, users.name, users.login_id) = ?"
         params.append(selected_user)
+    
+    # Apply action filter
+    if selected_action != "All Actions":
+        query += " AND audit_logs.action = ?"
+        params.append(selected_action)
     
     # Apply date range filter
     if date_range and len(date_range) == 2:
@@ -3989,7 +4105,7 @@ def page_audit_log():
         params.append(start_datetime_utc.isoformat())
         params.append(end_datetime_utc.isoformat())
     
-    query += " ORDER BY audit_logs.id DESC LIMIT 500"
+    query += f" ORDER BY audit_logs.id DESC LIMIT {limit}"
     
     # Execute query
     rows = fetchall(query, tuple(params))
@@ -4007,29 +4123,69 @@ def page_audit_log():
         except Exception:
             return ts
     
+    # Colorize action badges
+    def colorize_action(action):
+        colors = {
+            "LOGIN": "🟢",
+            "LOGOUT": "🔴",
+            "CREATE": "🟦",
+            "UPDATE": "🟨",
+            "DELETE": "🟥",
+            "UPLOAD": "🟪",
+            "DOWNLOAD": "🟧",
+            "BACKUP": "🔵",
+            "RESTORE": "🟣",
+        }
+        return f"{colors.get(action, '⚪')} {action}"
+    
     df = pd.DataFrame([
         {
-            "User": r["user"],
-            "Date": to_gmt7(r["timestamp"]),
-            "Action": r["action"],
-            "Detail": r["details"]
+            "Timestamp": to_gmt7(r["timestamp"]),
+            "User": r["user"] or "Unknown",
+            "Action": colorize_action(r["action"] or "N/A"),
+            "Details": r["details"] or "-"
         } for r in rows
     ])
     
-    # Display results count
-    st.markdown(f"**📊 Total Records:** {len(df)} entries")
+    # ========================================================================
+    # DISPLAY RESULTS WITH ENHANCED UI
+    # ========================================================================
+    st.markdown("---")
     
-    # Download button for filtered data
-    csv = df.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        label="📥 Download CSV",
-        data=csv,
-        file_name=f"audit_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-        mime="text/csv",
-        use_container_width=False
+    result_col1, result_col2 = st.columns([2, 1])
+    with result_col1:
+        st.markdown(f"### 📊 Filtered Results: **{len(df)}** entries")
+    with result_col2:
+        # Download button for filtered data
+        csv = df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Download CSV",
+            data=csv,
+            file_name=f"audit_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv",
+            use_container_width=True,
+            type="primary"
+        )
+    
+    # Display dataframe with custom styling
+    st.dataframe(
+        df, 
+        use_container_width=True, 
+        hide_index=True,
+        height=500,
+        column_config={
+            "Timestamp": st.column_config.TextColumn("🕒 Timestamp", width="medium"),
+            "User": st.column_config.TextColumn("👤 User", width="medium"),
+            "Action": st.column_config.TextColumn("⚡ Action", width="small"),
+            "Details": st.column_config.TextColumn("📝 Details", width="large"),
+        }
     )
     
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    # ========================================================================
+    # FOOTER INFO
+    # ========================================================================
+    st.markdown("---")
+    st.caption(f"💡 **Tips:** Gunakan filter untuk mempersempit pencarian. Data diurutkan dari terbaru ke terlama. Maksimal {limit} records ditampilkan.")
     
     # Stay on Audit Log page without redirecting
     return
