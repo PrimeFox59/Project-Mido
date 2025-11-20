@@ -1194,7 +1194,7 @@ def logout_user():
     if "user" in st.session_state:
         del st.session_state["user"]
     # Reset auto-restore/backup flags on logout
-    for k in ["auto_restore_checked", "auto_backup_checked", "auto_restore_attempted"]:
+    for k in ["auto_restore_checked", "auto_backup_checked", "auto_restore_attempted", "logout_reminder_shown"]:
         if k in st.session_state:
             del st.session_state[k]
     # Hapus pesan login agar tidak muncul setelah logout
@@ -3855,6 +3855,12 @@ def main():
         page_auth()
         return
 
+    # ========================================================================
+    # POST-LOGIN REMINDER: Show logout reminder toast (5 seconds)
+    # ========================================================================
+    if 'logout_reminder_shown' not in st.session_state:
+        st.session_state.logout_reminder_shown = True
+        st.toast("⚠️ Setelah menggunakan apps, jangan lupa logout untuk menghindari data tidak tersimpan!", icon="⚠️")
 
     if st.session_state.page == "Supervisor":
         page_supervisor()
