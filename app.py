@@ -10297,7 +10297,28 @@ def page_tracer():
                 st.text_input("Debtor Name", value=sel_row.get('Debtor_Name',''), disabled=True, key="tr_v_debtor")
                 nik_val = st.text_input("NIK KTP", value=sel_row.get('NIK_KTP','') or "", key="tr_v_nik")
             with col2:
-                emp_update = st.text_input("EMPLOYMENT UPDATE", value=sel_row.get('EMPLOYMENT_UPDATE',''), key="tr_emp_update")
+                # Employment Update dengan dropdown options
+                employment_options = ["", "NIHIL", "PNS", "DEBITUR", "SUAMI", "ISTRI", "AYAH", "IBU", "KERABAT"]
+                current_emp_update = sel_row.get('EMPLOYMENT_UPDATE','') or ""
+                
+                # Jika value saat ini tidak ada di list, tambahkan ke options
+                if current_emp_update and current_emp_update not in employment_options:
+                    employment_options.insert(1, current_emp_update)
+                
+                # Find index of current value
+                try:
+                    current_index = employment_options.index(current_emp_update)
+                except ValueError:
+                    current_index = 0
+                
+                emp_update = st.selectbox(
+                    "EMPLOYMENT UPDATE", 
+                    options=employment_options,
+                    index=current_index,
+                    key="tr_emp_update",
+                    help="Pilih status employment update"
+                )
+                
                 employer = st.text_input("EMPLOYER (Masked)", value=sel_row.get('EMPLOYER',''), key="tr_employer",
                                         help="Masukkan nama company yang ter-mask (e.g., VI****** CA** IN******* PT)")
                 
