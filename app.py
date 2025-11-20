@@ -3916,18 +3916,88 @@ def page_audit_log():
     require_roles(("Superuser", "Supervisor"))
     st.title("📋 Audit Log")
     st.caption("Semua aktivitas aplikasi direkam di sini. Waktu: GMT+07:00 (WIB)")
-    # Query audit logs with user info
-    rows = fetchall("""
-        SELECT audit_logs.timestamp, COALESCE(users.full_name, users.name, users.login_id) AS user, audit_logs.action, audit_logs.details
-        FROM audit_logs
-        LEFT JOIN users ON audit_logs.user_id = users.id
-        ORDER BY audit_logs.id DESC LIMIT 200
-    """)
-    if not rows:
-        st.info("Belum ada aktivitas yang tercatat.")
-        return
+    
+    # ========================================================================
+    # FILTERS
+    # ========================================================================
+    with st.expander("🔍 Filter & Search", expanded=True):
+        filter_col1, filter_col2, filter_col3 = st.columns([2, 2, 1])
+        
+        with filter_col1:
+            # Get all unique users
+            all_users = fetchall("""
+                SELECT DISTINCT COALESCE(users.full_name, users.name, users.login_id) AS user_name
+                FROM audit_logs
+                LEFT JOIN users ON audit_logs.user_id = users.id
+                WHERE users.id IS NOT NULL
+                ORDER BY user_name
+            """)
+            user_options = ["All Users"] + [u["user_name"] for u in all_users if u["user_name"]]
+            selected_user = st.selectbox("👤 Filter by User", options=user_options, key="audit_user_filter")
+        
+        with filter_col2:
+            # Date range filter
+            date_range = st.date_input(
+                "📅 Filter by Date Range",
+                value=(today_wib() - timedelta(days=7), today_wib()),
+                max_value=today_wib(),
+                key="audit_date_range",
+                help="Pilih rentang tanggal untuk filter log"
+            )
+        
+        with filter_col3:
+            st.markdown("<br>", unsafe_allow_html=True)
+            clear_filter = st.button("🔄 Reset Filter", use_container_width=True)
+            if clear_filter:
+                st.rerun()
+    
+    # ========================================================================
+    # BUILD QUERY WITH FILTERS
+    # ========================================================================
     import pandas as pd
     from datetime import datetime, timedelta
+    
+    # Base query
+    query = """
+        SELECT audit_logs.timestamp, COALESCE(users.full_name, users.name, users.login_id) AS user, 
+               audit_logs.action, audit_logs.details
+        FROM audit_logs
+        LEFT JOIN users ON audit_logs.user_id = users.id
+        WHERE 1=1
+    """
+    params = []
+    
+    # Apply user filter
+    if selected_user != "All Users":
+        query += " AND COALESCE(users.full_name, users.name, users.login_id) = ?"
+        params.append(selected_user)
+    
+    # Apply date range filter
+    if date_range and len(date_range) == 2:
+        start_date = date_range[0]
+        end_date = date_range[1]
+        
+        # Convert to datetime with time boundaries (start of day to end of day)
+        start_datetime = datetime.combine(start_date, datetime.min.time())
+        end_datetime = datetime.combine(end_date, datetime.max.time())
+        
+        # Adjust for GMT+7 offset (subtract 7 hours to match UTC in database)
+        start_datetime_utc = start_datetime - timedelta(hours=7)
+        end_datetime_utc = end_datetime - timedelta(hours=7)
+        
+        query += " AND audit_logs.timestamp BETWEEN ? AND ?"
+        params.append(start_datetime_utc.isoformat())
+        params.append(end_datetime_utc.isoformat())
+    
+    query += " ORDER BY audit_logs.id DESC LIMIT 500"
+    
+    # Execute query
+    rows = fetchall(query, tuple(params))
+    
+    if not rows:
+        st.info("📭 Tidak ada aktivitas yang sesuai dengan filter.")
+        return
+    
     # Convert UTC to GMT+7
     def to_gmt7(ts):
         try:
@@ -3936,6 +4006,7 @@ def page_audit_log():
             return dt7.strftime("%Y-%m-%d %H:%M:%S")
         except Exception:
             return ts
+    
     df = pd.DataFrame([
         {
             "User": r["user"],
@@ -3944,7 +4015,22 @@ def page_audit_log():
             "Detail": r["details"]
         } for r in rows
     ])
+    
+    # Display results count
+    st.markdown(f"**📊 Total Records:** {len(df)} entries")
+    
+    # Download button for filtered data
+    csv = df.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="📥 Download CSV",
+        data=csv,
+        file_name=f"audit_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+        mime="text/csv",
+        use_container_width=False
+    )
+    
     st.dataframe(df, use_container_width=True, hide_index=True)
+    
     # Stay on Audit Log page without redirecting
     return
 
