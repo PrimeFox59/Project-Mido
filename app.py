@@ -2636,6 +2636,19 @@ def page_gdrive():
         service, _sa_email = build_drive_service()
     except Exception:
         return
+    
+    # ========================================================================
+    # AUTO-CHECK SCHEDULED BACKUP (Silent Background)
+    # ========================================================================
+    try:
+        if get_setting('scheduled_backup_enabled', 'false') == 'true':
+            ok, msg = check_scheduled_backup(service, FOLDER_ID_DEFAULT)
+            if ok:
+                st.toast(f"📅 {msg}", icon="✅")
+            # Jika tidak ok, tidak perlu notif (silent - sudah backup hari ini atau di luar slot)
+    except Exception:
+        pass  # Silent fail untuk background check
+    
     # Hardcoded folder ID per permintaan user
     folder_id = FOLDER_ID_DEFAULT
     meta, meta_err = get_folder_metadata(service, folder_id)
@@ -2773,59 +2786,116 @@ def page_gdrive():
                 set_setting('auto_restore_enabled', 'true' if ar_toggle else 'false')
                 st.success('Pengaturan auto-restore disimpan.')
             st.caption('Auto-restore akan mencoba mendeteksi DB fresh (reset) dan mengganti otomatis dengan backup Drive terbaru sekali per sesi admin pertama yang login.')
-            # --- Dynamic Slot Editor ---
-            with st.expander("🕒 Edit Slot Jadwal (Advanced)", expanded=False):
+            
+            st.divider()
+            
+            # --- Dynamic Slot Editor (RAPIKAN UI) ---
+            with st.expander("🕒 Edit Slot Jadwal Backup (Advanced)", expanded=False):
                 st.markdown("""
-                Atur slot jadwal backup tanpa perlu menulis JSON. Setiap slot menentukan rentang jam lokal (0-23).\
-                Jika Start > End maka dianggap melewati tengah malam (wrap). Contoh: 23 -> 6.\
-                Tidak boleh ada dua slot yang saling tumpang tindih pada jam yang sama.\
+                ### 📋 Pengaturan Slot Jadwal Backup
+                
+                **Cara Kerja:**
+                - Setiap slot menentukan **rentang jam** untuk backup otomatis (format 24 jam: 0-23)
+                - Backup akan dijalankan **sekali per slot per hari** saat ada aktivitas di halaman G Drive
+                - Jika **Start > End** = melewati tengah malam (contoh: 23→6 = malam hingga pagi)
+                
+                **Aturan:**
+                - ✅ Nama slot harus **unik**
+                - ✅ Start dan End **tidak boleh sama** (durasi minimal 1 jam)
+                - ✅ Tidak boleh ada **overlap** antar slot
+                
+                ---
                 """)
+                
                 hours = list(range(24))
                 # Ambil slot saat ini dari setting / default
                 if 'slot_editor_state' not in st.session_state:
                     st.session_state.slot_editor_state = get_schedule_slots()
                 slots_state = st.session_state.slot_editor_state
 
-                # Tampilkan form per slot
-                to_remove_indexes = []
-                for idx, slot_obj in enumerate(slots_state):
-                    with st.container():
-                        c1,c2,c3,c4 = st.columns([1,1,2,0.6])
-                        with c1:
-                            slots_state[idx]['start'] = c1.selectbox(
-                                'Start', hours, index=hours.index(int(slot_obj['start'])), key=f'slot_start_{idx}')
-                        with c2:
-                            slots_state[idx]['end'] = c2.selectbox(
-                                'End', hours, index=hours.index(int(slot_obj['end'])), key=f'slot_end_{idx}')
-                        with c3:
-                            slots_state[idx]['name'] = c3.text_input('Nama Slot', value=slot_obj['name'], key=f'slot_name_{idx}')
-                        with c4:
-                            if st.button('🗑️', key=f'del_slot_{idx}'):
-                                to_remove_indexes.append(idx)
-                    st.markdown("")
-                # Hapus slot yang diminta
-                if to_remove_indexes:
-                    for ridx in sorted(to_remove_indexes, reverse=True):
-                        if 0 <= ridx < len(slots_state):
-                            slots_state.pop(ridx)
-                    st.rerun()
-
-                st.markdown("**Tambah Slot Baru**")
-                col_new1, col_new2, col_new3, col_new4 = st.columns([1,1,2,0.8])
-                new_start = col_new1.selectbox('Start', hours, key='new_slot_start')
-                new_end = col_new2.selectbox('End', hours, index=hours.index((new_start+1) % 24), key='new_slot_end')
-                new_name = col_new3.text_input('Nama Slot', key='new_slot_name', placeholder='misal: slot_dawn')
-                if col_new4.button('➕ Tambah'):
+                # Tampilkan current slot dengan styling lebih baik
+                if slots_state:
+                    st.markdown("#### 📌 Slot Aktif Saat Ini")
+                    to_remove_indexes = []
+                    
+                    for idx, slot_obj in enumerate(slots_state):
+                        # Hitung durasi
+                        st_h = int(slot_obj['start'])
+                        en_h = int(slot_obj['end'])
+                        dur = (en_h - st_h) if st_h < en_h else ((24 - st_h) + en_h)
+                        
+                        with st.container():
+                            st.markdown(f"""
+                            <div style="background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(139, 92, 246, 0.1) 100%);
+                                        padding: 15px; border-radius: 10px; margin-bottom: 10px; border: 1px solid rgba(99, 102, 241, 0.2);">
+                                <strong>Slot {idx + 1}:</strong> <code>{slot_obj['name']}</code> 
+                                <span style="color: #6366F1;">({st_h:02d}:00 - {en_h:02d}:00, durasi: {dur}h)</span>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            
+                            c1, c2, c3, c4 = st.columns([1.5, 1.5, 3, 1])
+                            with c1:
+                                slots_state[idx]['start'] = st.selectbox(
+                                    'Jam Mulai', hours, 
+                                    index=hours.index(int(slot_obj['start'])), 
+                                    key=f'slot_start_{idx}',
+                                    help="Jam mulai backup (0-23)"
+                                )
+                            with c2:
+                                slots_state[idx]['end'] = st.selectbox(
+                                    'Jam Selesai', hours, 
+                                    index=hours.index(int(slot_obj['end'])), 
+                                    key=f'slot_end_{idx}',
+                                    help="Jam selesai backup (0-23)"
+                                )
+                            with c3:
+                                slots_state[idx]['name'] = st.text_input(
+                                    'Nama Slot', 
+                                    value=slot_obj['name'], 
+                                    key=f'slot_name_{idx}',
+                                    placeholder="Contoh: slot_pagi, slot_siang",
+                                    help="Nama unik untuk slot ini"
+                                )
+                            with c4:
+                                if st.button('🗑️ Hapus', key=f'del_slot_{idx}', type="secondary"):
+                                    to_remove_indexes.append(idx)
+                    
+                    # Hapus slot yang diminta
+                    if to_remove_indexes:
+                        for ridx in sorted(to_remove_indexes, reverse=True):
+                            if 0 <= ridx < len(slots_state):
+                                slots_state.pop(ridx)
+                        st.success(f"✅ {len(to_remove_indexes)} slot berhasil dihapus!")
+                        st.rerun()
+                
+                st.divider()
+                
+                # Form tambah slot baru dengan styling lebih baik
+                st.markdown("#### ➕ Tambah Slot Baru")
+                
+                col_new1, col_new2, col_new3, col_new4 = st.columns([1.5, 1.5, 3, 1.2])
+                new_start = col_new1.selectbox('Jam Mulai', hours, key='new_slot_start', help="Jam mulai (0-23)")
+                new_end = col_new2.selectbox('Jam Selesai', hours, index=hours.index((new_start+1) % 24), key='new_slot_end', help="Jam selesai (0-23)")
+                new_name = col_new3.text_input('Nama Slot', key='new_slot_name', placeholder='Contoh: slot_dawn, slot_midnight', help="Nama unik untuk slot")
+                
+                # Preview durasi slot baru
+                new_dur = (new_end - new_start) if new_start < new_end else ((24 - new_start) + new_end)
+                if new_start != new_end:
+                    st.caption(f"⏱️ Durasi: {new_dur} jam ({new_start:02d}:00 - {new_end:02d}:00)")
+                
+                if col_new4.button('➕ Tambah Slot', key='add_slot_btn', type="primary"):
                     if new_name.strip() == '':
-                        st.error('Nama slot tidak boleh kosong.')
+                        st.error('❌ Nama slot tidak boleh kosong.')
                     elif any(s['name'] == new_name.strip() for s in slots_state):
-                        st.error('Nama slot harus unik.')
+                        st.error('❌ Nama slot harus unik. Sudah ada slot dengan nama tersebut.')
                     elif new_start == new_end:
-                        st.error('Start dan End tidak boleh sama (durasi 0).')
+                        st.error('❌ Start dan End tidak boleh sama (durasi minimal 1 jam).')
                     else:
                         slots_state.append({'start': int(new_start), 'end': int(new_end), 'name': new_name.strip()})
-                        st.success('Slot ditambahkan.')
+                        st.success(f'✅ Slot "{new_name.strip()}" berhasil ditambahkan!')
                         st.rerun()
+
+                st.divider()
 
                 # Validasi overlap & struktur sebelum simpan
                 def _hours_covered(slot):
@@ -2843,35 +2913,42 @@ def page_gdrive():
                     conflicts = {h:n for h,n in hour_map.items() if len(n) > 1}
                     return conflicts
 
-                save_col, reset_col, export_col = st.columns([1,1,1])
+                # Action buttons dengan spacing lebih baik
+                st.markdown("#### 💾 Aksi")
+                save_col, reset_col, preview_col = st.columns([1, 1, 1])
+                
                 with save_col:
-                    if st.button('💾 Simpan Slot Jadwal', key='save_slots_btn'):
+                    if st.button('💾 Simpan Slot Jadwal', key='save_slots_btn', type="primary", use_container_width=True):
                         # Basic structure validation
                         if not _validate_slot_struct(slots_state):
-                            st.error('Struktur slot tidak valid (nama unik, rentang jam 0-23, start != end).')
+                            st.error('❌ Struktur slot tidak valid (nama unik, rentang jam 0-23, start != end).')
                         else:
                             conflicts = _check_overlaps(slots_state)
                             if conflicts:
                                 conflict_msgs = []
                                 for h, names in sorted(conflicts.items()):
-                                    conflict_msgs.append(f"Jam {h}: {' , '.join(sorted(names))}")
-                                st.error('Terdapat tumpang tindih slot:\n' + '\n'.join(conflict_msgs))
+                                    conflict_msgs.append(f"  • Jam {h}:00 → {', '.join(sorted(names))}")
+                                st.error('❌ **Terdapat tumpang tindih slot:**\n\n' + '\n'.join(conflict_msgs))
                             else:
                                 set_setting('scheduled_backup_slots_json', json.dumps(slots_state))
-                                st.success('Slot jadwal tersimpan ke konfigurasi.')
+                                st.success('✅ Slot jadwal berhasil tersimpan ke konfigurasi!')
+                                st.balloons()
+                
                 with reset_col:
-                    if st.button('♻️ Reset Default', key='reset_slots_btn'):
+                    if st.button('♻️ Reset ke Default', key='reset_slots_btn', use_container_width=True):
                         st.session_state.slot_editor_state = DEFAULT_SCHEDULE_SLOTS.copy()
                         set_setting('scheduled_backup_slots_json', json.dumps(DEFAULT_SCHEDULE_SLOTS))
-                        st.info('Slot dikembalikan ke default.')
+                        st.info('ℹ️ Slot dikembalikan ke konfigurasi default (4 slot standar).')
                         st.rerun()
-                with export_col:
-                    if st.button('📄 Lihat JSON', key='export_slots_btn'):
-                        st.code(json.dumps(slots_state, indent=2))
+                
+                with preview_col:
+                    if st.button('📄 Preview JSON', key='export_slots_btn', use_container_width=True):
+                        st.code(json.dumps(slots_state, indent=2), language='json')
 
-                # Preview ringkas
+                # Preview tabel dengan styling lebih baik
                 if slots_state:
-                    st.markdown("**Preview Slot Aktif**")
+                    st.divider()
+                    st.markdown("#### 📊 Preview Slot Aktif")
                     prev_df = pd.DataFrame(slots_state)
                     # Durasi jam (approx) hanya untuk info
                     def _dur(srow):
@@ -10713,14 +10790,7 @@ def page_guide():
     - Autentikasi password di-hash dengan SHA256 (`hash_password()`); akun baru harus disetujui (`approved` flag).
     """, unsafe_allow_html=True)
 
-    st.header("7) Modul Chat AI")
-    st.markdown("""
-    - Menu **Chat AI** terhubung ke Google Gemini (API key via `st.secrets` atau env var).
-    - AI dapat membaca lampiran konteks dari tabel aman (`ai_build_context_pack()`) dan menghasilkan jawaban lewat `ai_generate_response()`.
-    - Kolom sensitif (mis. password, service_account, email_token) dikecualikan dari lampiran.
-    """, unsafe_allow_html=True)
-
-    st.header("8) Aliran Data (Ringkas)")
+    st.header("7) Aliran Data (Ringkas)")
     st.markdown("""
     Supervisor Uploads Data
         ↓
