@@ -59,7 +59,30 @@ st.markdown("""
         background: rgba(255, 255, 255, 0.3) !important;
         backdrop-filter: blur(10px) !important;
         border-radius: 20px !important;
-        padding: 2rem !important;
+        padding: 1rem 2rem 2rem 2rem !important;
+        padding-top: 1rem !important;
+        margin-top: 0 !important;
+    }
+    
+    /* Remove top whitespace/header area */
+    header[data-testid="stHeader"] {
+        display: none !important;
+    }
+    
+    /* Compact toolbar */
+    .stApp > header {
+        height: 0 !important;
+        min-height: 0 !important;
+    }
+    
+    /* Remove top padding from main container */
+    section.main > div {
+        padding-top: 0 !important;
+    }
+    
+    /* Compact content area */
+    .main {
+        padding-top: 0 !important;
     }
     
     /* ============================================
