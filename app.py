@@ -6559,7 +6559,7 @@ def page_supervisor():
     conn = get_db()
     
     # Monitoring first so it's the default view
-    tabs = st.tabs(["Monitoring", "Payment Recap", "Input", "Trace Assigning", "Agent Assigning", "Trace Results", "Enriched & Lookup", "Freeze Manager", "Company Library"])
+    tabs = st.tabs(["Monitoring", "Payment Recap", "Input", "Trace Assigning", "Agent Assigning", "Trace Results", "Enriched & Lookup", "Freeze Manager", "Company Library", "Data Migration"])
 
     # --- Monitoring Tab ---
     with tabs[0]:
@@ -9627,6 +9627,503 @@ def page_supervisor():
                                 st.rerun()
                             except Exception as e:
                                 st.error(f"❌ Error deleting entry: {e}")
+    
+    # --- Data Migration Tab ---
+    with tabs[9]:
+        st.header("📦 Data Migration - Import Historical Data")
+        st.markdown("""
+        Gunakan tab ini untuk migrasi data dari Excel lama ke sistem baru.
+        
+        **Cara menggunakan:**
+        1. Download template Excel yang sesuai
+        2. Isi data historical Anda ke template (jangan ubah nama kolom!)
+        3. Upload file Excel
+        4. Preview data dan konfirmasi import
+        """)
+        
+        migration_tabs = st.tabs(["📋 Supervisor Data", "🔍 Tracer Data", "👤 Agent Results", "💰 Payment Data"])
+        
+        # --- Supervisor Data Migration ---
+        with migration_tabs[0]:
+            st.subheader("Import Supervisor Data (Master Case List)")
+            
+            st.markdown("""
+            **Template kolom yang diperlukan:**
+            - `Case_ID` (wajib, unique identifier untuk case)
+            - `Customer_name` (wajib)
+            - `Virtual_Account_Number` (wajib)
+            - `DPD`, `Principle_Outstanding`, `Phone_Number_1`, dll.
+            
+            **Kolom wajib minimal:** Case_ID, Customer_name, Virtual_Account_Number
+            """)
+            
+            # Generate template button
+            if st.button("📥 Download Template Excel - Supervisor Data", key="sup_template"):
+                template_cols = [
+                    "DT", "Lending_Entity", "Date", "Case_ID", "Task_ID", "Customer_name", 
+                    "email", "Gender", "Customer_Occupation", "DPD", "Principle_Outstanding",
+                    "Principal_Overdue_CURR", "Interest_Overdue_CURR", "Last_Late_Fee", "Return_Date",
+                    "Detail", "Loan_Type", "Third_Uid", "Product", "Home_Address", "Province", "City",
+                    "Street", "RoomNumber", "Postcode", "Assignment_Date", "Withdrawal_Date",
+                    "Phone_Number_1", "Phone_Number_2", 
+                    "Contact_Type_1", "Contact_Name_1", "Contact_Phone_1",
+                    "Contact_Type_2", "Contact_Name_2", "Contact_Phone_2",
+                    "Contact_Type_3", "Contact_Name_3", "Contact_Phone_3",
+                    "Contact_Type_4", "Contact_Name_4", "Contact_Phone_4",
+                    "Contact_Type_5", "Contact_Name_5", "Contact_Phone_5",
+                    "Contact_Type_6", "Contact_Name_6", "Contact_Phone_6",
+                    "Contact_Type_7", "Contact_Name_7", "Contact_Phone_7",
+                    "Contact_Type_8", "Contact_Name_8", "Contact_Phone_8",
+                    "Total_debt_in_third_party", "Repayment_on_third_Party", "Remaining_Loan_on_third_Party",
+                    "Virtual_Account_Number", "NIK_KTP"
+                ]
+                template_df = pd.DataFrame(columns=template_cols)
+                # Add sample row
+                template_df.loc[0] = [""] * len(template_cols)
+                
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    template_df.to_excel(writer, index=False, sheet_name='Supervisor_Data')
+                output.seek(0)
+                
+                st.download_button(
+                    label="💾 Download Template_Supervisor_Data.xlsx",
+                    data=output,
+                    file_name="Template_Supervisor_Data.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="sup_template_download"
+                )
+            
+            st.divider()
+            
+            # Upload file
+            uploaded_sup = st.file_uploader("Upload Excel Supervisor Data", type=["xlsx", "xls"], key="sup_upload_migration")
+            
+            if uploaded_sup:
+                try:
+                    df_sup = pd.read_excel(uploaded_sup)
+                    st.success(f"✅ File berhasil dibaca! Total baris: {len(df_sup)}")
+                    
+                    # Validate required columns
+                    required_cols = ["Case_ID", "Customer_name", "Virtual_Account_Number"]
+                    missing_cols = [col for col in required_cols if col not in df_sup.columns]
+                    
+                    if missing_cols:
+                        st.error(f"❌ Kolom wajib tidak ditemukan: {', '.join(missing_cols)}")
+                    else:
+                        # Preview data
+                        st.dataframe(df_sup.head(20), use_container_width=True)
+                        
+                        # Confirm import
+                        st.warning(f"⚠️ Anda akan mengimport {len(df_sup)} baris data ke tabel supervisor_data")
+                        
+                        col1, col2 = st.columns([1, 3])
+                        with col1:
+                            if st.button("✅ Konfirmasi Import", type="primary", key="sup_confirm_import"):
+                                try:
+                                    imported_count = 0
+                                    skipped_count = 0
+                                    
+                                    for idx, row in df_sup.iterrows():
+                                        # Check if Case_ID already exists
+                                        case_id = str(row.get('Case_ID', '')).strip()
+                                        if not case_id:
+                                            skipped_count += 1
+                                            continue
+                                        
+                                        existing = fetchone("SELECT id FROM supervisor_data WHERE Case_ID = ?", (case_id,))
+                                        if existing:
+                                            skipped_count += 1
+                                            continue
+                                        
+                                        # Build insert query dynamically based on available columns
+                                        cols_to_insert = []
+                                        vals_to_insert = []
+                                        
+                                        for col in df_sup.columns:
+                                            if col in ["DT", "Lending_Entity", "Date", "Case_ID", "Task_ID", "Customer_name", 
+                                                      "email", "Gender", "Customer_Occupation", "DPD", "Principle_Outstanding",
+                                                      "Principal_Overdue_CURR", "Interest_Overdue_CURR", "Last_Late_Fee", 
+                                                      "Return_Date", "Detail", "Loan_Type", "Third_Uid", "Product", 
+                                                      "Home_Address", "Province", "City", "Street", "RoomNumber", "Postcode",
+                                                      "Assignment_Date", "Withdrawal_Date", "Phone_Number_1", "Phone_Number_2",
+                                                      "Contact_Type_1", "Contact_Name_1", "Contact_Phone_1",
+                                                      "Contact_Type_2", "Contact_Name_2", "Contact_Phone_2",
+                                                      "Contact_Type_3", "Contact_Name_3", "Contact_Phone_3",
+                                                      "Contact_Type_4", "Contact_Name_4", "Contact_Phone_4",
+                                                      "Contact_Type_5", "Contact_Name_5", "Contact_Phone_5",
+                                                      "Contact_Type_6", "Contact_Name_6", "Contact_Phone_6",
+                                                      "Contact_Type_7", "Contact_Name_7", "Contact_Phone_7",
+                                                      "Contact_Type_8", "Contact_Name_8", "Contact_Phone_8",
+                                                      "Total_debt_in_third_party", "Repayment_on_third_Party", 
+                                                      "Remaining_Loan_on_third_Party", "Virtual_Account_Number", "NIK_KTP"]:
+                                                cols_to_insert.append(col)
+                                                val = row.get(col)
+                                                # Convert NaN to None
+                                                if pd.isna(val):
+                                                    vals_to_insert.append(None)
+                                                else:
+                                                    vals_to_insert.append(str(val).strip() if val else None)
+                                        
+                                        if cols_to_insert:
+                                            query = f"INSERT INTO supervisor_data ({', '.join(cols_to_insert)}) VALUES ({', '.join(['?'] * len(cols_to_insert))})"
+                                            execute(query, tuple(vals_to_insert))
+                                            imported_count += 1
+                                    
+                                    st.success(f"✅ Import selesai! Imported: {imported_count}, Skipped (duplicate/empty): {skipped_count}")
+                                    st.balloons()
+                                except Exception as e:
+                                    st.error(f"❌ Error saat import: {e}")
+                        
+                        with col2:
+                            if st.button("🔄 Reset Upload", key="sup_reset_upload"):
+                                st.rerun()
+                
+                except Exception as e:
+                    st.error(f"❌ Error membaca file: {e}")
+        
+        # --- Tracer Data Migration ---
+        with migration_tabs[1]:
+            st.subheader("Import Tracer Data (Employment Update)")
+            
+            st.markdown("""
+            **Template kolom yang diperlukan:**
+            - `TRC_Code` (opsional, kode tracer)
+            - `Agreement_No` (wajib, harus sesuai dengan Case_ID di Supervisor Data)
+            - `Debtor_Name` (wajib)
+            - `NIK_KTP`, `EMPLOYMENT_UPDATE`, `EMPLOYER`, dll.
+            
+            **Kolom wajib minimal:** Agreement_No, Debtor_Name
+            """)
+            
+            # Generate template button
+            if st.button("📥 Download Template Excel - Tracer Data", key="tracer_template"):
+                template_cols = [
+                    "TRC_Code", "Agreement_No", "Debtor_Name", "NIK_KTP", 
+                    "EMPLOYMENT_UPDATE", "EMPLOYER", "Decoded_Company_Name",
+                    "Debtor_Legal_Name", "Employee_Name", "Employee_ID_Number", 
+                    "Debtor_Relation_to_Employee", "Assigned_To"
+                ]
+                template_df = pd.DataFrame(columns=template_cols)
+                template_df.loc[0] = [""] * len(template_cols)
+                
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    template_df.to_excel(writer, index=False, sheet_name='Tracer_Data')
+                output.seek(0)
+                
+                st.download_button(
+                    label="💾 Download Template_Tracer_Data.xlsx",
+                    data=output,
+                    file_name="Template_Tracer_Data.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="tracer_template_download"
+                )
+            
+            st.divider()
+            
+            # Upload file
+            uploaded_tracer = st.file_uploader("Upload Excel Tracer Data", type=["xlsx", "xls"], key="tracer_upload_migration")
+            
+            if uploaded_tracer:
+                try:
+                    df_tracer = pd.read_excel(uploaded_tracer)
+                    st.success(f"✅ File berhasil dibaca! Total baris: {len(df_tracer)}")
+                    
+                    # Validate required columns
+                    required_cols = ["Agreement_No", "Debtor_Name"]
+                    missing_cols = [col for col in required_cols if col not in df_tracer.columns]
+                    
+                    if missing_cols:
+                        st.error(f"❌ Kolom wajib tidak ditemukan: {', '.join(missing_cols)}")
+                    else:
+                        # Preview data
+                        st.dataframe(df_tracer.head(20), use_container_width=True)
+                        
+                        # Confirm import
+                        st.warning(f"⚠️ Anda akan mengimport {len(df_tracer)} baris data ke tabel assign_tracer")
+                        
+                        col1, col2 = st.columns([1, 3])
+                        with col1:
+                            if st.button("✅ Konfirmasi Import", type="primary", key="tracer_confirm_import"):
+                                try:
+                                    imported_count = 0
+                                    skipped_count = 0
+                                    
+                                    for idx, row in df_tracer.iterrows():
+                                        agreement_no = str(row.get('Agreement_No', '')).strip()
+                                        if not agreement_no:
+                                            skipped_count += 1
+                                            continue
+                                        
+                                        # Check if already exists
+                                        existing = fetchone("SELECT id FROM assign_tracer WHERE Agreement_No = ?", (agreement_no,))
+                                        if existing:
+                                            skipped_count += 1
+                                            continue
+                                        
+                                        # Auto-decode if EMPLOYER provided but no Decoded_Company_Name
+                                        employer = str(row.get('EMPLOYER', '')).strip() if pd.notna(row.get('EMPLOYER')) else None
+                                        decoded = str(row.get('Decoded_Company_Name', '')).strip() if pd.notna(row.get('Decoded_Company_Name')) else None
+                                        
+                                        if employer and not decoded:
+                                            decoded = decode_company_name(employer)
+                                        
+                                        execute(
+                                            """INSERT INTO assign_tracer 
+                                            (TRC_Code, Agreement_No, Debtor_Name, NIK_KTP, EMPLOYMENT_UPDATE, EMPLOYER, 
+                                             Decoded_Company_Name, Debtor_Legal_Name, Employee_Name, Employee_ID_Number, 
+                                             Debtor_Relation_to_Employee, Assigned_To) 
+                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                            (
+                                                str(row.get('TRC_Code', '')).strip() if pd.notna(row.get('TRC_Code')) else None,
+                                                agreement_no,
+                                                str(row.get('Debtor_Name', '')).strip() if pd.notna(row.get('Debtor_Name')) else None,
+                                                str(row.get('NIK_KTP', '')).strip() if pd.notna(row.get('NIK_KTP')) else None,
+                                                str(row.get('EMPLOYMENT_UPDATE', '')).strip() if pd.notna(row.get('EMPLOYMENT_UPDATE')) else None,
+                                                employer,
+                                                decoded,
+                                                str(row.get('Debtor_Legal_Name', '')).strip() if pd.notna(row.get('Debtor_Legal_Name')) else None,
+                                                str(row.get('Employee_Name', '')).strip() if pd.notna(row.get('Employee_Name')) else None,
+                                                str(row.get('Employee_ID_Number', '')).strip() if pd.notna(row.get('Employee_ID_Number')) else None,
+                                                str(row.get('Debtor_Relation_to_Employee', '')).strip() if pd.notna(row.get('Debtor_Relation_to_Employee')) else None,
+                                                str(row.get('Assigned_To', '')).strip() if pd.notna(row.get('Assigned_To')) else None
+                                            )
+                                        )
+                                        imported_count += 1
+                                    
+                                    st.success(f"✅ Import selesai! Imported: {imported_count}, Skipped (duplicate/empty): {skipped_count}")
+                                    st.balloons()
+                                except Exception as e:
+                                    st.error(f"❌ Error saat import: {e}")
+                        
+                        with col2:
+                            if st.button("🔄 Reset Upload", key="tracer_reset_upload"):
+                                st.rerun()
+                
+                except Exception as e:
+                    st.error(f"❌ Error membaca file: {e}")
+        
+        # --- Agent Results Migration ---
+        with migration_tabs[2]:
+            st.subheader("Import Agent Results (Handling Outcome)")
+            
+            st.markdown("""
+            **Template kolom yang diperlukan:**
+            - `Agreement_No` (wajib)
+            - `agent` (nama agent)
+            - `agent_status` (status handling: PTP, Broken Promise, dll)
+            - `agent_ptp_amount`, `agent_ptp_date`, `agent_notes`
+            
+            **Kolom wajib minimal:** Agreement_No, agent
+            """)
+            
+            # Generate template button
+            if st.button("📥 Download Template Excel - Agent Results", key="agent_template"):
+                template_cols = [
+                    "Agreement_No", "agent", "agent_status", "agent_ptp_amount", 
+                    "agent_ptp_date", "agent_notes", "updated_at"
+                ]
+                template_df = pd.DataFrame(columns=template_cols)
+                template_df.loc[0] = [""] * len(template_cols)
+                
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    template_df.to_excel(writer, index=False, sheet_name='Agent_Results')
+                output.seek(0)
+                
+                st.download_button(
+                    label="💾 Download Template_Agent_Results.xlsx",
+                    data=output,
+                    file_name="Template_Agent_Results.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="agent_template_download"
+                )
+            
+            st.divider()
+            
+            # Upload file
+            uploaded_agent = st.file_uploader("Upload Excel Agent Results", type=["xlsx", "xls"], key="agent_upload_migration")
+            
+            if uploaded_agent:
+                try:
+                    df_agent = pd.read_excel(uploaded_agent)
+                    st.success(f"✅ File berhasil dibaca! Total baris: {len(df_agent)}")
+                    
+                    # Validate required columns
+                    required_cols = ["Agreement_No", "agent"]
+                    missing_cols = [col for col in required_cols if col not in df_agent.columns]
+                    
+                    if missing_cols:
+                        st.error(f"❌ Kolom wajib tidak ditemukan: {', '.join(missing_cols)}")
+                    else:
+                        # Preview data
+                        st.dataframe(df_agent.head(20), use_container_width=True)
+                        
+                        # Confirm import
+                        st.warning(f"⚠️ Anda akan mengimport {len(df_agent)} baris data ke tabel agent_results")
+                        
+                        col1, col2 = st.columns([1, 3])
+                        with col1:
+                            if st.button("✅ Konfirmasi Import", type="primary", key="agent_confirm_import"):
+                                try:
+                                    imported_count = 0
+                                    
+                                    for idx, row in df_agent.iterrows():
+                                        agreement_no = str(row.get('Agreement_No', '')).strip()
+                                        agent_name = str(row.get('agent', '')).strip()
+                                        
+                                        if not agreement_no or not agent_name:
+                                            continue
+                                        
+                                        # Parse PTP amount (handle currency format)
+                                        ptp_amount = row.get('agent_ptp_amount')
+                                        if pd.notna(ptp_amount):
+                                            try:
+                                                ptp_amount = float(str(ptp_amount).replace(',', '').replace('Rp', '').strip())
+                                            except:
+                                                ptp_amount = None
+                                        else:
+                                            ptp_amount = None
+                                        
+                                        execute(
+                                            """INSERT INTO agent_results 
+                                            (Agreement_No, agent, agent_status, agent_ptp_amount, agent_ptp_date, agent_notes, updated_at) 
+                                            VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                                            (
+                                                agreement_no,
+                                                agent_name,
+                                                str(row.get('agent_status', '')).strip() if pd.notna(row.get('agent_status')) else None,
+                                                ptp_amount,
+                                                str(row.get('agent_ptp_date', '')).strip() if pd.notna(row.get('agent_ptp_date')) else None,
+                                                str(row.get('agent_notes', '')).strip() if pd.notna(row.get('agent_notes')) else None,
+                                                str(row.get('updated_at', '')).strip() if pd.notna(row.get('updated_at')) else None
+                                            )
+                                        )
+                                        imported_count += 1
+                                    
+                                    st.success(f"✅ Import selesai! Total imported: {imported_count}")
+                                    st.balloons()
+                                except Exception as e:
+                                    st.error(f"❌ Error saat import: {e}")
+                        
+                        with col2:
+                            if st.button("🔄 Reset Upload", key="agent_reset_upload"):
+                                st.rerun()
+                
+                except Exception as e:
+                    st.error(f"❌ Error membaca file: {e}")
+        
+        # --- Payment Data Migration ---
+        with migration_tabs[3]:
+            st.subheader("Import Payment Data")
+            
+            st.markdown("""
+            **Template kolom yang diperlukan:**
+            - `Agreement_No` (wajib)
+            - `paid_amount` (jumlah pembayaran, wajib)
+            - `paid_date` (tanggal bayar, wajib)
+            - `status` (misal: Confirmed, Pending)
+            - `source_file`, `uploaded_by`
+            
+            **Kolom wajib minimal:** Agreement_No, paid_amount, paid_date
+            """)
+            
+            # Generate template button
+            if st.button("📥 Download Template Excel - Payment Data", key="payment_template"):
+                template_cols = [
+                    "Agreement_No", "paid_amount", "paid_date", "status", 
+                    "source_file", "uploaded_by"
+                ]
+                template_df = pd.DataFrame(columns=template_cols)
+                template_df.loc[0] = [""] * len(template_cols)
+                
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    template_df.to_excel(writer, index=False, sheet_name='Payment_Data')
+                output.seek(0)
+                
+                st.download_button(
+                    label="💾 Download Template_Payment_Data.xlsx",
+                    data=output,
+                    file_name="Template_Payment_Data.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="payment_template_download"
+                )
+            
+            st.divider()
+            
+            # Upload file
+            uploaded_payment = st.file_uploader("Upload Excel Payment Data", type=["xlsx", "xls"], key="payment_upload_migration")
+            
+            if uploaded_payment:
+                try:
+                    df_payment = pd.read_excel(uploaded_payment)
+                    st.success(f"✅ File berhasil dibaca! Total baris: {len(df_payment)}")
+                    
+                    # Validate required columns
+                    required_cols = ["Agreement_No", "paid_amount", "paid_date"]
+                    missing_cols = [col for col in required_cols if col not in df_payment.columns]
+                    
+                    if missing_cols:
+                        st.error(f"❌ Kolom wajib tidak ditemukan: {', '.join(missing_cols)}")
+                    else:
+                        # Preview data
+                        st.dataframe(df_payment.head(20), use_container_width=True)
+                        
+                        # Confirm import
+                        st.warning(f"⚠️ Anda akan mengimport {len(df_payment)} baris data ke tabel payments")
+                        
+                        col1, col2 = st.columns([1, 3])
+                        with col1:
+                            if st.button("✅ Konfirmasi Import", type="primary", key="payment_confirm_import"):
+                                try:
+                                    imported_count = 0
+                                    u = current_user()
+                                    uploader_name = u.get('full_name') if u else 'Migration'
+                                    
+                                    for idx, row in df_payment.iterrows():
+                                        agreement_no = str(row.get('Agreement_No', '')).strip()
+                                        
+                                        if not agreement_no:
+                                            continue
+                                        
+                                        # Parse paid_amount
+                                        paid_amt = row.get('paid_amount')
+                                        if pd.notna(paid_amt):
+                                            try:
+                                                paid_amt = float(str(paid_amt).replace(',', '').replace('Rp', '').strip())
+                                            except:
+                                                continue
+                                        else:
+                                            continue
+                                        
+                                        execute(
+                                            """INSERT INTO payments 
+                                            (Agreement_No, paid_amount, paid_date, status, source_file, uploaded_by) 
+                                            VALUES (?, ?, ?, ?, ?, ?)""",
+                                            (
+                                                agreement_no,
+                                                paid_amt,
+                                                str(row.get('paid_date', '')).strip() if pd.notna(row.get('paid_date')) else None,
+                                                str(row.get('status', 'Confirmed')).strip() if pd.notna(row.get('status')) else 'Confirmed',
+                                                str(row.get('source_file', 'Migration')).strip() if pd.notna(row.get('source_file')) else 'Migration',
+                                                str(row.get('uploaded_by', uploader_name)).strip() if pd.notna(row.get('uploaded_by')) else uploader_name
+                                            )
+                                        )
+                                        imported_count += 1
+                                    
+                                    st.success(f"✅ Import selesai! Total imported: {imported_count}")
+                                    st.balloons()
+                                except Exception as e:
+                                    st.error(f"❌ Error saat import: {e}")
+                        
+                        with col2:
+                            if st.button("🔄 Reset Upload", key="payment_reset_upload"):
+                                st.rerun()
+                
+                except Exception as e:
+                    st.error(f"❌ Error membaca file: {e}")
     
     # Close database connection
     conn.close()
