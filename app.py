@@ -9838,7 +9838,7 @@ def page_tracer():
                         decoded_company = decode_company_name(employer.strip())
 
                     execute(
-                        "UPDATE assign_tracer SET NIK_KTP=?, EMPLOYMENT_UPDATE=?, EMPLOYER=?, Debtor_Legal_Name=?, Employee_Name=?, Employee_ID_Number=?, Debtor_Relation_to_Employee=?, Decoded_Company_Name=? WHERE id=? AND IFNULL(Assigned_To,'')=?",
+                        "UPDATE assign_tracer SET NIK_KTP=?, EMPLOYMENT_UPDATE=?, EMPLOYER=?, Debtor_Legal_Name=?, Employee_Name=?, Employee_ID_Number=?, Debtor_Relation_to_Employee=?, Decoded_Company_Name=? WHERE id=?",
                         (
                             nik_new,
                             (emp_update.strip() if emp_update is not None else None),
@@ -9848,7 +9848,7 @@ def page_tracer():
                             (employee_id.strip() if employee_id is not None else None),
                             (relation.strip() if relation is not None else None),
                             decoded_company,
-                            sel_id, tracer_name
+                            sel_id
                         )
                     )
                     # Optional: propagate updated NIK to supervisor_data for this agreement
