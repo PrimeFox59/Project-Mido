@@ -10037,6 +10037,25 @@ def page_supervisor():
             **Kolom wajib minimal:** Agreement_No, paid_amount, paid_date
             
             ℹ️ **Note:** `Agreement_No` = `Case_ID` (gunakan Case_ID yang sama dari Supervisor Data)
+            
+            ---
+            
+            **✅ Data yang TERISI OTOMATIS saat tampilan Payment Recap:**
+            
+            Sistem akan otomatis mengambil data berikut dari tabel lain berdasarkan `Agreement_No`:
+            
+            1. **Customer Name** → Dari tabel `supervisor_data` (Customer_name)
+            2. **Status/Skema Pelunasan** → Dari tabel `agent_results` (agent_status: PTP, Full Payment, dll)
+            3. **PAID OFF Status** → Dari tabel `supervisor_data` (Paid_Off: YES/NO)
+            4. **Assigned Agent** → Dari tabel `agent_results` (agent) atau uploaded_by sebagai fallback
+            5. **Product** → Dari tabel `supervisor_data` (Product)
+            
+            Anda **TIDAK PERLU** mengisi kolom-kolom tersebut di Excel, cukup isi:
+            - Agreement_No (Case_ID)
+            - paid_amount
+            - paid_date
+            
+            Sistem akan otomatis JOIN dan enrichment data saat ditampilkan! 🎯
             """)
             
             # Generate template button
