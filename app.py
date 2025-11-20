@@ -708,6 +708,8 @@ def init_db():
         cols = [r['name'] for r in c.execute("PRAGMA table_info(assign_tracer)").fetchall()]
         if 'Masked_Company_Name' not in cols:
             c.execute("ALTER TABLE assign_tracer ADD COLUMN Masked_Company_Name TEXT")
+        if 'Decoded_Company_Name' not in cols:
+            c.execute("ALTER TABLE assign_tracer ADD COLUMN Decoded_Company_Name TEXT")
     except Exception:
         pass
     
@@ -1317,6 +1319,56 @@ def is_frozen_by_agreement(agreement_no: str) -> bool:
         return is_frozen_by_nik(nik)
     except Exception:
         return False
+
+# -------------------------
+# Company Decode Helper
+# -------------------------
+def decode_company_name(masked_name: str) -> str:
+    """
+    Auto-decode company name from masked format using library.
+    
+    Args:
+        masked_name: Masked company name (e.g., "VI****** CA** IN******* PT")
+    
+    Returns:
+        Decoded company name if found in library, otherwise returns original masked_name
+    
+    Examples:
+        >>> decode_company_name("VI****** CA** IN******* PT")
+        "VICTORIA CARE INDONESIA PT"
+        >>> decode_company_name("Unknown Company")
+        "Unknown Company"
+    """
+    try:
+        if not masked_name or not masked_name.strip():
+            return masked_name
+        
+        masked_clean = masked_name.strip()
+        
+        # Try exact match first
+        result = fetchone(
+            "SELECT canonical_name FROM masked_companies WHERE masked_name = ?", 
+            (masked_clean,)
+        )
+        
+        if result:
+            return result.get('canonical_name', masked_name)
+        
+        # If no exact match, try case-insensitive match
+        result = fetchone(
+            "SELECT canonical_name FROM masked_companies WHERE LOWER(masked_name) = LOWER(?)", 
+            (masked_clean,)
+        )
+        
+        if result:
+            return result.get('canonical_name', masked_name)
+        
+        # No match found, return original
+        return masked_name
+        
+    except Exception:
+        # On error, return original masked name
+        return masked_name
 
 # -------------------------
 # Assignment Rotation & Mutual Exclusion Helpers
@@ -6509,7 +6561,7 @@ def page_supervisor():
     conn = get_db()
     
     # Monitoring first so it's the default view
-    tabs = st.tabs(["Monitoring", "Payment Recap", "Input", "Trace Assigning", "Agent Assigning", "Trace Results", "Enriched & Lookup", "Freeze Manager"])
+    tabs = st.tabs(["Monitoring", "Payment Recap", "Input", "Trace Assigning", "Agent Assigning", "Trace Results", "Enriched & Lookup", "Freeze Manager", "Company Library"])
 
     # --- Monitoring Tab ---
     with tabs[0]:
@@ -7736,8 +7788,7 @@ def page_supervisor():
                                     st.toast(f"Upload berhasil: baru {saved:,}, replace {replaced:,}, dilewati {skipped:,}.", icon="✅")
                                 except Exception:
                                     pass
-                                # Clear uploader to prevent re-upload on rerun
-                                st.session_state['sup_upload_file'] = None
+                                # Rerun without modifying widget state (Streamlit will clear the uploader automatically)
                                 st.rerun()
             except Exception as e:
                 st.error(f"Gagal memproses file: {e}")
@@ -9300,6 +9351,285 @@ def page_supervisor():
                     else:
                         st.info("ℹ️ Case ID tidak ditemukan.")
     
+    # --- Company Library Tab ---
+    with tabs[8]:
+        st.subheader("🏢 Company Decode Library")
+        st.markdown("""
+        <div style='background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(139, 92, 246, 0.1) 100%); 
+                    padding: 16px; border-radius: 12px; border-left: 4px solid #6366F1; margin-bottom: 20px;'>
+            <p style='margin: 0; font-size: 14px;'>
+                📚 <b>Library ini digunakan untuk decode nama company yang ter-mask.</b><br>
+                Contoh: <code>VI****** CA** IN******* PT</code> → <code>VICTORIA CARE INDONESIA PT</code>
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Sub-tabs for different operations
+        lib_tabs = st.tabs(["📋 View Library", "➕ Add/Edit Manual", "📤 Upload CSV/Excel", "🗑️ Delete Entry"])
+        
+        # --- View Library Tab ---
+        with lib_tabs[0]:
+            st.markdown("### 📋 Current Library")
+            
+            # Search filter
+            search_company = st.text_input("🔍 Search (Masked or Decoded)", key="lib_search", placeholder="Type to filter...")
+            
+            # Fetch all entries
+            if search_company:
+                lib_rows = fetchall("""
+                    SELECT id, masked_name, canonical_name, mapping_notes, created_at 
+                    FROM masked_companies 
+                    WHERE masked_name LIKE ? OR canonical_name LIKE ?
+                    ORDER BY masked_name ASC
+                """, (f"%{search_company}%", f"%{search_company}%"))
+            else:
+                lib_rows = fetchall("""
+                    SELECT id, masked_name, canonical_name, mapping_notes, created_at 
+                    FROM masked_companies 
+                    ORDER BY masked_name ASC
+                """)
+            
+            if lib_rows:
+                st.success(f"✅ Total entries: **{len(lib_rows)}**")
+                df_lib = pd.DataFrame(lib_rows)
+                # Rename columns for display
+                df_lib_display = df_lib.rename(columns={
+                    'id': 'ID',
+                    'masked_name': 'Masked Company',
+                    'canonical_name': 'Decoded Company',
+                    'mapping_notes': 'Notes',
+                    'created_at': 'Created At'
+                })
+                st.dataframe(df_lib_display, use_container_width=True, hide_index=True)
+                
+                # Download as CSV
+                csv = df_lib_display.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Download Library as CSV",
+                    data=csv,
+                    file_name=f"company_library_{today_wib().isoformat()}.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.info("📭 Library masih kosong. Tambahkan entry melalui tab 'Add/Edit Manual' atau 'Upload CSV/Excel'.")
+        
+        # --- Add/Edit Manual Tab ---
+        with lib_tabs[1]:
+            st.markdown("### ➕ Add or Edit Entry")
+            
+            # Check if editing existing entry
+            edit_mode = st.checkbox("✏️ Edit existing entry", key="lib_edit_mode")
+            
+            if edit_mode:
+                # Select entry to edit
+                all_masked = fetchall("SELECT id, masked_name, canonical_name FROM masked_companies ORDER BY masked_name ASC")
+                if not all_masked:
+                    st.warning("⚠️ No entries to edit. Add new entry first.")
+                else:
+                    options_dict = {f"{row['masked_name']} → {row['canonical_name']}": row for row in all_masked}
+                    selected_entry = st.selectbox("Select entry to edit:", list(options_dict.keys()), key="lib_select_edit")
+                    
+                    if selected_entry:
+                        entry_data = options_dict[selected_entry]
+                        st.info(f"Editing ID: {entry_data['id']}")
+                        
+                        masked_input = st.text_input("Masked Company Name", value=entry_data['masked_name'], key="lib_edit_masked")
+                        decoded_input = st.text_input("Decoded Company Name", value=entry_data['canonical_name'], key="lib_edit_decoded")
+                        notes_input = st.text_area("Notes (optional)", value="", key="lib_edit_notes")
+                        
+                        if st.button("💾 Update Entry", type="primary", key="lib_update_btn"):
+                            if masked_input.strip() and decoded_input.strip():
+                                try:
+                                    execute("""
+                                        UPDATE masked_companies 
+                                        SET masked_name = ?, canonical_name = ?, mapping_notes = ?
+                                        WHERE id = ?
+                                    """, (masked_input.strip(), decoded_input.strip(), notes_input.strip(), entry_data['id']))
+                                    st.success(f"✅ Entry updated successfully!")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"❌ Error updating entry: {e}")
+                            else:
+                                st.error("❌ Both Masked and Decoded names are required!")
+            else:
+                # Add new entry
+                st.markdown("**Add New Company Mapping:**")
+                
+                masked_input = st.text_input("Masked Company Name", placeholder="e.g., VI****** CA** IN******* PT", key="lib_add_masked")
+                decoded_input = st.text_input("Decoded Company Name", placeholder="e.g., VICTORIA CARE INDONESIA PT", key="lib_add_decoded")
+                notes_input = st.text_area("Notes (optional)", placeholder="Any additional information...", key="lib_add_notes")
+                
+                if st.button("➕ Add to Library", type="primary", key="lib_add_btn"):
+                    if masked_input.strip() and decoded_input.strip():
+                        try:
+                            # Check if masked name already exists
+                            existing = fetchone("SELECT id FROM masked_companies WHERE masked_name = ?", (masked_input.strip(),))
+                            if existing:
+                                st.error(f"❌ Masked name already exists! Use Edit mode to update.")
+                            else:
+                                execute("""
+                                    INSERT INTO masked_companies (masked_name, canonical_name, mapping_notes)
+                                    VALUES (?, ?, ?)
+                                """, (masked_input.strip(), decoded_input.strip(), notes_input.strip()))
+                                st.success(f"✅ Entry added successfully!")
+                                st.balloons()
+                                st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Error adding entry: {e}")
+                    else:
+                        st.error("❌ Both Masked and Decoded names are required!")
+        
+        # --- Upload CSV/Excel Tab ---
+        with lib_tabs[2]:
+            st.markdown("### 📤 Upload CSV/Excel Library")
+            st.markdown("""
+            <div style='background: #FEF3C7; padding: 12px; border-radius: 8px; border-left: 4px solid #F59E0B; margin-bottom: 16px;'>
+                <p style='margin: 0; font-size: 13px;'>
+                    ⚠️ <b>Format file:</b> Harus memiliki kolom <code>Masked</code> dan <code>Decoded</code><br>
+                    📝 Kolom opsional: <code>Notes</code><br>
+                    🔄 Entry yang sudah ada akan di-update (replace), entry baru akan ditambahkan.
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Display upload result message if any
+            _upload_lib_result = st.session_state.pop('lib_upload_result', None)
+            if _upload_lib_result:
+                st.success(_upload_lib_result)
+            
+            uploaded_lib = st.file_uploader("Upload CSV/Excel file", type=["csv", "xlsx"], key="lib_upload_file")
+            
+            if uploaded_lib is not None:
+                try:
+                    # Read file
+                    if uploaded_lib.name.lower().endswith(".csv"):
+                        df_upload = pd.read_csv(uploaded_lib)
+                    else:
+                        df_upload = pd.read_excel(uploaded_lib)
+                    
+                    # Normalize column names
+                    df_upload.columns = [c.strip().lower() for c in df_upload.columns]
+                    
+                    # Check required columns
+                    if 'masked' not in df_upload.columns or 'decoded' not in df_upload.columns:
+                        st.error("❌ File harus memiliki kolom 'Masked' dan 'Decoded'!")
+                    else:
+                        st.info(f"📊 File detected: {uploaded_lib.name} — {len(df_upload):,} rows")
+                        
+                        # Preview
+                        st.dataframe(df_upload.head(10), use_container_width=True, hide_index=True)
+                        
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            do_upload = st.button("📤 Upload to Library", type="primary", key="lib_commit_upload")
+                        with col2:
+                            st.button("🚫 Cancel", key="lib_cancel_upload")
+                        
+                        if do_upload:
+                            try:
+                                uploaded_lib.seek(0)
+                            except Exception:
+                                pass
+                            
+                            # Re-read
+                            try:
+                                if uploaded_lib.name.lower().endswith(".csv"):
+                                    df_full = pd.read_csv(uploaded_lib)
+                                else:
+                                    df_full = pd.read_excel(uploaded_lib)
+                                df_full.columns = [c.strip().lower() for c in df_full.columns]
+                            except Exception as e:
+                                st.error(f"❌ Error reading file: {e}")
+                                df_full = None
+                            
+                            if df_full is not None:
+                                added = 0
+                                updated = 0
+                                skipped = 0
+                                
+                                for idx, row in df_full.iterrows():
+                                    try:
+                                        masked = str(row.get('masked', '')).strip()
+                                        decoded = str(row.get('decoded', '')).strip()
+                                        notes = str(row.get('notes', '')).strip()
+                                        
+                                        if not masked or not decoded or masked == 'nan' or decoded == 'nan':
+                                            skipped += 1
+                                            continue
+                                        
+                                        # Check if exists
+                                        existing = fetchone("SELECT id FROM masked_companies WHERE masked_name = ?", (masked,))
+                                        
+                                        if existing:
+                                            # Update
+                                            execute("""
+                                                UPDATE masked_companies 
+                                                SET canonical_name = ?, mapping_notes = ?
+                                                WHERE masked_name = ?
+                                            """, (decoded, notes, masked))
+                                            updated += 1
+                                        else:
+                                            # Insert
+                                            execute("""
+                                                INSERT INTO masked_companies (masked_name, canonical_name, mapping_notes)
+                                                VALUES (?, ?, ?)
+                                            """, (masked, decoded, notes))
+                                            added += 1
+                                    except Exception as e:
+                                        skipped += 1
+                                
+                                st.session_state['lib_upload_result'] = f"✅ Upload complete! Added: {added}, Updated: {updated}, Skipped: {skipped}"
+                                
+                                # Audit log
+                                u = current_user() or {}
+                                try:
+                                    execute(
+                                        "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                                        (u.get('id') if u else None, "UPLOAD_COMPANY_LIBRARY", 
+                                         f"Uploaded company library: {added} added, {updated} updated, {skipped} skipped from '{uploaded_lib.name}'")
+                                    )
+                                except Exception:
+                                    pass
+                                
+                                st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Error processing file: {e}")
+        
+        # --- Delete Entry Tab ---
+        with lib_tabs[3]:
+            st.markdown("### 🗑️ Delete Entry")
+            st.warning("⚠️ **Warning:** Deleting an entry is permanent and cannot be undone!")
+            
+            # Select entry to delete
+            all_entries = fetchall("SELECT id, masked_name, canonical_name FROM masked_companies ORDER BY masked_name ASC")
+            
+            if not all_entries:
+                st.info("📭 No entries to delete.")
+            else:
+                options_delete = {f"{row['masked_name']} → {row['canonical_name']}": row for row in all_entries}
+                selected_delete = st.selectbox("Select entry to delete:", list(options_delete.keys()), key="lib_select_delete")
+                
+                if selected_delete:
+                    entry_to_delete = options_delete[selected_delete]
+                    
+                    st.error(f"""
+                    **You are about to delete:**
+                    - ID: {entry_to_delete['id']}
+                    - Masked: {entry_to_delete['masked_name']}
+                    - Decoded: {entry_to_delete['canonical_name']}
+                    """)
+                    
+                    confirm_delete = st.checkbox("I confirm I want to delete this entry", key="lib_confirm_delete")
+                    
+                    if confirm_delete:
+                        if st.button("🗑️ DELETE ENTRY", type="primary", key="lib_delete_btn"):
+                            try:
+                                execute("DELETE FROM masked_companies WHERE id = ?", (entry_to_delete['id'],))
+                                st.success("✅ Entry deleted successfully!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ Error deleting entry: {e}")
+    
     # Close database connection
     conn.close()
 
@@ -9320,7 +9650,7 @@ def page_tracer():
         rows = fetchall(
             """
             SELECT at.id, at.TRC_Code, at.Agreement_No, at.Debtor_Name, at.NIK_KTP, 
-                   at.EMPLOYMENT_UPDATE, at.EMPLOYER, at.Debtor_Legal_Name, 
+                   at.EMPLOYMENT_UPDATE, at.EMPLOYER, at.Decoded_Company_Name, at.Debtor_Legal_Name, 
                    at.Employee_Name, at.Employee_ID_Number, at.Debtor_Relation_to_Employee, 
                    at.Masked_Company_Name, at.Assigned_To, at.created_at,
                    sd.Remarks_Suggested_NIK_Prospect
@@ -9334,7 +9664,7 @@ def page_tracer():
         rows = fetchall(
             """
             SELECT at.id, at.TRC_Code, at.Agreement_No, at.Debtor_Name, at.NIK_KTP, 
-                   at.EMPLOYMENT_UPDATE, at.EMPLOYER, at.Debtor_Legal_Name, 
+                   at.EMPLOYMENT_UPDATE, at.EMPLOYER, at.Decoded_Company_Name, at.Debtor_Legal_Name, 
                    at.Employee_Name, at.Employee_ID_Number, at.Debtor_Relation_to_Employee, 
                    at.Masked_Company_Name, at.Assigned_To, at.created_at,
                    sd.Remarks_Suggested_NIK_Prospect
@@ -9378,6 +9708,7 @@ def page_tracer():
             'Suggested_NIK': r.get('Remarks_Suggested_NIK_Prospect') or '',
             'EMPLOYMENT_UPDATE': r.get('EMPLOYMENT_UPDATE'),
             'EMPLOYER': r.get('EMPLOYER'),
+            'Decoded_Company': r.get('Decoded_Company_Name') or '-',
             'Debtor_Legal_Name': r.get('Debtor_Legal_Name'),
             'Employee_Name': r.get('Employee_Name'),
             'Employee_ID_Number': r.get('Employee_ID_Number'),
@@ -9405,7 +9736,7 @@ def page_tracer():
     else:
         df_view['Selected'] = []
 
-    # Column config dengan tambahan Assigned_To
+    # Column config dengan tambahan Assigned_To dan Decoded_Company
     col_config = {
         'Selected': st.column_config.CheckboxColumn('Selected', help='Centang untuk memilih assignment'),
         'ID': st.column_config.TextColumn('ID'),
@@ -9415,7 +9746,8 @@ def page_tracer():
         'NIK_KTP': st.column_config.TextColumn('NIK KTP'),
         'Suggested_NIK': st.column_config.TextColumn('Suggested NIK (by Agent)', help='NIK yang disarankan oleh Agent'),
         'EMPLOYMENT_UPDATE': st.column_config.TextColumn('EMPLOYMENT UPDATE'),
-        'EMPLOYER': st.column_config.TextColumn('EMPLOYER'),
+        'EMPLOYER': st.column_config.TextColumn('EMPLOYER (Masked)'),
+        'Decoded_Company': st.column_config.TextColumn('🔓 Decoded Company', help='Auto-decoded from library'),
         'Debtor_Legal_Name': st.column_config.TextColumn('Debtor Legal Name'),
         'Employee_Name': st.column_config.TextColumn('Employee Name'),
         'Employee_ID_Number': st.column_config.TextColumn('Employee ID Number'),
@@ -9424,7 +9756,7 @@ def page_tracer():
     }
     
     # Tambahkan kolom Assigned_To jika Supervisor/Superuser
-    disabled_cols = ['ID','TRC_Code','Case_ID','Debtor_Name','NIK_KTP','Suggested_NIK','EMPLOYMENT_UPDATE','EMPLOYER','Debtor_Legal_Name','Employee_Name','Employee_ID_Number','Debtor_Relation_to_Employee','Assigned_At']
+    disabled_cols = ['ID','TRC_Code','Case_ID','Debtor_Name','NIK_KTP','Suggested_NIK','EMPLOYMENT_UPDATE','EMPLOYER','Decoded_Company','Debtor_Legal_Name','Employee_Name','Employee_ID_Number','Debtor_Relation_to_Employee','Assigned_At']
     if user_role in ("Superuser", "Supervisor"):
         col_config['Assigned_To'] = st.column_config.TextColumn('Assigned To')
         disabled_cols.append('Assigned_To')
@@ -9470,7 +9802,17 @@ def page_tracer():
                 nik_val = st.text_input("NIK KTP", value=sel_row.get('NIK_KTP','') or "", key="tr_v_nik")
             with col2:
                 emp_update = st.text_input("EMPLOYMENT UPDATE", value=sel_row.get('EMPLOYMENT_UPDATE',''), key="tr_emp_update")
-                employer = st.text_input("EMPLOYER", value=sel_row.get('EMPLOYER',''), key="tr_employer")
+                employer = st.text_input("EMPLOYER (Masked)", value=sel_row.get('EMPLOYER',''), key="tr_employer",
+                                        help="Masukkan nama company yang ter-mask (e.g., VI****** CA** IN******* PT)")
+                
+                # Auto-decode preview
+                if employer and employer.strip():
+                    decoded_preview = decode_company_name(employer.strip())
+                    if decoded_preview != employer.strip():
+                        st.success(f"🔓 Decoded: **{decoded_preview}**")
+                    else:
+                        st.caption("ℹ️ Belum ada di library. Silakan tambahkan di menu Supervisor > Company Library")
+                
                 debtor_legal = st.text_input("Debtor Legal Name", value=sel_row.get('Debtor_Legal_Name',''), key="tr_debtor_legal")
                 employee_name = st.text_input("Employee Name", value=sel_row.get('Employee_Name',''), key="tr_employee_name")
                 employee_id = st.text_input("Employee ID Number", value=sel_row.get('Employee_ID_Number',''), key="tr_employee_id")
@@ -9499,9 +9841,14 @@ def page_tracer():
                     nik_new = (nik_val or "").strip()
                     nik_new = nik_new if nik_new != "" else None
                     nik_old = (sel_row.get('NIK_KTP') or '').strip()
+                    
+                    # Auto-decode company name if EMPLOYER is provided
+                    decoded_company = None
+                    if employer and employer.strip():
+                        decoded_company = decode_company_name(employer.strip())
 
                     execute(
-                        "UPDATE assign_tracer SET NIK_KTP=?, EMPLOYMENT_UPDATE=?, EMPLOYER=?, Debtor_Legal_Name=?, Employee_Name=?, Employee_ID_Number=?, Debtor_Relation_to_Employee=?, Masked_Company_Name=? WHERE id=? AND IFNULL(Assigned_To,'')=?",
+                        "UPDATE assign_tracer SET NIK_KTP=?, EMPLOYMENT_UPDATE=?, EMPLOYER=?, Debtor_Legal_Name=?, Employee_Name=?, Employee_ID_Number=?, Debtor_Relation_to_Employee=?, Masked_Company_Name=?, Decoded_Company_Name=? WHERE id=? AND IFNULL(Assigned_To,'')=?",
                         (
                             nik_new,
                             (emp_update.strip() if emp_update is not None else None),
@@ -9511,6 +9858,7 @@ def page_tracer():
                             (employee_id.strip() if employee_id is not None else None),
                             (relation.strip() if relation is not None else None),
                             (masked_value if masked_value else None),
+                            decoded_company,
                             sel_id, tracer_name
                         )
                     )
