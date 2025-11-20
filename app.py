@@ -10031,12 +10031,31 @@ def page_supervisor():
             - `Agreement_No` (wajib, **sama dengan Case_ID**)
             - `paid_amount` (jumlah pembayaran, wajib)
             - `paid_date` (tanggal bayar, wajib)
-            - `status` (misal: Confirmed, Pending)
-            - `source_file`, `uploaded_by`
+            - `status` (opsional: Confirmed/Pending, default: "Confirmed")
+            - `source_file` (opsional: nama file sumber, default: "Migration")
+            - `uploaded_by` (opsional: nama agent/user yang upload)
             
             **Kolom wajib minimal:** Agreement_No, paid_amount, paid_date
             
             ℹ️ **Note:** `Agreement_No` = `Case_ID` (gunakan Case_ID yang sama dari Supervisor Data)
+            
+            ---
+            
+            **📝 Penjelasan Kolom `uploaded_by`:**
+            
+            Kolom ini untuk tracking siapa yang upload/input data payment.
+            
+            **Cara mengisi:**
+            - Isi dengan **Full Name** agent yang terkait (contoh: "John Doe", "Jane Smith")
+            - Atau kosongkan, maka otomatis terisi dengan nama user yang sedang login saat import
+            - Jika ada data dari `agent_results`, kolom `agent` akan diprioritaskan di Payment Recap
+            
+            **Contoh:**
+            ```
+            Agreement_No | paid_amount | paid_date  | uploaded_by
+            45044479     | 5000000     | 2025-11-20 | Budi Santoso
+            45044480     | 3000000     | 2025-11-21 | (kosong, akan terisi otomatis)
+            ```
             
             ---
             
@@ -10047,7 +10066,7 @@ def page_supervisor():
             1. **Customer Name** → Dari tabel `supervisor_data` (Customer_name)
             2. **Status/Skema Pelunasan** → Dari tabel `agent_results` (agent_status: PTP, Full Payment, dll)
             3. **PAID OFF Status** → Dari tabel `supervisor_data` (Paid_Off: YES/NO)
-            4. **Assigned Agent** → Dari tabel `agent_results` (agent) atau uploaded_by sebagai fallback
+            4. **Assigned Agent** → Dari tabel `agent_results` (agent) atau `uploaded_by` sebagai fallback
             5. **Product** → Dari tabel `supervisor_data` (Product)
             
             Anda **TIDAK PERLU** mengisi kolom-kolom tersebut di Excel, cukup isi:
