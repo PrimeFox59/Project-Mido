@@ -2924,17 +2924,37 @@ def page_auth():
                                 cert_filename = None
                                 
                                 if sertifikasi_file:
+                                    # Initialize progress bar for certificate upload
+                                    progress_bar = st.progress(0)
+                                    status_text = st.empty()
+                                    status_text.text("Uploading certificate...")
+                                    progress_bar.progress(20)
+                                    
                                     try:
                                         service, _ = build_drive_service()
+                                        status_text.text("Preparing certificate file...")
+                                        progress_bar.progress(40)
+                                        
                                         timestamp = now_wib().strftime("%Y%m%d_%H%M%S")
                                         file_ext = sertifikasi_file.name.split('.')[-1]
                                         cert_filename = f"cert_{reg_id.strip()}_{timestamp}.{file_ext}"
                                         cert_bytes = sertifikasi_file.read()
+                                        
+                                        status_text.text(f"Uploading {cert_filename} to Google Drive...")
+                                        progress_bar.progress(60)
+                                        
                                         cert_drive_id = upload_bytes(service, FOLDER_ID_DEFAULT, cert_filename, cert_bytes, sertifikasi_file.type)
                                         
                                         if not cert_drive_id:
+                                            progress_bar.progress(0)
+                                            status_text.text("Upload failed")
                                             st.warning("⚠️ Certificate upload failed, but registration will continue without it.")
+                                        else:
+                                            progress_bar.progress(100)
+                                            status_text.text("Certificate uploaded!")
                                     except Exception as e:
+                                        progress_bar.progress(0)
+                                        status_text.text("Upload error")
                                         st.warning(f"⚠️ Certificate upload error: {e}. Registration will continue without it.")
                                 
                                 # Insert user with all fields
@@ -3404,8 +3424,18 @@ def page_gdrive():
             elif used_now + len(data) > cap:
                 st.error("Upload dibatalkan: file ini akan melebihi kapasitas maksimum.")
             else:
+                # Progress bar
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                status_text.text(f"Uploading {uploaded.name}...")
+                progress_bar.progress(20)
+                
                 fid = upload_bytes(service, folder_id, uploaded.name, data, mimetype=uploaded.type or 'application/octet-stream')
+                progress_bar.progress(80)
+                
                 if fid:
+                    progress_bar.progress(100)
+                    status_text.text("Upload complete!")
                     st.success(f"File '{uploaded.name}' terupload (ID: {fid})")
                     # Audit log upload
                     try:
@@ -3485,12 +3515,24 @@ def page_gdrive():
             auto_push = st.checkbox("Juga upload file ini ke Drive setelah replace", value=True, key="sync_auto_push")
             if up_db and st.button("Replace Database Lokal", type="primary"):
                 try:
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    status_text.text("Reading database file...")
+                    progress_bar.progress(10)
+                    
                     data = up_db.read()
+                    progress_bar.progress(20)
+                    
                     # Validasi header sqlite
                     if not data.startswith(b"SQLite format 3\x00"):
+                        progress_bar.progress(0)
+                        status_text.text("")
                         st.error("File bukan database SQLite yang valid.")
                     else:
                         ts = time.strftime('%Y%m%d_%H%M%S')
+                        progress_bar.progress(30)
+                        status_text.text("Creating backup...")
+                        
                         # Backup lokal lama jika ada
                         if os.path.exists(DB_PATH):
                             backup_local = f"local_backup_before_replace_{ts}.sqlite"
@@ -3500,18 +3542,30 @@ def page_gdrive():
                                 st.info(f"Backup lokal lama tersimpan: {backup_local}")
                             except Exception as e:
                                 st.error(f"Gagal membuat backup lokal: {e}")
+                        
+                        progress_bar.progress(60)
+                        status_text.text("Replacing local database...")
+                        
                         # Tulis DB baru
                         with open(DB_PATH,'wb') as fnew:
                             fnew.write(data)
+                        
+                        progress_bar.progress(80)
+                        
                         st.success("Database lokal berhasil diganti dengan file yang diupload.")
                         # Optional push ke Drive
                         if auto_push:
+                            status_text.text("Uploading to Google Drive...")
                             fname_drive = f"uploaded_db_{ts}.sqlite"
                             fid = upload_bytes(service, folder_id, fname_drive, data, mimetype='application/x-sqlite3')
+                            progress_bar.progress(95)
                             if fid:
                                 st.success(f"Salinan diupload ke Drive sebagai {fname_drive} (ID: {fid})")
                             else:
                                 st.error("Gagal mengupload salinan ke Drive.")
+                        
+                        progress_bar.progress(100)
+                        status_text.text("Database replacement complete!")
                         st.info("Silakan refresh halaman atau navigasi ulang untuk memastikan app memakai DB baru.")
                 except Exception as e:
                     st.error(f"Gagal mengganti database: {e}")
@@ -5209,8 +5263,17 @@ def page_agent():
                                 proof_filename = None
                                 upload_message = ""
                                 if uploaded_proof is not None:
+                                    # Initialize progress bar for image upload
+                                    progress_bar = st.progress(0)
+                                    status_text = st.empty()
+                                    status_text.text("Uploading payment proof...")
+                                    progress_bar.progress(20)
+                                    
                                     try:
                                         service, _ = build_drive_service()
+                                        status_text.text("Preparing file for upload...")
+                                        progress_bar.progress(40)
+                                        
                                         # Generate filename dengan timestamp dan case_id
                                         timestamp = now_wib().strftime("%Y%m%d_%H%M%S")
                                         original_filename = uploaded_proof.name
@@ -5220,10 +5283,18 @@ def page_agent():
                                         # Upload ke folder yang sama dengan backup
                                         proof_bytes = uploaded_proof.read()
                                         mimetype = uploaded_proof.type or "image/jpeg"
+                                        
+                                        status_text.text(f"Uploading {proof_filename} to Google Drive...")
+                                        progress_bar.progress(60)
+                                        
                                         proof_drive_id = upload_bytes(service, FOLDER_ID_DEFAULT, proof_filename, proof_bytes, mimetype)
                                         
+                                        progress_bar.progress(100)
+                                        status_text.text("Upload complete!")
                                         upload_message = f" Bukti gambar tersimpan: {proof_filename}"
                                     except Exception as e:
+                                        progress_bar.progress(0)
+                                        status_text.text("Upload failed")
                                         upload_message = f" (Catatan: Gagal upload gambar - {str(e)[:50]})"
                                 
                                 # 1) Simpan pembayaran dengan info bukti gambar dan approval_status='pending'
@@ -7032,7 +7103,14 @@ def page_user_setting():
         if uploaded_cert is not None:
             if st.button("Upload Certificate to Google Drive"):
                 try:
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    status_text.text("Preparing certificate upload...")
+                    progress_bar.progress(10)
+                    
                     service, _ = build_drive_service()
+                    progress_bar.progress(20)
+                    
                     timestamp = now_wib().strftime("%Y%m%d_%H%M%S")
                     original_filename = uploaded_cert.name
                     ext = original_filename.split('.')[-1] if '.' in original_filename else 'pdf'
@@ -7040,10 +7118,16 @@ def page_user_setting():
                     cert_bytes = uploaded_cert.read()
                     mimetype = uploaded_cert.type or "application/pdf"
                     
+                    progress_bar.progress(40)
+                    status_text.text(f"Uploading {cert_filename}...")
+                    
                     # Upload to Google Drive
                     cert_drive_id = upload_bytes(service, FOLDER_ID_DEFAULT, cert_filename, cert_bytes, mimetype)
+                    progress_bar.progress(80)
                     
                     if cert_drive_id:
+                        progress_bar.progress(90)
+                        
                         # Save to database
                         execute(
                             "UPDATE users SET sertifikasi_drive_id=?, sertifikasi_filename=? WHERE id=?",
@@ -7059,9 +7143,13 @@ def page_user_setting():
                         except Exception:
                             pass
                         
+                        progress_bar.progress(100)
+                        status_text.text("Certificate uploaded successfully!")
                         st.success(f"✅ Certificate uploaded successfully: {cert_filename}")
                         st.rerun()
                     else:
+                        progress_bar.progress(0)
+                        status_text.text("")
                         st.error("Failed to upload certificate to Google Drive.")
                 except Exception as e:
                     st.error(f"Upload failed: {e}")
@@ -10625,8 +10713,22 @@ def page_supervisor():
                                 added = 0
                                 updated = 0
                                 skipped = 0
+                                error_count = 0
+                                error_rows = []
+                                
+                                # Initialize progress tracking
+                                total_rows = len(df_full)
+                                progress_bar = st.progress(0)
+                                status_text = st.empty()
+                                status_text.text(f"Importing company library... (0 / {total_rows})")
                                 
                                 for idx, row in df_full.iterrows():
+                                    row_num = idx + 2
+                                    # Update progress
+                                    progress = int(((idx + 1) / total_rows) * 100)
+                                    progress_bar.progress(progress)
+                                    status_text.text(f"Processing row {idx + 1} / {total_rows}... (➕ {added} | 🔄 {updated} | ⏭️ {skipped} | ❌ {error_count})")
+                                    
                                     try:
                                         masked = str(row.get('masked', '')).strip()
                                         decoded = str(row.get('decoded', '')).strip()
@@ -10656,6 +10758,27 @@ def page_supervisor():
                                             added += 1
                                     except Exception as e:
                                         skipped += 1
+                                        error_count += 1
+                                        error_rows.append(f"Row {row_num}: {str(e)[:100]}")
+                                
+                                progress_bar.progress(100)
+                                status_text.text(f"✅ Complete! | Added: {added} | Updated: {updated} | Skipped: {skipped} | Errors: {error_count}")
+                                
+                                # Show detailed statistics
+                                col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
+                                with col_stat1:
+                                    st.metric("➕ Added", added)
+                                with col_stat2:
+                                    st.metric("🔄 Updated", updated)
+                                with col_stat3:
+                                    st.metric("⏭️ Skipped", skipped)
+                                with col_stat4:
+                                    st.metric("❌ Errors", error_count)
+                                
+                                if error_rows:
+                                    with st.expander("📋 View Errors", expanded=True):
+                                        st.error(f"**❌ Error Rows ({len(error_rows)}):**")
+                                        st.text("\\n".join(error_rows[:30]))
                                 
                                 st.session_state['lib_upload_result'] = f"✅ Upload complete! Added: {added}, Updated: {updated}, Skipped: {skipped}"
                                 
@@ -10808,18 +10931,43 @@ def page_supervisor():
                                 try:
                                     imported_count = 0
                                     skipped_count = 0
+                                    duplicate_count = 0
+                                    error_count = 0
                                     inserted_ids = []
+                                    error_rows = []  # Track rows with errors
+                                    duplicate_rows = []  # Track duplicate Case_IDs
+                                    empty_rows = []  # Track rows with empty Case_ID
+                                    
+                                    # Initialize progress tracking
+                                    total_rows = len(df_sup)
+                                    progress_bar = st.progress(0)
+                                    status_text = st.empty()
+                                    status_text.text(f"Importing supervisor data... (0 / {total_rows})")
                                     
                                     for idx, row in df_sup.iterrows():
-                                        # Check if Case_ID already exists
-                                        case_id = str(row.get('Case_ID', '')).strip()
-                                        if not case_id:
-                                            skipped_count += 1
-                                            continue
+                                        row_num = idx + 2  # Excel row (header = 1, data starts at 2)
                                         
-                                        existing = fetchone("SELECT id FROM supervisor_data WHERE Case_ID = ?", (case_id,))
-                                        if existing:
-                                            skipped_count += 1
+                                        try:
+                                            # Update progress
+                                            progress = int(((idx + 1) / total_rows) * 100)
+                                            progress_bar.progress(progress)
+                                            status_text.text(f"Processing row {idx + 1} / {total_rows}... (✅ {imported_count} | ⏭️ {skipped_count} | 🔁 {duplicate_count} | ❌ {error_count})")
+                                            
+                                            # Check if Case_ID already exists
+                                            case_id = str(row.get('Case_ID', '')).strip()
+                                            if not case_id:
+                                                skipped_count += 1
+                                                empty_rows.append(row_num)
+                                                continue
+                                            
+                                            existing = fetchone("SELECT id FROM supervisor_data WHERE Case_ID = ?", (case_id,))
+                                            if existing:
+                                                duplicate_count += 1
+                                                duplicate_rows.append(f"Row {row_num}: {case_id}")
+                                                continue
+                                        except Exception as row_err:
+                                            error_count += 1
+                                            error_rows.append(f"Row {row_num}: {str(row_err)[:100]}")
                                             continue
                                         
                                         # Build insert query dynamically based on available columns
@@ -10861,8 +11009,45 @@ def page_supervisor():
                                             except Exception:
                                                 pass
                                     
-                                    st.success(f"✅ Import selesai! Imported: {imported_count}, Skipped (duplicate/empty): {skipped_count}")
-                                    st.balloons()
+                                    progress_bar.progress(100)
+                                    status_text.text(f"✅ Import Complete! | Imported: {imported_count} | Duplicates: {duplicate_count} | Empty: {len(empty_rows)} | Errors: {error_count}")
+                                    
+                                    # Detailed statistics panel
+                                    st.success(f"✅ Import selesai! Total: {total_rows} rows")
+                                    
+                                    col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
+                                    with col_stat1:
+                                        st.metric("✅ Imported", imported_count)
+                                    with col_stat2:
+                                        st.metric("🔁 Duplicates", duplicate_count)
+                                    with col_stat3:
+                                        st.metric("⏭️ Empty Case_ID", len(empty_rows))
+                                    with col_stat4:
+                                        st.metric("❌ Errors", error_count)
+                                    
+                                    # Show details if there are issues
+                                    if duplicate_rows or error_rows or empty_rows:
+                                        with st.expander("📋 View Details", expanded=True):
+                                            if duplicate_rows:
+                                                st.warning(f"**🔁 Duplicate Case_IDs ({len(duplicate_rows)}):**")
+                                                st.text("\\n".join(duplicate_rows[:50]))
+                                                if len(duplicate_rows) > 50:
+                                                    st.caption(f"... and {len(duplicate_rows) - 50} more")
+                                            
+                                            if empty_rows:
+                                                st.info(f"**⏭️ Rows with Empty Case_ID ({len(empty_rows)}):**")
+                                                st.text(f"Excel rows: {', '.join(map(str, empty_rows[:30]))}")
+                                                if len(empty_rows) > 30:
+                                                    st.caption(f"... and {len(empty_rows) - 30} more")
+                                            
+                                            if error_rows:
+                                                st.error(f"**❌ Rows with Errors ({len(error_rows)}):**")
+                                                st.text("\\n".join(error_rows[:20]))
+                                                if len(error_rows) > 20:
+                                                    st.caption(f"... and {len(error_rows) - 20} more")
+                                    
+                                    if imported_count > 0:
+                                        st.balloons()
                                     # Record migration history for undo
                                     try:
                                         u = current_user() or {}
@@ -10965,19 +11150,42 @@ def page_supervisor():
                             if st.button("✅ Konfirmasi Import", type="primary", key="tracer_confirm_import"):
                                 try:
                                     imported_count = 0
-                                    skipped_count = 0
+                                    duplicate_count = 0
+                                    error_count = 0
                                     inserted_ids = []
+                                    error_rows = []
+                                    duplicate_rows = []
+                                    empty_rows = []
+                                    
+                                    # Initialize progress tracking
+                                    total_rows = len(df_tracer)
+                                    progress_bar = st.progress(0)
+                                    status_text = st.empty()
+                                    status_text.text(f"Importing tracer data... (0 / {total_rows})")
                                     
                                     for idx, row in df_tracer.iterrows():
-                                        agreement_no = str(row.get('Agreement_No', '')).strip()
-                                        if not agreement_no:
-                                            skipped_count += 1
-                                            continue
+                                        row_num = idx + 2
                                         
-                                        # Check if already exists
-                                        existing = fetchone("SELECT id FROM assign_tracer WHERE Agreement_No = ?", (agreement_no,))
-                                        if existing:
-                                            skipped_count += 1
+                                        try:
+                                            # Update progress
+                                            progress = int(((idx + 1) / total_rows) * 100)
+                                            progress_bar.progress(progress)
+                                            status_text.text(f"Processing row {idx + 1} / {total_rows}... (✅ {imported_count} | 🔁 {duplicate_count} | ❌ {error_count})")
+                                            
+                                            agreement_no = str(row.get('Agreement_No', '')).strip()
+                                            if not agreement_no:
+                                                empty_rows.append(row_num)
+                                                continue
+                                            
+                                            # Check if already exists
+                                            existing = fetchone("SELECT id FROM assign_tracer WHERE Agreement_No = ?", (agreement_no,))
+                                            if existing:
+                                                duplicate_count += 1
+                                                duplicate_rows.append(f"Row {row_num}: {agreement_no}")
+                                                continue
+                                        except Exception as row_err:
+                                            error_count += 1
+                                            error_rows.append(f"Row {row_num}: {str(row_err)[:100]}")
                                             continue
                                         
                                         # Auto-decode if EMPLOYER provided but no Decoded_Company_Name
@@ -11014,8 +11222,34 @@ def page_supervisor():
                                             pass
                                         imported_count += 1
                                     
-                                    st.success(f"✅ Import selesai! Imported: {imported_count}, Skipped (duplicate/empty): {skipped_count}")
-                                    st.balloons()
+                                    progress_bar.progress(100)
+                                    status_text.text(f"✅ Complete! | Imported: {imported_count} | Duplicates: {duplicate_count} | Empty: {len(empty_rows)} | Errors: {error_count}")
+                                    
+                                    st.success(f"✅ Import selesai! Total: {total_rows} rows")
+                                    
+                                    col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
+                                    with col_stat1:
+                                        st.metric("✅ Imported", imported_count)
+                                    with col_stat2:
+                                        st.metric("🔁 Duplicates", duplicate_count)
+                                    with col_stat3:
+                                        st.metric("⏭️ Empty Agreement_No", len(empty_rows))
+                                    with col_stat4:
+                                        st.metric("❌ Errors", error_count)
+                                    
+                                    if duplicate_rows or error_rows or empty_rows:
+                                        with st.expander("📋 View Details", expanded=True):
+                                            if duplicate_rows:
+                                                st.warning(f"**🔁 Duplicates ({len(duplicate_rows)}):**")
+                                                st.text("\\n".join(duplicate_rows[:50]))
+                                            if empty_rows:
+                                                st.info(f"**⏭️ Empty Agreement_No ({len(empty_rows)}):** Rows {', '.join(map(str, empty_rows[:30]))}")
+                                            if error_rows:
+                                                st.error(f"**❌ Errors ({len(error_rows)}):**")
+                                                st.text("\\n".join(error_rows[:20]))
+                                    
+                                    if imported_count > 0:
+                                        st.balloons()
                                     # record migration history for undo
                                     try:
                                         u = current_user() or {}
@@ -11110,13 +11344,37 @@ def page_supervisor():
                             if st.button("✅ Konfirmasi Import", type="primary", key="agent_confirm_import"):
                                 try:
                                     imported_count = 0
+                                    skipped_count = 0
+                                    error_count = 0
                                     inserted_ids = []
+                                    error_rows = []
+                                    empty_rows = []
+                                    
+                                    # Initialize progress tracking
+                                    total_rows = len(df_agent)
+                                    progress_bar = st.progress(0)
+                                    status_text = st.empty()
+                                    status_text.text(f"Importing agent results... (0 / {total_rows})")
 
                                     for idx, row in df_agent.iterrows():
-                                        agreement_no = str(row.get('Agreement_No', '')).strip()
-                                        agent_name = str(row.get('agent', '')).strip()
+                                        row_num = idx + 2
                                         
-                                        if not agreement_no or not agent_name:
+                                        try:
+                                            # Update progress
+                                            progress = int(((idx + 1) / total_rows) * 100)
+                                            progress_bar.progress(progress)
+                                            status_text.text(f"Processing row {idx + 1} / {total_rows}... (✅ {imported_count} | ⏭️ {skipped_count} | ❌ {error_count})")
+                                            
+                                            agreement_no = str(row.get('Agreement_No', '')).strip()
+                                            agent_name = str(row.get('agent', '')).strip()
+                                            
+                                            if not agreement_no or not agent_name:
+                                                skipped_count += 1
+                                                empty_rows.append(f"Row {row_num}: Missing Agreement_No or agent")
+                                                continue
+                                        except Exception as row_err:
+                                            error_count += 1
+                                            error_rows.append(f"Row {row_num}: {str(row_err)[:100]}")
                                             continue
                                         
                                         # Parse PTP amount (handle currency format)
@@ -11149,8 +11407,30 @@ def page_supervisor():
                                             pass
                                         imported_count += 1
                                     
-                                    st.success(f"✅ Import selesai! Total imported: {imported_count}")
-                                    st.balloons()
+                                    progress_bar.progress(100)
+                                    status_text.text(f"✅ Complete! | Imported: {imported_count} | Skipped: {skipped_count} | Errors: {error_count}")
+                                    
+                                    st.success(f"✅ Import selesai! Total: {total_rows} rows")
+                                    
+                                    col_stat1, col_stat2, col_stat3 = st.columns(3)
+                                    with col_stat1:
+                                        st.metric("✅ Imported", imported_count)
+                                    with col_stat2:
+                                        st.metric("⏭️ Skipped", skipped_count)
+                                    with col_stat3:
+                                        st.metric("❌ Errors", error_count)
+                                    
+                                    if empty_rows or error_rows:
+                                        with st.expander("📋 View Details", expanded=True):
+                                            if empty_rows:
+                                                st.info(f"**⏭️ Skipped Rows ({len(empty_rows)}):**")
+                                                st.text("\\n".join(empty_rows[:30]))
+                                            if error_rows:
+                                                st.error(f"**❌ Error Rows ({len(error_rows)}):**")
+                                                st.text("\\n".join(error_rows[:20]))
+                                    
+                                    if imported_count > 0:
+                                        st.balloons()
                                     try:
                                         u = current_user() or {}
                                         if imported_count > 0:
@@ -11283,24 +11563,54 @@ def page_supervisor():
                             if st.button("✅ Konfirmasi Import", type="primary", key="payment_confirm_import"):
                                 try:
                                     imported_count = 0
+                                    skipped_count = 0
+                                    error_count = 0
                                     u = current_user()
                                     uploader_name = u.get('full_name') if u else 'Migration'
                                     
                                     inserted_ids = []
+                                    error_rows = []
+                                    empty_rows = []
+                                    invalid_amount_rows = []
+                                    
+                                    # Initialize progress tracking
+                                    total_rows = len(df_payment)
+                                    progress_bar = st.progress(0)
+                                    status_text = st.empty()
+                                    status_text.text(f"Importing payment data... (0 / {total_rows})")
+                                    
                                     for idx, row in df_payment.iterrows():
-                                        agreement_no = str(row.get('Agreement_No', '')).strip()
+                                        row_num = idx + 2
                                         
-                                        if not agreement_no:
-                                            continue
-                                        
-                                        # Parse paid_amount
-                                        paid_amt = row.get('paid_amount')
-                                        if pd.notna(paid_amt):
-                                            try:
-                                                paid_amt = float(str(paid_amt).replace(',', '').replace('Rp', '').strip())
-                                            except:
+                                        try:
+                                            # Update progress
+                                            progress = int(((idx + 1) / total_rows) * 100)
+                                            progress_bar.progress(progress)
+                                            status_text.text(f"Processing row {idx + 1} / {total_rows}... (✅ {imported_count} | ⏭️ {skipped_count} | ❌ {error_count})")
+                                            
+                                            agreement_no = str(row.get('Agreement_No', '')).strip()
+                                            
+                                            if not agreement_no:
+                                                skipped_count += 1
+                                                empty_rows.append(f"Row {row_num}: Empty Agreement_No")
                                                 continue
-                                        else:
+                                            
+                                            # Parse paid_amount
+                                            paid_amt = row.get('paid_amount')
+                                            if pd.notna(paid_amt):
+                                                try:
+                                                    paid_amt = float(str(paid_amt).replace(',', '').replace('Rp', '').strip())
+                                                except:
+                                                    skipped_count += 1
+                                                    invalid_amount_rows.append(f"Row {row_num} ({agreement_no}): Invalid amount '{paid_amt}'")
+                                                    continue
+                                            else:
+                                                skipped_count += 1
+                                                invalid_amount_rows.append(f"Row {row_num} ({agreement_no}): Missing paid_amount")
+                                                continue
+                                        except Exception as row_err:
+                                            error_count += 1
+                                            error_rows.append(f"Row {row_num}: {str(row_err)[:100]}")
                                             continue
                                         
                                         last_id = execute(
@@ -11322,8 +11632,33 @@ def page_supervisor():
                                             pass
                                         imported_count += 1
                                     
-                                    st.success(f"✅ Import selesai! Total imported: {imported_count}")
-                                    st.balloons()
+                                    progress_bar.progress(100)
+                                    status_text.text(f"✅ Complete! | Imported: {imported_count} | Skipped: {skipped_count} | Errors: {error_count}")
+                                    
+                                    st.success(f"✅ Import selesai! Total: {total_rows} rows")
+                                    
+                                    col_stat1, col_stat2, col_stat3 = st.columns(3)
+                                    with col_stat1:
+                                        st.metric("✅ Imported", imported_count)
+                                    with col_stat2:
+                                        st.metric("⏭️ Skipped", skipped_count)
+                                    with col_stat3:
+                                        st.metric("❌ Errors", error_count)
+                                    
+                                    if empty_rows or invalid_amount_rows or error_rows:
+                                        with st.expander("📋 View Details", expanded=True):
+                                            if empty_rows:
+                                                st.info(f"**⏭️ Empty Agreement_No ({len(empty_rows)}):**")
+                                                st.text("\\n".join(empty_rows[:30]))
+                                            if invalid_amount_rows:
+                                                st.warning(f"**⚠️ Invalid Amount ({len(invalid_amount_rows)}):**")
+                                                st.text("\\n".join(invalid_amount_rows[:30]))
+                                            if error_rows:
+                                                st.error(f"**❌ Error Rows ({len(error_rows)}):**")
+                                                st.text("\\n".join(error_rows[:20]))
+                                    
+                                    if imported_count > 0:
+                                        st.balloons()
                                     # record migration history for undo
                                     try:
                                         u = current_user() or {}
