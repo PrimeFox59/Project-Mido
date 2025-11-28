@@ -8002,6 +8002,62 @@ def page_supervisor():
             # Agent-updated fields
             "STATUS", "REGISTERED_PHONE", "Additional_Contacts", "Remarks_Suggested_NIK_Prospect", "Payment", "Paid_Off_Status"
         ]
+        
+        # Download Template Button for Supervisor Data
+        st.markdown("#### 📥 Download Template")
+        st.info("💡 Download template Excel dengan semua kolom yang diperlukan. Isi data Anda sesuai format template.")
+        
+        # Create template DataFrame with all field names as columns
+        template_supervisor_df = pd.DataFrame(columns=field_names)
+        # Add sample rows for guidance
+        sample_data = {
+            field_names[0]: ['Sample data - replace with your actual data'],
+            **{col: [''] for col in field_names[1:]}
+        }
+        template_supervisor_df = pd.DataFrame(sample_data)
+        
+        # Convert to Excel
+        template_sup_buffer = io.BytesIO()
+        with pd.ExcelWriter(template_sup_buffer, engine='openpyxl') as writer:
+            template_supervisor_df.to_excel(writer, index=False, sheet_name='Supervisor Data')
+            # Add instructions sheet
+            instructions_df = pd.DataFrame({
+                'Instructions': [
+                    '1. Isi data Anda pada sheet "Supervisor Data"',
+                    '2. JANGAN ubah nama kolom (header)',
+                    '3. Case_ID wajib diisi dan unik',
+                    '4. Kolom opsional boleh dikosongkan',
+                    '5. Upload file ini setelah diisi',
+                    '',
+                    'Kolom WAJIB:',
+                    '- Case_ID',
+                    '- Customer_name',
+                    '- Virtual_Account_Number',
+                    '',
+                    'Kolom OPSIONAL (boleh kosong):',
+                    '- NIK_KTP, EMPLOYMENT_UPDATE, EMPLOYER',
+                    '- Debtor_Legal_Name, Employee_Name, Employee_ID_Number',
+                    '- Debtor_Relation_to_Employee',
+                    '- STATUS, REGISTERED_PHONE, Additional_Contacts',
+                    '- Remarks_Suggested_NIK_Prospect, Payment, Paid_Off_Status'
+                ]
+            })
+            instructions_df.to_excel(writer, index=False, sheet_name='Instructions')
+        template_sup_buffer.seek(0)
+        
+        col_btn1, col_btn2 = st.columns([1, 3])
+        with col_btn1:
+            st.download_button(
+                label="📥 Download Template Excel",
+                data=template_sup_buffer,
+                file_name="supervisor_data_template.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                help="Download template Excel untuk upload Supervisor Data",
+                type="primary"
+            )
+        
+        st.markdown("---")
+        
         # Tampilkan pesan hasil upload sebelumnya (sekali tampil)
         _upload_result_msg = st.session_state.pop('sup_upload_result', None)
         if _upload_result_msg:
@@ -9933,6 +9989,30 @@ def page_supervisor():
                 </p>
             </div>
             """, unsafe_allow_html=True)
+            
+            # Download Template Button
+            st.markdown("#### 📥 Download Template")
+            template_df = pd.DataFrame({
+                'Masked': ['VI****** CA** IN******* PT', 'AD****** FI******* PT'],
+                'Decoded': ['VICTORIA CARE INDONESIA PT', 'ADITAMA FINANSIAL PT'],
+                'Notes': ['Example entry 1', 'Example entry 2']
+            })
+            
+            # Convert to Excel
+            template_buffer = io.BytesIO()
+            with pd.ExcelWriter(template_buffer, engine='openpyxl') as writer:
+                template_df.to_excel(writer, index=False, sheet_name='Company Library')
+            template_buffer.seek(0)
+            
+            st.download_button(
+                label="📥 Download Template Excel",
+                data=template_buffer,
+                file_name="company_library_template.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                help="Download template Excel untuk upload Company Library"
+            )
+            
+            st.markdown("---")
             
             # Display upload result message if any
             _upload_lib_result = st.session_state.pop('lib_upload_result', None)
