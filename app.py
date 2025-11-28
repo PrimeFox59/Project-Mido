@@ -46,17 +46,26 @@ st.markdown("""
        GLOBAL APP BACKGROUND & THEME
     ============================================ */
     
-    /* Sidebar Toggle Button - Always visible when sidebar is collapsed */
-    button[data-testid="baseButton-header"] {
+    /* Sidebar Toggle Button - CRITICAL: Always visible and accessible */
+    button[data-testid="baseButton-header"],
+    button[data-testid="collapsedControl"],
+    [data-testid="collapsedControl"] button,
+    section[data-testid="stSidebar"] button[kind="header"] {
         visibility: visible !important;
         display: flex !important;
-    }
-    
-    /* Ensure sidebar collapse button is always accessible */
-    button[kind="header"] {
-        visibility: visible !important;
         opacity: 1 !important;
         pointer-events: auto !important;
+        z-index: 999999 !important;
+        position: relative !important;
+    }
+    
+    /* Ensure header toolbar is visible for sidebar toggle */
+    header[data-testid="stHeader"],
+    .stApp > header {
+        visibility: visible !important;
+        display: block !important;
+        height: auto !important;
+        min-height: 2.5rem !important;
     }
     
     /* Subtle gradient background for main app */
@@ -74,28 +83,16 @@ st.markdown("""
         border-radius: 20px !important;
         padding: 1rem 2rem 2rem 2rem !important;
         padding-top: 1rem !important;
-        margin-top: 0 !important;
+        margin-top: 1rem !important;
     }
     
-    /* Remove top whitespace/header area */
-    header[data-testid="stHeader"] {
-        display: none !important;
-    }
-    
-    /* Compact toolbar */
-    .stApp > header {
-        height: 0 !important;
-        min-height: 0 !important;
-    }
-    
-    /* Remove top padding from main container */
+    /* Compact content area but ensure header space exists */
     section.main > div {
-        padding-top: 0 !important;
+        padding-top: 0.5rem !important;
     }
     
-    /* Compact content area */
     .main {
-        padding-top: 0 !important;
+        padding-top: 0.5rem !important;
     }
     
     /* ============================================
