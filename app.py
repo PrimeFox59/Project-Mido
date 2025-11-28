@@ -46,6 +46,19 @@ st.markdown("""
        GLOBAL APP BACKGROUND & THEME
     ============================================ */
     
+    /* Sidebar Toggle Button - Always visible when sidebar is collapsed */
+    button[data-testid="baseButton-header"] {
+        visibility: visible !important;
+        display: flex !important;
+    }
+    
+    /* Ensure sidebar collapse button is always accessible */
+    button[kind="header"] {
+        visibility: visible !important;
+        opacity: 1 !important;
+        pointer-events: auto !important;
+    }
+    
     /* Subtle gradient background for main app */
     .stApp {
         background: linear-gradient(135deg, 
@@ -3662,8 +3675,25 @@ def main():
     if st.session_state.page == 'RestoreSystem' and not user:
         st.markdown("""
         <style>
-        /* Hide sidebar on restore page */
-        [data-testid="stSidebar"] {display: none !important;}
+        /* Collapse sidebar on restore page but keep toggle button visible */
+        [data-testid="stSidebar"][aria-expanded="true"] {
+            display: flex !important;
+        }
+        
+        [data-testid="stSidebar"][aria-expanded="false"] {
+            display: none !important;
+        }
+        
+        /* Ensure sidebar toggle button is always visible and accessible */
+        button[data-testid="baseButton-header"],
+        button[kind="header"],
+        [data-testid="collapsedControl"] {
+            visibility: visible !important;
+            display: flex !important;
+            opacity: 1 !important;
+            pointer-events: auto !important;
+            z-index: 999999 !important;
+        }
         
         /* Limit content width to compact centered layout */
         .main .block-container {
