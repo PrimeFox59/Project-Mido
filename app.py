@@ -1552,18 +1552,106 @@ def get_all_active_agents():
     except Exception:
         return []
 
+def get_agent_allowed_dts(user_id: int) -> list:
+    """Get list of allowed DTs (Lending Entities) for an agent.
+    
+    Returns: List of DT names. Empty list means no restrictions (can accept all DTs).
+    """
+    try:
+        rows = fetchall("SELECT lending_entity FROM agent_dt_restrictions WHERE user_id = ?", (user_id,))
+        return [r['lending_entity'] for r in rows]
+    except Exception:
+        return []
+
+
+def set_agent_allowed_dts(user_id: int, dt_list: list, created_by: str = None) -> tuple:
+    """Set allowed DTs for an agent. Replaces existing restrictions.
+    
+    Args:
+        user_id: User ID of the agent
+        dt_list: List of DT names (Lending Entities) to allow. Empty list removes all restrictions.
+        created_by: Name of user making the change
+    
+    Returns: (success: bool, message: str)
+    """
+    try:
+        # Delete existing restrictions
+        execute("DELETE FROM agent_dt_restrictions WHERE user_id = ?", (user_id,))
+        
+        # Add new restrictions
+        if dt_list:
+            for dt in dt_list:
+                if dt and dt.strip():
+                    execute(
+                        "INSERT INTO agent_dt_restrictions (user_id, lending_entity, created_by) VALUES (?, ?, ?)",
+                        (user_id, dt.strip(), created_by)
+                    )
+        
+        dt_count = len(dt_list) if dt_list else 0
+        return True, f"DT restrictions updated: {dt_count} DT(s) allowed" if dt_count > 0 else "All DT restrictions removed (agent can accept all DTs)"
+    except Exception as e:
+        return False, f"Error setting DT restrictions: {e}"
+
+
+def check_agent_dt_restriction(agent_name: str, case_dt: str) -> tuple:
+    """Check if agent is allowed to take case from this DT.
+    
+    Args:
+        agent_name: Full name or login_id of the agent
+        case_dt: DT (Lending Entity) of the case
+    
+    Returns: (allowed: bool, reason: str)
+    """
+    try:
+        # Get agent user_id
+        agent = fetchone(
+            "SELECT id FROM users WHERE (full_name = ? OR login_id = ?) AND role = 'Agent'",
+            (agent_name, agent_name)
+        )
+        if not agent:
+            return False, "Agent not found"
+        
+        # Get allowed DTs
+        allowed_dts = get_agent_allowed_dts(agent['id'])
+        
+        # No restrictions = can accept all DTs
+        if not allowed_dts:
+            return True, "No DT restrictions"
+        
+        # Check if case DT is in allowed list
+        if case_dt in allowed_dts:
+            return True, f"DT '{case_dt}' allowed"
+        else:
+            return False, f"Agent restricted to DT(s): {', '.join(allowed_dts)}"
+    except Exception as e:
+        return True, f"Error checking DT restriction (allowing): {e}"
+
+
 def can_agent_take_case(agent_name: str, agreement_no: str) -> tuple:
-    """Check if agent can take this case based on rotation rules.
+    """Check if agent can take this case based on rotation rules and DT restrictions.
     
     Rules:
     1. Case must not have active assignment
     2. Case must not be frozen
     3. Case must not have payment yet
-    4. Agent can only take case if ALL other agents have touched it (rotation complete)
+    4. Agent must be allowed to handle this DT (if restrictions exist)
+    5. Agent can only take case if ALL other agents have touched it (rotation complete)
     
     Returns: (can_take: bool, reason: str)
     """
     try:
+        # Check 0: DT restriction (check first to fail fast)
+        case_info = fetchone(
+            "SELECT Lending_Entity FROM supervisor_data WHERE Case_ID = ? OR Virtual_Account_Number = ? OR Third_Uid = ? LIMIT 1",
+            (agreement_no, agreement_no, agreement_no)
+        )
+        if case_info:
+            case_dt = case_info.get('Lending_Entity', '')
+            if case_dt:
+                dt_allowed, dt_reason = check_agent_dt_restriction(agent_name, case_dt)
+                if not dt_allowed:
+                    return False, dt_reason
+        
         # Check 1: Active assignment exists?
         active = get_active_assignment(agreement_no)
         if active:
@@ -6839,7 +6927,7 @@ def page_user_setting():
             st.caption("Manage users, approve pending registrations, and edit user details")
             
             # Sub-tabs untuk User Management
-            mgmt_tabs = st.tabs(["Pending Approvals", "All Users", "Add New User"])
+            mgmt_tabs = st.tabs(["Pending Approvals", "All Users", "Add New User", "🎯 Agent DT Restrictions"])
             
             # --- Pending Approvals Sub-tab ---
             with mgmt_tabs[0]:
@@ -7087,6 +7175,115 @@ def page_user_setting():
                                     st.rerun()
                                 except Exception as e:
                                     st.error(f"Failed to create user: {e}")
+            
+            # --- Agent DT Restrictions Sub-tab ---
+            with mgmt_tabs[3]:
+                st.markdown("#### 🎯 Agent DT (Lending Entity) Restrictions")
+                st.caption("Configure which Lending Entities (DT) each Agent can accept assignments from. Leave empty to allow all DTs.")
+                
+                # Get all agents
+                all_agents = fetchall("SELECT id, full_name, login_id FROM users WHERE role='Agent' AND approved=1 ORDER BY full_name")
+                
+                if not all_agents:
+                    st.warning("⚠️ No approved Agents found in the system.")
+                else:
+                    # Get all unique DTs from supervisor_data
+                    dt_rows = fetchall("SELECT DISTINCT Lending_Entity FROM supervisor_data WHERE Lending_Entity IS NOT NULL AND Lending_Entity != '' ORDER BY Lending_Entity")
+                    available_dts = [row['Lending_Entity'] for row in dt_rows if row.get('Lending_Entity')]
+                    
+                    if not available_dts:
+                        st.warning("⚠️ No Lending Entities found in supervisor_data.")
+                    else:
+                        st.info(f"📊 Found {len(available_dts)} unique Lending Entity/DT values")
+                        
+                        # Agent selector
+                        selected_agent_id = st.selectbox(
+                            "Select Agent to configure",
+                            options=[a['id'] for a in all_agents],
+                            format_func=lambda x: f"{next((a['full_name'] for a in all_agents if a['id'] == x), 'Unknown')} ({next((a['login_id'] for a in all_agents if a['id'] == x), 'N/A')})",
+                            key="dt_restriction_agent_select"
+                        )
+                        
+                        if selected_agent_id:
+                            selected_agent = next((a for a in all_agents if a['id'] == selected_agent_id), None)
+                            
+                            if selected_agent:
+                                st.markdown(f"**Configuring restrictions for:** {selected_agent['full_name']} ({selected_agent['login_id']})")
+                                
+                                # Get current allowed DTs for this agent
+                                current_dts = get_agent_allowed_dts(selected_agent_id)
+                                
+                                # Display current restrictions
+                                if current_dts:
+                                    st.success(f"✅ Current restrictions: Agent can only accept from **{len(current_dts)} DT(s)**: {', '.join(current_dts)}")
+                                else:
+                                    st.info("ℹ️ No restrictions set - Agent can accept assignments from **all DTs**")
+                                
+                                st.markdown("---")
+                                
+                                # Multiselect for allowed DTs
+                                st.markdown("**Set Allowed Lending Entities (DT)**")
+                                st.caption("Select one or more DTs that this agent can accept. Leave empty to remove all restrictions.")
+                                
+                                selected_dts = st.multiselect(
+                                    "Allowed DTs (Lending Entities)",
+                                    options=available_dts,
+                                    default=current_dts,
+                                    key="dt_restriction_multiselect",
+                                    help="Select multiple DTs using the dropdown. Agent will only be able to accept assignments from these selected DTs."
+                                )
+                                
+                                # Set button
+                                col1, col2 = st.columns([1, 3])
+                                with col1:
+                                    if st.button("💾 Set DT Restrictions", type="primary"):
+                                        success, message = set_agent_allowed_dts(
+                                            selected_agent_id, 
+                                            selected_dts,
+                                            created_by=u.get('full_name') or u.get('login_id')
+                                        )
+                                        
+                                        if success:
+                                            # Audit log
+                                            try:
+                                                detail = f"Set DT restrictions for {selected_agent['login_id']}: {len(selected_dts)} DT(s)"
+                                                execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                                                        (u.get('id'), "DT_RESTRICTION_SET", detail))
+                                            except Exception:
+                                                pass
+                                            
+                                            st.success(f"✅ {message}")
+                                            st.rerun()
+                                        else:
+                                            st.error(f"❌ {message}")
+                                
+                                # Show preview of restrictions impact
+                                if selected_dts:
+                                    st.markdown("---")
+                                    st.markdown("**Preview: Assignment Restrictions**")
+                                    st.caption(f"With these settings, agent **{selected_agent['full_name']}** will:")
+                                    st.markdown(f"- ✅ **CAN** accept assignments from: {', '.join(selected_dts)}")
+                                    
+                                    blocked_dts = [dt for dt in available_dts if dt not in selected_dts]
+                                    if blocked_dts:
+                                        st.markdown(f"- ❌ **CANNOT** accept assignments from: {', '.join(blocked_dts)}")
+                                
+                                # Show all agent restrictions summary
+                                st.markdown("---")
+                                st.markdown("**All Agent DT Restrictions Summary**")
+                                
+                                restrictions_summary = []
+                                for agent in all_agents:
+                                    agent_dts = get_agent_allowed_dts(agent['id'])
+                                    restrictions_summary.append({
+                                        'Agent': f"{agent['full_name']} ({agent['login_id']})",
+                                        'Allowed DTs': ', '.join(agent_dts) if agent_dts else 'All DTs (No restrictions)',
+                                        'Count': len(agent_dts) if agent_dts else len(available_dts)
+                                    })
+                                
+                                if restrictions_summary:
+                                    df_restrictions = pd.DataFrame(restrictions_summary)
+                                    st.dataframe(df_restrictions, use_container_width=True, hide_index=True)
 
 # -------------------------
 # Supervisor Page
