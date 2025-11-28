@@ -60,22 +60,12 @@ st.markdown("""
     }
     
     /* Ensure header toolbar is visible for sidebar toggle */
-    header[data-testid="stHeader"] {
+    header[data-testid="stHeader"],
+    .stApp > header {
         visibility: visible !important;
         display: block !important;
         height: auto !important;
         min-height: 2.5rem !important;
-        background: transparent !important;
-    }
-    
-    /* Hide specific toolbar items but keep sidebar toggle */
-    [data-testid="stToolbar"] > div:not(:has(button[data-testid="baseButton-header"])) {
-        display: none !important;
-    }
-    
-    /* Hide GitHub/Fork links if they exist */
-    header[data-testid="stHeader"] a[href*="github"] {
-        display: none !important;
     }
     
     /* Subtle gradient background for main app */
