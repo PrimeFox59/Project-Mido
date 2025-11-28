@@ -1627,15 +1627,80 @@ def check_agent_dt_restriction(agent_name: str, case_dt: str) -> tuple:
         return True, f"Error checking DT restriction (allowing): {e}"
 
 
+def has_recent_payment(agreement_no: str, days: int = 30) -> tuple:
+    """Check if case has payment within specified days.
+    
+    Args:
+        agreement_no: Case identifier
+        days: Number of days to check (default 30 for 1 month)
+    
+    Returns: (has_recent: bool, last_payment_date: str or None)
+    """
+    try:
+        cutoff_date = (now_wib() - timedelta(days=days)).date().isoformat()
+        payment = fetchone(
+            """SELECT paid_date, paid_amount FROM payments 
+            WHERE Agreement_No=? AND COALESCE(paid_amount,0) > 0 
+            AND paid_date >= ?
+            ORDER BY paid_date DESC LIMIT 1""",
+            (agreement_no, cutoff_date)
+        )
+        if payment:
+            return True, payment.get('paid_date')
+        return False, None
+    except Exception:
+        return False, None
+
+
+def has_pending_approved_ptp(agreement_no: str) -> tuple:
+    """Check if case has approved PTP with future date.
+    
+    Returns: (has_pending: bool, ptp_date: str or None)
+    """
+    try:
+        today = today_wib().isoformat()
+        ptp = fetchone(
+            """SELECT agent_ptp_date FROM agent_results 
+            WHERE Agreement_No=? 
+            AND approval_status='approved' 
+            AND agent_ptp_date IS NOT NULL 
+            AND agent_ptp_date >= ?
+            ORDER BY agent_ptp_date ASC LIMIT 1""",
+            (agreement_no, today)
+        )
+        if ptp:
+            return True, ptp.get('agent_ptp_date')
+        return False, None
+    except Exception:
+        return False, None
+
+
+def get_case_touch_count(agreement_no: str) -> int:
+    """Get number of times this case has been handled (assignment count).
+    
+    Returns: Count of unique assignments
+    """
+    try:
+        result = fetchone(
+            "SELECT COUNT(*) as cnt FROM assignment_history WHERE Agreement_No=?",
+            (agreement_no,)
+        )
+        return result.get('cnt', 0) if result else 0
+    except Exception:
+        return 0
+
+
 def can_agent_take_case(agent_name: str, agreement_no: str) -> tuple:
-    """Check if agent can take this case based on rotation rules and DT restrictions.
+    """Check if agent can take this case based on comprehensive business rules.
     
     Rules:
     1. Case must not have active assignment
     2. Case must not be frozen
-    3. Case must not have payment yet
-    4. Agent must be allowed to handle this DT (if restrictions exist)
-    5. Agent can only take case if ALL other agents have touched it (rotation complete)
+    3. Case must not have recent payment (within 1 month)
+    4. Case must not have pending approved PTP
+    5. Agent must not have handled this case before
+    6. Agent must be allowed to handle this DT (if restrictions exist)
+    7. Agent can only take case if ALL other agents have touched it (rotation complete)
     
     Returns: (can_take: bool, reason: str)
     """
@@ -1663,14 +1728,21 @@ def can_agent_take_case(agent_name: str, agreement_no: str) -> tuple:
         if is_frozen_by_agreement(agreement_no):
             return False, "Case ini frozen (diblokir)"
         
-        # Check 3: Payment exists?
-        payment = fetchone("""
-            SELECT 1 as x FROM payments 
-            WHERE Agreement_No=? AND COALESCE(paid_amount,0) > 0 
-            LIMIT 1
-        """, (agreement_no,))
-        if payment:
-            return False, "Case sudah ada pembayaran"
+        # Check 3: Recent payment (within 1 month)?
+        has_recent, last_pay_date = has_recent_payment(agreement_no, days=30)
+        if has_recent:
+            return False, f"Case ada pembayaran baru ({last_pay_date}), tunggu 1 bulan"
+        
+        # Check 4: Pending approved PTP?
+        has_ptp, ptp_date = has_pending_approved_ptp(agreement_no)
+        if has_ptp:
+            return False, f"Case ada PTP approved yang belum jatuh tempo ({ptp_date})"
+        
+        # Check 5: Agent already handled this case before?
+        history = get_assignment_history(agreement_no, 'agent')
+        agent_names = [h.get('assigned_to') for h in history if h.get('assigned_to')]
+        if agent_name in agent_names:
+            return False, "Agent sudah pernah handle case ini sebelumnya"
         
         # Check 4: Rotation rule - all other agents must have touched this case
         all_agents = set(get_all_active_agents())
@@ -1707,6 +1779,80 @@ def can_agent_take_case(agent_name: str, agreement_no: str) -> tuple:
         
     except Exception as e:
         return False, f"Error checking: {str(e)}"
+
+def get_available_cases_for_agent(agent_name: str, lending_entity_filter: list = None, employment_filter: str = None, limit: int = 100) -> list:
+    """Get list of cases available for agent to take, sorted by priority.
+    
+    Priority order:
+    1. Least-handled cases first (fewer touches = higher priority)
+    2. Older cases first (by Assignment_Date)
+    
+    Args:
+        agent_name: Agent login_id or full_name
+        lending_entity_filter: Optional list of Lending_Entity to filter by
+        employment_filter: Optional EMPLOYMENT_UPDATE filter ('DEBTOR', 'SPOUSE', etc)
+        limit: Maximum number of cases to return
+    
+    Returns: List of dict with case info and touch_count
+    """
+    try:
+        # Build base query
+        query = """
+            SELECT DISTINCT 
+                s.Case_ID,
+                s.Virtual_Account_Number,
+                s.Third_Uid,
+                s.Customer_name,
+                s.Lending_Entity,
+                s.DPD,
+                s.Assignment_Date,
+                s.Phone_Number_1,
+                t.EMPLOYMENT_UPDATE
+            FROM supervisor_data s
+            LEFT JOIN assign_tracer t ON (s.Case_ID = t.Agreement_No OR s.Virtual_Account_Number = t.Agreement_No)
+            WHERE 1=1
+        """
+        params = []
+        
+        # Filter by lending entity if specified
+        if lending_entity_filter:
+            placeholders = ','.join(['?' for _ in lending_entity_filter])
+            query += f" AND s.Lending_Entity IN ({placeholders})"
+            params.extend(lending_entity_filter)
+        
+        # Filter by employment update if specified
+        if employment_filter:
+            query += " AND t.EMPLOYMENT_UPDATE = ?"
+            params.append(employment_filter)
+        
+        query += " ORDER BY s.Assignment_Date ASC"
+        
+        all_cases = fetchall(query, tuple(params))
+        
+        # Filter and sort by business rules
+        available = []
+        for case in all_cases:
+            agreement_no = case.get('Case_ID') or case.get('Virtual_Account_Number') or case.get('Third_Uid')
+            if not agreement_no:
+                continue
+            
+            # Apply business rules
+            can_take, reason = can_agent_take_case(agent_name, agreement_no)
+            if can_take:
+                # Add touch count for sorting
+                touch_count = get_case_touch_count(agreement_no)
+                case['touch_count'] = touch_count
+                case['Agreement_No'] = agreement_no
+                available.append(case)
+        
+        # Sort by touch count (ascending) then by Assignment_Date
+        available.sort(key=lambda x: (x.get('touch_count', 0), x.get('Assignment_Date', '')))
+        
+        return available[:limit]
+    except Exception as e:
+        st.error(f"Error getting available cases: {e}")
+        return []
+
 
 def assign_case_to_agent(agreement_no: str, agent_name: str, assigned_by: str) -> tuple:
     """Assign case to agent with 7-day auto-return.
@@ -8948,7 +9094,45 @@ def page_supervisor():
     # --- Agent Assigning Tab ---
     with tabs[4]:
         st.subheader("Assign ke Agent")
-        # Filters similar to Trace Assigning
+        
+        # Advanced Filters Section
+        with st.expander("🔍 Filter Lanjutan", expanded=False):
+            st.caption("Filter ini membantu memilih case yang sesuai untuk di-assign ke agent")
+            
+            fcol1, fcol2 = st.columns(2)
+            
+            with fcol1:
+                # Get unique Lending Entities
+                lending_entities = fetchall("SELECT DISTINCT Lending_Entity FROM supervisor_data WHERE Lending_Entity IS NOT NULL AND Lending_Entity != '' ORDER BY Lending_Entity")
+                le_options = ["-- Semua Lending Entity --"] + [le.get('Lending_Entity') for le in lending_entities if le.get('Lending_Entity')]
+                selected_lending_entity = st.selectbox(
+                    "Filter by Lending Entity / Product",
+                    options=le_options,
+                    key="aa_lending_entity_filter",
+                    help="Filter case berdasarkan produk/lending entity tertentu"
+                )
+            
+            with fcol2:
+                # Get unique Employment Update values from assign_tracer
+                employment_updates = fetchall("SELECT DISTINCT EMPLOYMENT_UPDATE FROM assign_tracer WHERE EMPLOYMENT_UPDATE IS NOT NULL AND EMPLOYMENT_UPDATE != '' ORDER BY EMPLOYMENT_UPDATE")
+                emp_options = ["-- Semua Employment Update --"] + [emp.get('EMPLOYMENT_UPDATE') for emp in employment_updates if emp.get('EMPLOYMENT_UPDATE')]
+                selected_employment = st.selectbox(
+                    "Filter by Employment Update",
+                    options=emp_options,
+                    key="aa_employment_filter",
+                    help="Filter berdasarkan status employment (DEBTOR/SPOUSE/dll) - berguna untuk produk tertentu seperti AkuLaku"
+                )
+            
+            # Show filter info
+            if selected_lending_entity != "-- Semua Lending Entity --" or selected_employment != "-- Semua Employment Update --":
+                filter_info = []
+                if selected_lending_entity != "-- Semua Lending Entity --":
+                    filter_info.append(f"Lending Entity: **{selected_lending_entity}**")
+                if selected_employment != "-- Semua Employment Update --":
+                    filter_info.append(f"Employment: **{selected_employment}**")
+                st.info("📌 Filter aktif: " + " | ".join(filter_info))
+        
+        # Basic Filters
         q1, q2, q3, q4 = st.columns([1.2, 1.2, 1.2, 0.6])
         with q1:
             fa_case = st.text_input("Filter Case_ID", key="aa_f_case")
@@ -8962,21 +9146,31 @@ def page_supervisor():
         hide_assigned = st.checkbox("Sembunyikan yang sudah di-assign ke Agent", value=True, key="aa_hide_assigned")
 
         # Build SQL with filters
-        wh = ["Case_ID IS NOT NULL", "TRIM(Case_ID)<>''"]
+        wh = ["s.Case_ID IS NOT NULL", "TRIM(s.Case_ID)<>''"]
         par = []
         if fa_case:
-            wh.append("Case_ID LIKE ?")
+            wh.append("s.Case_ID LIKE ?")
             par.append(f"%{fa_case.strip()}%")
         if fa_name:
-            wh.append("Customer_name LIKE ?")
+            wh.append("s.Customer_name LIKE ?")
             par.append(f"%{fa_name.strip()}%")
         if fa_phone:
-            wh.append("(Phone_Number_1 LIKE ? OR Phone_Number_2 LIKE ?)")
+            wh.append("(s.Phone_Number_1 LIKE ? OR s.Phone_Number_2 LIKE ?)")
             par.extend([f"%{fa_phone.strip()}%", f"%{fa_phone.strip()}%"])
         if hide_assigned:
-            wh.append("Case_ID NOT IN (SELECT Agreement_No FROM agent_assignments WHERE IFNULL(active,1)=1)")
+            wh.append("s.Case_ID NOT IN (SELECT Agreement_No FROM agent_assignments WHERE IFNULL(active,1)=1)")
+        
+        # Apply advanced filters
+        if selected_lending_entity and selected_lending_entity != "-- Semua Lending Entity --":
+            wh.append("s.Lending_Entity = ?")
+            par.append(selected_lending_entity)
+        
+        if selected_employment and selected_employment != "-- Semua Employment Update --":
+            wh.append("t.EMPLOYMENT_UPDATE = ?")
+            par.append(selected_employment)
+        
         # Exclude data already assigned to tracer
-        wh.append("Case_ID NOT IN (SELECT Agreement_No FROM assign_tracer WHERE IFNULL(Assigned_To,'')!='')")
+        wh.append("s.Case_ID NOT IN (SELECT Agreement_No FROM assign_tracer WHERE IFNULL(Assigned_To,'')!='')")
         wh_sql = " AND ".join(wh) if wh else "1=1"
 
         # Determine available columns dynamically
@@ -8985,29 +9179,87 @@ def page_supervisor():
             sup_cols = {str(r.get('name')) for r in _sup_cols}
         except Exception:
             sup_cols = set()
-        base_cols = ["id", "Case_ID", "Customer_name", "NIK_KTP", "DPD", "Phone_Number_1", "Phone_Number_2"]
+        base_cols = ["s.id", "s.Case_ID", "s.Customer_name", "s.NIK_KTP", "s.DPD", "s.Phone_Number_1", "s.Phone_Number_2", "s.Lending_Entity"]
         extra_cols = [
             # employment details (for context)
-            "EMPLOYMENT_UPDATE", "EMPLOYER", "Debtor_Legal_Name", "Employee_Name", "Employee_ID_Number", "Debtor_Relation_to_Employee",
+            ("t.EMPLOYMENT_UPDATE", "EMPLOYMENT_UPDATE"), 
+            ("t.EMPLOYER", "EMPLOYER"), 
+            ("s.Debtor_Legal_Name", "Debtor_Legal_Name"), 
+            ("s.Employee_Name", "Employee_Name"), 
+            ("s.Employee_ID_Number", "Employee_ID_Number"), 
+            ("s.Debtor_Relation_to_Employee", "Debtor_Relation_to_Employee"),
             # agent-editable fields (for visibility)
-            "STATUS", "REGISTERED_PHONE", "Additional_Contacts", "Remarks_Suggested_NIK_Prospect", "Payment", "Paid_Off_Status"
+            ("s.STATUS", "STATUS"), 
+            ("s.REGISTERED_PHONE", "REGISTERED_PHONE"), 
+            ("s.Additional_Contacts", "Additional_Contacts"), 
+            ("s.Remarks_Suggested_NIK_Prospect", "Remarks_Suggested_NIK_Prospect"), 
+            ("s.Payment", "Payment"), 
+            ("s.Paid_Off_Status", "Paid_Off_Status")
         ]
-        sel_cols = base_cols + [c for c in extra_cols if c in sup_cols]
+        
+        # Build SELECT clause
+        sel_parts = base_cols.copy()
+        for col_expr, col_alias in extra_cols:
+            # Check if base column exists in supervisor_data
+            base_col = col_expr.split('.')[-1]
+            if base_col in sup_cols or col_expr.startswith('t.'):
+                sel_parts.append(f"{col_expr} as {col_alias}")
+        
         rows_sup = fetchall(
             f"""
-            SELECT {', '.join(sel_cols)}
-            FROM supervisor_data
+            SELECT {', '.join(sel_parts)}
+            FROM supervisor_data s
+            LEFT JOIN assign_tracer t ON s.Case_ID = t.Agreement_No
             WHERE {wh_sql}
-            ORDER BY id DESC
+            ORDER BY s.id DESC
             LIMIT ?
             """,
             tuple(par + [int(fa_limit)])
         )
         import pandas as _pd
-        df = _pd.DataFrame(rows_sup) if rows_sup else _pd.DataFrame(columns=sel_cols)
-        for col in extra_cols:
+        
+        # Clean up column names for DataFrame
+        if rows_sup:
+            clean_rows = []
+            for row in rows_sup:
+                clean_row = {}
+                for k, v in row.items():
+                    # Remove table prefix (s. or t.)
+                    clean_key = k.split('.')[-1] if '.' in k else k
+                    clean_row[clean_key] = v
+                clean_rows.append(clean_row)
+            df = _pd.DataFrame(clean_rows)
+        else:
+            df = _pd.DataFrame()
+        
+        # Ensure all expected columns exist
+        expected_cols = ["id", "Case_ID", "Customer_name", "NIK_KTP", "DPD", "Phone_Number_1", "Phone_Number_2", "Lending_Entity", "EMPLOYMENT_UPDATE", "EMPLOYER"]
+        for col in expected_cols:
             if col not in df.columns:
                 df[col] = ""
+        
+        # Add touch count and priority indicator for each case
+        if not df.empty and 'Case_ID' in df.columns:
+            touch_counts = []
+            priorities = []
+            for idx, row in df.iterrows():
+                case_id = row.get('Case_ID', '')
+                if case_id:
+                    count = get_case_touch_count(case_id)
+                    touch_counts.append(count)
+                    # Priority: 🔴 High (0-1 touches), 🟡 Medium (2-3), 🟢 Low (4+)
+                    if count <= 1:
+                        priorities.append("🔴 High (Fresh)")
+                    elif count <= 3:
+                        priorities.append("🟡 Medium")
+                    else:
+                        priorities.append("🟢 Low (Handled)")
+                else:
+                    touch_counts.append(0)
+                    priorities.append("🔴 High (Fresh)")
+            
+            df.insert(1, "Priority", priorities)
+            df.insert(2, "Touch_Count", touch_counts)
 
         # Selection controls
         select_all = st.checkbox("Pilih semua yang ditampilkan", key="aa_select_all")
@@ -9019,6 +9271,13 @@ def page_supervisor():
             except Exception:
                 pass
         st.caption(f"Menampilkan {len(df)} baris kandidat untuk assignment Agent")
+        
+        # Show priority legend
+        st.markdown("""
+        **Prioritas Assignment:** 🔴 High (0-1x handled) → 🟡 Medium (2-3x) → 🟢 Low (4+ handled)  
+        💡 System otomatis prioritaskan case dengan touch count paling sedikit
+        """)
+        
         try:
             edited = st.data_editor(
                 df,
@@ -9026,12 +9285,17 @@ def page_supervisor():
                 hide_index=True,
                 column_config={
                     "Selected": st.column_config.CheckboxColumn("Selected", default=select_all),
+                    "Priority": st.column_config.TextColumn("Priority", disabled=True, width="small", help="Prioritas berdasarkan jumlah penanganan"),
+                    "Touch_Count": st.column_config.NumberColumn("Handled", disabled=True, width="small", help="Berapa kali case ini sudah di-handle"),
                     "Case_ID": st.column_config.TextColumn("Case_ID", disabled=True),
                     "Customer_name": st.column_config.TextColumn("Customer", disabled=True),
                     "NIK_KTP": st.column_config.TextColumn("NIK", disabled=True),
                     "DPD": st.column_config.TextColumn("DPD", disabled=True),
                     "Phone_Number_1": st.column_config.TextColumn("Phone 1", disabled=True),
                     "Phone_Number_2": st.column_config.TextColumn("Phone 2", disabled=True),
+                    "Lending_Entity": st.column_config.TextColumn("Lending Entity", disabled=True),
+                    "EMPLOYMENT_UPDATE": st.column_config.TextColumn("Employment Update", disabled=True),
+                    "EMPLOYER": st.column_config.TextColumn("Employer", disabled=True),
                     "STATUS": st.column_config.TextColumn("STATUS", disabled=True),
                     "REGISTERED_PHONE": st.column_config.TextColumn("REGISTERED PHONE", disabled=True),
                     "Additional_Contacts": st.column_config.TextColumn("Remarks", disabled=True),
