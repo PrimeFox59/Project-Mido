@@ -660,6 +660,26 @@ def init_db():
         );
         """
     )
+    # Migration / upload history for undo support
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS migration_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            operation_type TEXT,
+            target_table TEXT,
+            affected_ids TEXT,
+            source_file TEXT,
+            user_id INTEGER,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            undone INTEGER DEFAULT 0,
+            undone_at TEXT
+        );
+        """
+    )
+    try:
+        c.execute("CREATE INDEX IF NOT EXISTS idx_migration_history_created_at ON migration_history(created_at)")
+    except Exception:
+        pass
     try:
         # Drop old UNIQUE index if exists (allow multiple payments on same date)
         c.execute("DROP INDEX IF EXISTS idx_payments_unique")
@@ -1280,6 +1300,64 @@ def execute(query, params=()):
     last = cur.lastrowid
     conn.close()
     return last
+
+
+def undo_migration(history_id: int) -> tuple:
+    """Undo a recorded migration/upload action.
+
+    Behavior:
+    - For DB table imports: deletes rows with ids listed in migration_history.affected_ids
+    - Marks the migration_history entry as undone and records timestamp
+
+    Returns (success: bool, message: str)
+    """
+    try:
+        hist = fetchone("SELECT * FROM migration_history WHERE id = ?", (history_id,))
+        if not hist:
+            return False, "History entry not found"
+        if hist.get('undone'):
+            return False, "Already undone"
+
+        operation = hist.get('operation_type')
+        target = hist.get('target_table')
+        affected = hist.get('affected_ids') or '[]'
+        try:
+            ids = json.loads(affected)
+        except Exception:
+            ids = []
+
+        if not ids:
+            # Nothing to undo
+            execute("UPDATE migration_history SET undone=1, undone_at=? WHERE id=?", (datetime.utcnow().isoformat(), history_id))
+            return True, "Nothing to undo (no affected IDs)"
+
+        # Only handle simple DB table deletions here
+        if operation and operation.upper().endswith("_IMPORT") and target:
+            # Build delete query safely
+            placeholders = ','.join(['?'] * len(ids))
+            q = f"DELETE FROM {target} WHERE id IN ({placeholders})"
+            try:
+                conn = sqlite3.connect(DB_PATH, timeout=30)
+                cur = conn.cursor()
+                cur.execute(q, tuple(ids))
+                conn.commit()
+                conn.close()
+            except Exception as e:
+                return False, f"Failed to delete imported rows: {e}"
+
+            # mark history undone
+            execute("UPDATE migration_history SET undone=1, undone_at=? WHERE id=?", (datetime.utcnow().isoformat(), history_id))
+            # add an audit log entry
+            try:
+                execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (hist.get('user_id'), 'UNDO_IMPORT', f"Undid {operation} on {target}, ids={ids}"))
+            except Exception:
+                pass
+            return True, f"Undone import on {target} (deleted {len(ids)} rows)"
+
+        # For other operation types, return message (special handling e.g., DRIVE_UPLOAD must be performed in page context)
+        return False, "Unsupported operation for automatic undo; use page-specific undo if available"
+    except Exception as e:
+        return False, f"Error during undo: {e}"
 
 def get_setting(key, default=None):
     row = fetchone("SELECT value FROM app_settings WHERE key=?", (key,))
@@ -3098,6 +3176,24 @@ def page_gdrive():
                     # Audit log upload
                     try:
                         execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (user.get('id') if user else None, "UPLOAD", f"Uploaded file '{uploaded.name}' to Drive (ID: {fid})"))
+                    except Exception:
+                        pass
+                    # Record in migration_history for undo (delete from Drive)
+                    try:
+                        hist_id = execute(
+                            "INSERT INTO migration_history (operation_type, target_table, affected_ids, source_file, user_id) VALUES (?,?,?,?,?)",
+                            ('DRIVE_UPLOAD', 'gdrive_files', json.dumps([fid]), uploaded.name, user.get('id') if user else None),
+                        )
+                        if hist_id:
+                            if st.button("🗑️ Undo Upload (Delete from Drive)", key=f"undo_drive_{hist_id}"):
+                                try:
+                                    delete_file(service, fid)
+                                    execute("UPDATE migration_history SET undone=1, undone_at=? WHERE id=?", (datetime.utcnow().isoformat(), hist_id))
+                                    execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", (user.get('id') if user else None, 'UNDO_UPLOAD', f"Deleted file '{uploaded.name}' (ID: {fid})"))
+                                    st.success(f"✅ File '{uploaded.name}' deleted from Drive")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"❌ Error deleting file: {e}")
                     except Exception:
                         pass
 
@@ -10251,6 +10347,7 @@ def page_supervisor():
                                 try:
                                     imported_count = 0
                                     skipped_count = 0
+                                    inserted_ids = []
                                     
                                     for idx, row in df_sup.iterrows():
                                         # Check if Case_ID already exists
@@ -10295,11 +10392,40 @@ def page_supervisor():
                                         
                                         if cols_to_insert:
                                             query = f"INSERT INTO supervisor_data ({', '.join(cols_to_insert)}) VALUES ({', '.join(['?'] * len(cols_to_insert))})"
-                                            execute(query, tuple(vals_to_insert))
+                                            last_id = execute(query, tuple(vals_to_insert))
                                             imported_count += 1
+                                            # record inserted id for undo
+                                            try:
+                                                inserted_ids.append(int(last_id))
+                                            except Exception:
+                                                pass
                                     
                                     st.success(f"✅ Import selesai! Imported: {imported_count}, Skipped (duplicate/empty): {skipped_count}")
                                     st.balloons()
+                                    # Record migration history for undo
+                                    try:
+                                        u = current_user() or {}
+                                        if imported_count > 0:
+                                            hist_id = execute(
+                                                "INSERT INTO migration_history (operation_type, target_table, affected_ids, source_file, user_id) VALUES (?,?,?,?,?)",
+                                                (
+                                                    'SUPERVISOR_IMPORT',
+                                                    'supervisor_data',
+                                                    json.dumps(inserted_ids),
+                                                    getattr(uploaded_sup, 'name', 'Supervisor_Migration'),
+                                                    u.get('id') if u else None,
+                                                ),
+                                            )
+                                            if hist_id:
+                                                if st.button("↩️ Undo Import (Supervisor)", key=f"undo_sup_{hist_id}"):
+                                                    ok, msg = undo_migration(hist_id)
+                                                    if ok:
+                                                        st.success(msg)
+                                                        st.rerun()
+                                                    else:
+                                                        st.error(msg)
+                                    except Exception:
+                                        pass
                                 except Exception as e:
                                     st.error(f"❌ Error saat import: {e}")
                         
@@ -10379,6 +10505,7 @@ def page_supervisor():
                                 try:
                                     imported_count = 0
                                     skipped_count = 0
+                                    inserted_ids = []
                                     
                                     for idx, row in df_tracer.iterrows():
                                         agreement_no = str(row.get('Agreement_No', '')).strip()
@@ -10399,7 +10526,7 @@ def page_supervisor():
                                         if employer and not decoded:
                                             decoded = decode_company_name(employer)
                                         
-                                        execute(
+                                        last_id = execute(
                                             """INSERT INTO assign_tracer 
                                             (TRC_Code, Agreement_No, Debtor_Name, NIK_KTP, EMPLOYMENT_UPDATE, EMPLOYER, 
                                              Decoded_Company_Name, Debtor_Legal_Name, Employee_Name, Employee_ID_Number, 
@@ -10420,10 +10547,32 @@ def page_supervisor():
                                                 str(row.get('Assigned_To', '')).strip() if pd.notna(row.get('Assigned_To')) else None
                                             )
                                         )
+                                        try:
+                                            inserted_ids.append(int(last_id))
+                                        except Exception:
+                                            pass
                                         imported_count += 1
                                     
                                     st.success(f"✅ Import selesai! Imported: {imported_count}, Skipped (duplicate/empty): {skipped_count}")
                                     st.balloons()
+                                    # record migration history for undo
+                                    try:
+                                        u = current_user() or {}
+                                        if imported_count > 0:
+                                            hist_id = execute(
+                                                "INSERT INTO migration_history (operation_type, target_table, affected_ids, source_file, user_id) VALUES (?,?,?,?,?)",
+                                                ('TRACER_IMPORT', 'assign_tracer', json.dumps(inserted_ids), getattr(uploaded_tracer, 'name', 'Tracer_Migration'), u.get('id') if u else None),
+                                            )
+                                            if hist_id:
+                                                if st.button("↩️ Undo Import (Tracer)", key=f"undo_tracer_{hist_id}"):
+                                                    ok, msg = undo_migration(hist_id)
+                                                    if ok:
+                                                        st.success(msg)
+                                                        st.rerun()
+                                                    else:
+                                                        st.error(msg)
+                                    except Exception:
+                                        pass
                                 except Exception as e:
                                     st.error(f"❌ Error saat import: {e}")
                         
@@ -10500,7 +10649,8 @@ def page_supervisor():
                             if st.button("✅ Konfirmasi Import", type="primary", key="agent_confirm_import"):
                                 try:
                                     imported_count = 0
-                                    
+                                    inserted_ids = []
+
                                     for idx, row in df_agent.iterrows():
                                         agreement_no = str(row.get('Agreement_No', '')).strip()
                                         agent_name = str(row.get('agent', '')).strip()
@@ -10518,7 +10668,7 @@ def page_supervisor():
                                         else:
                                             ptp_amount = None
                                         
-                                        execute(
+                                        last_id = execute(
                                             """INSERT INTO agent_results 
                                             (Agreement_No, agent, agent_status, agent_ptp_amount, agent_ptp_date, agent_notes, updated_at) 
                                             VALUES (?, ?, ?, ?, ?, ?, ?)""",
@@ -10532,10 +10682,31 @@ def page_supervisor():
                                                 str(row.get('updated_at', '')).strip() if pd.notna(row.get('updated_at')) else None
                                             )
                                         )
+                                        try:
+                                            inserted_ids.append(int(last_id))
+                                        except Exception:
+                                            pass
                                         imported_count += 1
                                     
                                     st.success(f"✅ Import selesai! Total imported: {imported_count}")
                                     st.balloons()
+                                    try:
+                                        u = current_user() or {}
+                                        if imported_count > 0:
+                                            hist_id = execute(
+                                                "INSERT INTO migration_history (operation_type, target_table, affected_ids, source_file, user_id) VALUES (?,?,?,?,?)",
+                                                ('AGENT_RESULTS_IMPORT', 'agent_results', json.dumps(inserted_ids), getattr(uploaded_agent, 'name', 'Agent_Results_Migration'), u.get('id') if u else None),
+                                            )
+                                            if hist_id:
+                                                if st.button("↩️ Undo Import (Agent Results)", key=f"undo_agentres_{hist_id}"):
+                                                    ok, msg = undo_migration(hist_id)
+                                                    if ok:
+                                                        st.success(msg)
+                                                        st.rerun()
+                                                    else:
+                                                        st.error(msg)
+                                    except Exception:
+                                        pass
                                 except Exception as e:
                                     st.error(f"❌ Error saat import: {e}")
                         
@@ -10654,6 +10825,7 @@ def page_supervisor():
                                     u = current_user()
                                     uploader_name = u.get('full_name') if u else 'Migration'
                                     
+                                    inserted_ids = []
                                     for idx, row in df_payment.iterrows():
                                         agreement_no = str(row.get('Agreement_No', '')).strip()
                                         
@@ -10670,7 +10842,7 @@ def page_supervisor():
                                         else:
                                             continue
                                         
-                                        execute(
+                                        last_id = execute(
                                             """INSERT INTO payments 
                                             (Agreement_No, paid_amount, paid_date, status, source_file, uploaded_by) 
                                             VALUES (?, ?, ?, ?, ?, ?)""",
@@ -10683,10 +10855,32 @@ def page_supervisor():
                                                 str(row.get('uploaded_by', uploader_name)).strip() if pd.notna(row.get('uploaded_by')) else uploader_name
                                             )
                                         )
+                                        try:
+                                            inserted_ids.append(int(last_id))
+                                        except Exception:
+                                            pass
                                         imported_count += 1
                                     
                                     st.success(f"✅ Import selesai! Total imported: {imported_count}")
                                     st.balloons()
+                                    # record migration history for undo
+                                    try:
+                                        u = current_user() or {}
+                                        if imported_count > 0:
+                                            hist_id = execute(
+                                                "INSERT INTO migration_history (operation_type, target_table, affected_ids, source_file, user_id) VALUES (?,?,?,?,?)",
+                                                ('PAYMENT_IMPORT', 'payments', json.dumps(inserted_ids), getattr(uploaded_payment, 'name', 'Payment_Migration'), u.get('id') if u else None),
+                                            )
+                                            if hist_id:
+                                                if st.button("↩️ Undo Import (Payments)", key=f"undo_pay_{hist_id}"):
+                                                    ok, msg = undo_migration(hist_id)
+                                                    if ok:
+                                                        st.success(msg)
+                                                        st.rerun()
+                                                    else:
+                                                        st.error(msg)
+                                    except Exception:
+                                        pass
                                 except Exception as e:
                                     st.error(f"❌ Error saat import: {e}")
                         
