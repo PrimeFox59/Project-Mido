@@ -10865,42 +10865,40 @@ def page_supervisor():
             ℹ️ **Note:** `Case_ID` di sini akan menjadi `Agreement_No` di tabel lainnya
             """)
             
-            # Generate template button
-            if st.button("📥 Download Template Excel - Supervisor Data", key="sup_template"):
-                template_cols = [
-                    "DT", "Lending_Entity", "Date", "Case_ID", "Task_ID", "Customer_name", 
-                    "email", "Gender", "Customer_Occupation", "DPD", "Principle_Outstanding",
-                    "Principal_Overdue_CURR", "Interest_Overdue_CURR", "Last_Late_Fee", "Return_Date",
-                    "Detail", "Loan_Type", "Third_Uid", "Product", "Home_Address", "Province", "City",
-                    "Street", "RoomNumber", "Postcode", "Assignment_Date", "Withdrawal_Date",
-                    "Phone_Number_1", "Phone_Number_2", 
-                    "Contact_Type_1", "Contact_Name_1", "Contact_Phone_1",
-                    "Contact_Type_2", "Contact_Name_2", "Contact_Phone_2",
-                    "Contact_Type_3", "Contact_Name_3", "Contact_Phone_3",
-                    "Contact_Type_4", "Contact_Name_4", "Contact_Phone_4",
-                    "Contact_Type_5", "Contact_Name_5", "Contact_Phone_5",
-                    "Contact_Type_6", "Contact_Name_6", "Contact_Phone_6",
-                    "Contact_Type_7", "Contact_Name_7", "Contact_Phone_7",
-                    "Contact_Type_8", "Contact_Name_8", "Contact_Phone_8",
-                    "Total_debt_in_third_party", "Repayment_on_third_Party", "Remaining_Loan_on_third_Party",
-                    "Virtual_Account_Number", "NIK_KTP"
-                ]
-                template_df = pd.DataFrame(columns=template_cols)
-                # Add sample row
-                template_df.loc[0] = [""] * len(template_cols)
-                
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    template_df.to_excel(writer, index=False, sheet_name='Supervisor_Data')
-                output.seek(0)
-                
-                st.download_button(
-                    label="💾 Download Template_Supervisor_Data.xlsx",
-                    data=output,
-                    file_name="Template_Supervisor_Data.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="sup_template_download"
-                )
+            # Generate template for direct download
+            template_cols = [
+                "DT", "Lending_Entity", "Date", "Case_ID", "Task_ID", "Customer_name", 
+                "email", "Gender", "Customer_Occupation", "DPD", "Principle_Outstanding",
+                "Principal_Overdue_CURR", "Interest_Overdue_CURR", "Last_Late_Fee", "Return_Date",
+                "Detail", "Loan_Type", "Third_Uid", "Product", "Home_Address", "Province", "City",
+                "Street", "RoomNumber", "Postcode", "Assignment_Date", "Withdrawal_Date",
+                "Phone_Number_1", "Phone_Number_2", 
+                "Contact_Type_1", "Contact_Name_1", "Contact_Phone_1",
+                "Contact_Type_2", "Contact_Name_2", "Contact_Phone_2",
+                "Contact_Type_3", "Contact_Name_3", "Contact_Phone_3",
+                "Contact_Type_4", "Contact_Name_4", "Contact_Phone_4",
+                "Contact_Type_5", "Contact_Name_5", "Contact_Phone_5",
+                "Contact_Type_6", "Contact_Name_6", "Contact_Phone_6",
+                "Contact_Type_7", "Contact_Name_7", "Contact_Phone_7",
+                "Contact_Type_8", "Contact_Name_8", "Contact_Phone_8",
+                "Total_debt_in_third_party", "Repayment_on_third_Party", "Remaining_Loan_on_third_Party",
+                "Virtual_Account_Number", "NIK_KTP"
+            ]
+            template_df = pd.DataFrame(columns=template_cols)
+            template_df.loc[0] = [""] * len(template_cols)
+            
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                template_df.to_excel(writer, index=False, sheet_name='Supervisor_Data')
+            output.seek(0)
+            
+            st.download_button(
+                label="📥 Download Template Excel - Supervisor Data",
+                data=output,
+                file_name="Template_Supervisor_Data.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="sup_template"
+            )
             
             st.divider()
             
@@ -11098,29 +11096,28 @@ def page_supervisor():
             ℹ️ **Note:** `Agreement_No` = `Case_ID` (pastikan isi sesuai dengan Case_ID di Supervisor Data)
             """)
             
-            # Generate template button
-            if st.button("📥 Download Template Excel - Tracer Data", key="tracer_template"):
-                template_cols = [
-                    "TRC_Code", "Agreement_No", "Debtor_Name", "NIK_KTP", 
-                    "EMPLOYMENT_UPDATE", "EMPLOYER", "Decoded_Company_Name",
-                    "Debtor_Legal_Name", "Employee_Name", "Employee_ID_Number", 
-                    "Debtor_Relation_to_Employee", "Assigned_To"
-                ]
-                template_df = pd.DataFrame(columns=template_cols)
-                template_df.loc[0] = [""] * len(template_cols)
-                
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    template_df.to_excel(writer, index=False, sheet_name='Tracer_Data')
-                output.seek(0)
-                
-                st.download_button(
-                    label="💾 Download Template_Tracer_Data.xlsx",
-                    data=output,
-                    file_name="Template_Tracer_Data.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="tracer_template_download"
-                )
+            # Generate template for direct download
+            template_cols = [
+                "TRC_Code", "Agreement_No", "Debtor_Name", "NIK_KTP", 
+                "EMPLOYMENT_UPDATE", "EMPLOYER", "Decoded_Company_Name",
+                "Debtor_Legal_Name", "Employee_Name", "Employee_ID_Number", 
+                "Debtor_Relation_to_Employee", "Assigned_To"
+            ]
+            template_df = pd.DataFrame(columns=template_cols)
+            template_df.loc[0] = [""] * len(template_cols)
+            
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                template_df.to_excel(writer, index=False, sheet_name='Tracer_Data')
+            output.seek(0)
+            
+            st.download_button(
+                label="📥 Download Template Excel - Tracer Data",
+                data=output,
+                file_name="Template_Tracer_Data.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="tracer_template"
+            )
             
             st.divider()
             
@@ -11294,27 +11291,26 @@ def page_supervisor():
             ℹ️ **Note:** `Agreement_No` = `Case_ID` (gunakan Case_ID yang sama dari Supervisor Data)
             """)
             
-            # Generate template button
-            if st.button("📥 Download Template Excel - Agent Results", key="agent_template"):
-                template_cols = [
-                    "Agreement_No", "agent", "agent_status", "agent_ptp_amount", 
-                    "agent_ptp_date", "agent_notes", "updated_at"
-                ]
-                template_df = pd.DataFrame(columns=template_cols)
-                template_df.loc[0] = [""] * len(template_cols)
-                
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    template_df.to_excel(writer, index=False, sheet_name='Agent_Results')
-                output.seek(0)
-                
-                st.download_button(
-                    label="💾 Download Template_Agent_Results.xlsx",
-                    data=output,
-                    file_name="Template_Agent_Results.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="agent_template_download"
-                )
+            # Generate template for direct download
+            template_cols = [
+                "Agreement_No", "agent", "agent_status", "agent_ptp_amount", 
+                "agent_ptp_date", "agent_notes", "updated_at"
+            ]
+            template_df = pd.DataFrame(columns=template_cols)
+            template_df.loc[0] = [""] * len(template_cols)
+            
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                template_df.to_excel(writer, index=False, sheet_name='Agent_Results')
+            output.seek(0)
+            
+            st.download_button(
+                label="📥 Download Template Excel - Agent Results",
+                data=output,
+                file_name="Template_Agent_Results.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="agent_template"
+            )
             
             st.divider()
             
@@ -11513,27 +11509,26 @@ def page_supervisor():
             Sistem akan otomatis JOIN dan enrichment data saat ditampilkan! 🎯
             """)
             
-            # Generate template button
-            if st.button("📥 Download Template Excel - Payment Data", key="payment_template"):
-                template_cols = [
-                    "Agreement_No", "paid_amount", "paid_date", "status", 
-                    "source_file", "uploaded_by"
-                ]
-                template_df = pd.DataFrame(columns=template_cols)
-                template_df.loc[0] = [""] * len(template_cols)
-                
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    template_df.to_excel(writer, index=False, sheet_name='Payment_Data')
-                output.seek(0)
-                
-                st.download_button(
-                    label="💾 Download Template_Payment_Data.xlsx",
-                    data=output,
-                    file_name="Template_Payment_Data.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="payment_template_download"
-                )
+            # Generate template for direct download
+            template_cols = [
+                "Agreement_No", "paid_amount", "paid_date", "status", 
+                "source_file", "uploaded_by"
+            ]
+            template_df = pd.DataFrame(columns=template_cols)
+            template_df.loc[0] = [""] * len(template_cols)
+            
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                template_df.to_excel(writer, index=False, sheet_name='Payment_Data')
+            output.seek(0)
+            
+            st.download_button(
+                label="📥 Download Template Excel - Payment Data",
+                data=output,
+                file_name="Template_Payment_Data.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="payment_template"
+            )
             
             st.divider()
             
