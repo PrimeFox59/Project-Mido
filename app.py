@@ -10867,6 +10867,29 @@ def page_supervisor():
             **Kolom wajib minimal:** Agreement_No, Debtor_Name
             
             ℹ️ **Note:** `Agreement_No` = `Case_ID` (pastikan isi sesuai dengan Case_ID di Supervisor Data)
+            
+            ---
+            
+            **🔄 Logika Import (UPSERT):**
+            
+            Sistem akan otomatis mendeteksi berdasarkan `Agreement_No`:
+            
+            1. **Jika Agreement_No SUDAH ADA** di database → **UPDATE** data yang sudah ada
+               - Semua field (Debtor_Name, NIK_KTP, EMPLOYMENT_UPDATE, dll) akan di-update
+               - Data lama akan ditimpa dengan data baru dari Excel
+            
+            2. **Jika Agreement_No BELUM ADA** di database → **INSERT** record baru
+               - Sistem akan membuat entry baru di tabel tracer
+            
+            **Contoh Skenario:**
+            - Row 1: Agreement_No = "45044479" (sudah ada) → Data akan di-UPDATE ✅
+            - Row 2: Agreement_No = "45044480" (belum ada) → Data akan di-INSERT ✅
+            - Row 3: Agreement_No = "45044479" (duplikat dalam Excel) → Update lagi (data terakhir yang menang) ⚠️
+            
+            **💡 Tips:**
+            - Gunakan fitur ini untuk update data tracer yang sudah ada (misalnya update EMPLOYER baru)
+            - Atau untuk import data tracer baru sekaligus
+            - Tidak perlu khawatir duplikat - sistem akan otomatis update jika sudah ada
             """)
             
             # Generate template for direct download
@@ -10919,12 +10942,12 @@ def page_supervisor():
                         with col1:
                             if st.button("✅ Konfirmasi Import", type="primary", key="tracer_confirm_import"):
                                 try:
-                                    imported_count = 0
-                                    duplicate_count = 0
+                                    inserted_count = 0
+                                    updated_count = 0
                                     error_count = 0
                                     inserted_ids = []
+                                    updated_ids = []
                                     error_rows = []
-                                    duplicate_rows = []
                                     empty_rows = []
                                     
                                     # Initialize progress tracking
@@ -10940,19 +10963,15 @@ def page_supervisor():
                                             # Update progress
                                             progress = int(((idx + 1) / total_rows) * 100)
                                             progress_bar.progress(progress)
-                                            status_text.text(f"Processing row {idx + 1} / {total_rows}... (✅ {imported_count} | 🔁 {duplicate_count} | ❌ {error_count})")
+                                            status_text.text(f"Processing row {idx + 1} / {total_rows}... (✅ New: {inserted_count} | 🔄 Updated: {updated_count} | ❌ {error_count})")
                                             
                                             agreement_no = str(row.get('Agreement_No', '')).strip()
                                             if not agreement_no:
-                                                empty_rows.append(row_num)
+                                                empty_rows.append(f"Row {row_num}: Missing Agreement_No")
                                                 continue
                                             
-                                            # Check if already exists
+                                            # Check if already exists in assign_tracer
                                             existing = fetchone("SELECT id FROM assign_tracer WHERE Agreement_No = ?", (agreement_no,))
-                                            if existing:
-                                                duplicate_count += 1
-                                                duplicate_rows.append(f"Row {row_num}: {agreement_no}")
-                                                continue
                                         except Exception as row_err:
                                             error_count += 1
                                             error_rows.append(f"Row {row_num}: {str(row_err)[:100]}")
@@ -10965,71 +10984,91 @@ def page_supervisor():
                                         if employer and not decoded:
                                             decoded = decode_company_name(employer)
                                         
-                                        last_id = execute(
-                                            """INSERT INTO assign_tracer 
-                                            (TRC_Code, Agreement_No, Debtor_Name, NIK_KTP, EMPLOYMENT_UPDATE, EMPLOYER, 
-                                             Decoded_Company_Name, Debtor_Legal_Name, Employee_Name, Employee_ID_Number, 
-                                             Debtor_Relation_to_Employee, Assigned_To) 
-                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                                            (
-                                                str(row.get('TRC_Code', '')).strip() if pd.notna(row.get('TRC_Code')) else None,
-                                                agreement_no,
-                                                str(row.get('Debtor_Name', '')).strip() if pd.notna(row.get('Debtor_Name')) else None,
-                                                str(row.get('NIK_KTP', '')).strip() if pd.notna(row.get('NIK_KTP')) else None,
-                                                str(row.get('EMPLOYMENT_UPDATE', '')).strip() if pd.notna(row.get('EMPLOYMENT_UPDATE')) else None,
-                                                employer,
-                                                decoded,
-                                                str(row.get('Debtor_Legal_Name', '')).strip() if pd.notna(row.get('Debtor_Legal_Name')) else None,
-                                                str(row.get('Employee_Name', '')).strip() if pd.notna(row.get('Employee_Name')) else None,
-                                                str(row.get('Employee_ID_Number', '')).strip() if pd.notna(row.get('Employee_ID_Number')) else None,
-                                                str(row.get('Debtor_Relation_to_Employee', '')).strip() if pd.notna(row.get('Debtor_Relation_to_Employee')) else None,
-                                                str(row.get('Assigned_To', '')).strip() if pd.notna(row.get('Assigned_To')) else None
+                                        # Prepare data
+                                        trc_code = str(row.get('TRC_Code', '')).strip() if pd.notna(row.get('TRC_Code')) else None
+                                        debtor_name = str(row.get('Debtor_Name', '')).strip() if pd.notna(row.get('Debtor_Name')) else None
+                                        nik_ktp = str(row.get('NIK_KTP', '')).strip() if pd.notna(row.get('NIK_KTP')) else None
+                                        employment_update = str(row.get('EMPLOYMENT_UPDATE', '')).strip() if pd.notna(row.get('EMPLOYMENT_UPDATE')) else None
+                                        debtor_legal_name = str(row.get('Debtor_Legal_Name', '')).strip() if pd.notna(row.get('Debtor_Legal_Name')) else None
+                                        employee_name = str(row.get('Employee_Name', '')).strip() if pd.notna(row.get('Employee_Name')) else None
+                                        employee_id_number = str(row.get('Employee_ID_Number', '')).strip() if pd.notna(row.get('Employee_ID_Number')) else None
+                                        debtor_relation = str(row.get('Debtor_Relation_to_Employee', '')).strip() if pd.notna(row.get('Debtor_Relation_to_Employee')) else None
+                                        assigned_to = str(row.get('Assigned_To', '')).strip() if pd.notna(row.get('Assigned_To')) else None
+                                        
+                                        if existing:
+                                            # UPDATE existing record
+                                            execute(
+                                                """UPDATE assign_tracer SET 
+                                                TRC_Code = ?, Debtor_Name = ?, NIK_KTP = ?, EMPLOYMENT_UPDATE = ?, 
+                                                EMPLOYER = ?, Decoded_Company_Name = ?, Debtor_Legal_Name = ?, 
+                                                Employee_Name = ?, Employee_ID_Number = ?, Debtor_Relation_to_Employee = ?, 
+                                                Assigned_To = ?
+                                                WHERE Agreement_No = ?""",
+                                                (
+                                                    trc_code, debtor_name, nik_ktp, employment_update,
+                                                    employer, decoded, debtor_legal_name,
+                                                    employee_name, employee_id_number, debtor_relation,
+                                                    assigned_to, agreement_no
+                                                )
                                             )
-                                        )
-                                        try:
-                                            inserted_ids.append(int(last_id))
-                                        except Exception:
-                                            pass
-                                        imported_count += 1
+                                            updated_ids.append(existing['id'])
+                                            updated_count += 1
+                                        else:
+                                            # INSERT new record
+                                            last_id = execute(
+                                                """INSERT INTO assign_tracer 
+                                                (TRC_Code, Agreement_No, Debtor_Name, NIK_KTP, EMPLOYMENT_UPDATE, EMPLOYER, 
+                                                 Decoded_Company_Name, Debtor_Legal_Name, Employee_Name, Employee_ID_Number, 
+                                                 Debtor_Relation_to_Employee, Assigned_To) 
+                                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                                (
+                                                    trc_code, agreement_no, debtor_name, nik_ktp, employment_update,
+                                                    employer, decoded, debtor_legal_name, employee_name,
+                                                    employee_id_number, debtor_relation, assigned_to
+                                                )
+                                            )
+                                            try:
+                                                inserted_ids.append(int(last_id))
+                                            except Exception:
+                                                pass
+                                            inserted_count += 1
                                     
                                     progress_bar.progress(100)
-                                    status_text.text(f"✅ Complete! | Imported: {imported_count} | Duplicates: {duplicate_count} | Empty: {len(empty_rows)} | Errors: {error_count}")
+                                    status_text.text(f"✅ Complete! | New: {inserted_count} | Updated: {updated_count} | Empty: {len(empty_rows)} | Errors: {error_count}")
                                     
                                     st.success(f"✅ Import selesai! Total: {total_rows} rows")
                                     
                                     col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
                                     with col_stat1:
-                                        st.metric("✅ Imported", imported_count)
+                                        st.metric("✅ New Records", inserted_count)
                                     with col_stat2:
-                                        st.metric("🔁 Duplicates", duplicate_count)
+                                        st.metric("🔄 Updated", updated_count)
                                     with col_stat3:
                                         st.metric("⏭️ Empty Agreement_No", len(empty_rows))
                                     with col_stat4:
                                         st.metric("❌ Errors", error_count)
                                     
-                                    if duplicate_rows or error_rows or empty_rows:
+                                    if empty_rows or error_rows:
                                         with st.expander("📋 View Details", expanded=True):
-                                            if duplicate_rows:
-                                                st.warning(f"**🔁 Duplicates ({len(duplicate_rows)}):**")
-                                                st.text("\\n".join(duplicate_rows[:50]))
                                             if empty_rows:
-                                                st.info(f"**⏭️ Empty Agreement_No ({len(empty_rows)}):** Rows {', '.join(map(str, empty_rows[:30]))}")
+                                                st.info(f"**⏭️ Empty Agreement_No ({len(empty_rows)}):**")
+                                                st.text("\\n".join(empty_rows[:30]))
                                             if error_rows:
                                                 st.error(f"**❌ Errors ({len(error_rows)}):**")
                                                 st.text("\\n".join(error_rows[:20]))
                                     
-                                    if imported_count > 0:
+                                    if inserted_count > 0:
                                         st.balloons()
-                                    # record migration history for undo
+                                    # record migration history for undo (only for new inserts)
                                     try:
                                         u = current_user() or {}
-                                        if imported_count > 0:
+                                        if inserted_count > 0:
                                             hist_id = execute(
                                                 "INSERT INTO migration_history (operation_type, target_table, affected_ids, source_file, user_id) VALUES (?,?,?,?,?)",
                                                 ('TRACER_IMPORT', 'assign_tracer', json.dumps(inserted_ids), getattr(uploaded_tracer, 'name', 'Tracer_Migration'), u.get('id') if u else None),
                                             )
                                             if hist_id:
-                                                if st.button("↩️ Undo Import (Tracer)", key=f"undo_tracer_{hist_id}"):
+                                                if st.button("↩️ Undo Import (New Records Only)", key=f"undo_tracer_{hist_id}"):
                                                     ok, msg = undo_migration(hist_id)
                                                     if ok:
                                                         st.success(msg)
