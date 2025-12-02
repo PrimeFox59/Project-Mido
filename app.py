@@ -4915,8 +4915,97 @@ def page_agent():
         with col_cl:
             clear_all = st.checkbox("Kosongkan pilihan", key="ag_clear_all")
         
-        # ===== BAGIAN BAWAH (Full Width): Action Forms =====
-        st.markdown("---")
+        # Initialize sel from session state BEFORE using it
+        prev_selected = set(st.session_state.get("agent_selected_list", []) or [])
+        sel = st.session_state.get("agent_selected") if st.session_state.get("agent_selected") in [r.get('Case_ID') for r in filtered] else None
+        
+        # ===== LAYOUT 2 KOLOM: Assignments di kiri, Case Details di kanan =====
+        assignments_col, details_col = st.columns([1.2, 1])
+        
+        with assignments_col:
+            st.subheader("Assignments")
+            
+            # Build enhanced table dengan kolom baru
+            data = []
+            for r in filtered:
+                row_data = {
+                    "Case_ID": r.get("Case_ID"),
+                    "Assignment_Date": r.get("Assignment_Date", "-"),
+                    "Status": r.get("Status", "-"),
+                    "Employment_Update": r.get("Employment_Update", "-"),
+                    "Employer": r.get("Employer", "-"),
+                    "Updated_Company_Contacts": r.get("Updated_Company_Contacts", "-"),
+                    "Work_Status": "✅ Dikerjakan" if r.get("Is_Worked_On") == 1 else "⏳ Belum",
+                }
+                
+                # Tambahkan kolom khusus Supervisor
+                if user_role in ("Superuser", "Supervisor"):
+                    row_data["Agent"] = r.get("Agent_Assigned_To")
+                    row_data["Principle_Outstanding"] = r.get("Principle_Outstanding")
+                
+                data.append(row_data)
+            
+            df = pd.DataFrame(data)
+            
+            if not df.empty:
+                if select_all:
+                    df.insert(0, "Selected", True)
+                elif clear_all:
+                    df.insert(0, "Selected", False)
+                else:
+                    df.insert(0, "Selected", df["Case_ID"].apply(lambda x: x in prev_selected))
+            else:
+                df["Selected"] = []
+
+            # Enhanced column config dengan kolom baru
+            col_config = {
+                "Selected": st.column_config.CheckboxColumn("Selected", help="Centang untuk memilih Case_ID"),
+                "Case_ID": st.column_config.TextColumn("Case ID", width="small"),
+                "Assignment_Date": st.column_config.TextColumn("Assignment Date", width="small"),
+                "Status": st.column_config.TextColumn("Status", width="small"),
+                "Employment_Update": st.column_config.TextColumn("Employment Update", width="small"),
+                "Employer": st.column_config.TextColumn("Employer", width="medium"),
+                "Updated_Company_Contacts": st.column_config.TextColumn("Updated Company Contacts", width="medium"),
+                "Work_Status": st.column_config.TextColumn("Work Status", width="small", help="Sudah dikerjakan atau belum"),
+            }
+            
+            disabled_cols = ["Case_ID", "Assignment_Date", "Status", "Employment_Update", "Employer", "Updated_Company_Contacts", "Work_Status"]
+            
+            if user_role in ("Superuser", "Supervisor"):
+                col_config["Agent"] = st.column_config.TextColumn("Agent", width="small")
+                col_config["Principle_Outstanding"] = st.column_config.NumberColumn(
+                    "Principle Outstanding",
+                    help="Sisa pokok pinjaman yang belum dibayar",
+                    format="Rp %.0f",
+                    width="small"
+                )
+                disabled_cols.extend(["Agent", "Principle_Outstanding"])
+
+            edited = st.data_editor(
+                df,
+                hide_index=True,
+                use_container_width=True,
+                column_config=col_config,
+                disabled=disabled_cols,
+                height=600  # Fixed height untuk tabel
+            )
+
+            # Determine selections from edited table
+            selected_list = []
+            if edited is not None and not edited.empty:
+                try:
+                    selected_list = [
+                        str(row["Case_ID"]) for _, row in edited.iterrows() if bool(row.get("Selected"))
+                    ]
+                except Exception:
+                    selected_list = []
+            st.session_state["agent_selected_list"] = selected_list
+            sel = selected_list[0] if selected_list else None
+            st.session_state["agent_selected"] = sel
+
+        # ===== KOLOM KANAN: CASE DETAILS =====
+        with details_col:
+            st.markdown("---")
         
         # Cek STATUS terlebih dahulu untuk menentukan tab yang ditampilkan
         sup_agent = fetchone(
