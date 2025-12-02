@@ -5124,60 +5124,75 @@ def page_agent():
                 if phone:
                     st.markdown(f"[Click to call]({'tel:'+str(phone)})  |  [SIP]({'sip:'+str(phone)})")
                 
-                # ===== CONTRACT DETAIL SCREENSHOT & WHATSAPP FEATURE =====
+                # Tombol untuk show/hide contract detail dan WhatsApp
                 st.markdown("---")
-                st.markdown("### 📸 Contract Detail")
                 
-                # Tombol untuk generate dan show contract detail
-                if st.button("📋 Show Contract Detail", key=f"show_contract_{sel}", use_container_width=True):
-                    st.session_state[f"show_contract_html_{sel}"] = True
+                col_btn1, col_btn2 = st.columns(2)
+                with col_btn1:
+                    if st.button("📋 Show Contract Detail", key=f"show_contract_{sel}", use_container_width=True):
+                        st.session_state[f"show_contract_html_{sel}"] = True
                 
-                if phone:
-                    wa_url = open_whatsapp_with_clipboard_instruction(phone)
-                    st.link_button("💬 Open WhatsApp", wa_url, use_container_width=True, type="primary")
-                else:
-                    st.button("💬 WhatsApp Unavailable", key=f"open_wa_disabled_{sel}", use_container_width=True, disabled=True)
+                with col_btn2:
+                    if phone:
+                        wa_url = open_whatsapp_with_clipboard_instruction(phone)
+                        st.link_button("💬 Open WhatsApp", wa_url, use_container_width=True, type="primary")
+                    else:
+                        st.button("💬 WhatsApp Unavailable", key=f"open_wa_disabled_{sel}", use_container_width=True, disabled=True)
                 
                 st.caption("🎯 Klik 'Show Contract Detail' untuk tampilkan detail dengan tombol auto-screenshot")
-                
-                # Display Contract Detail HTML jika tombol diklik
-                if st.session_state.get(f"show_contract_html_{sel}", False):
-                    st.markdown("---")
-                    
-                    # Prepare data untuk contract detail
-                    contract_data = {
-                        'Debtor_Name': info.get('Debtor_Name', 'N/A') or sup_data.get('Customer_name', 'N/A'),
-                        'PhoneNumber': phone or 'N/A',
-                        'Gender': sup_data.get('Gender', 'N/A') or 'N/A',
-                        'Legal_Address': sup_data.get('Home_Address', 'N/A') or 'N/A',
-                        'DOB': '2025-10-24',
-                        'Email': sup_data.get('email', 'N/A') or 'N/A',
-                        'Last_Known_Office_Name': '',
-                        'Last_Known_Job_Position': sup_data.get('Customer_Occupation', 'N/A') or 'Lainnya',
-                        'Last_Known_Work_Phone': 'None',
-                        'Debtor_Phone_Number_II': sup_data.get('Phone_Number_2', 'None') or 'None',
-                        'Debtor_Other_Phone_Numbers': '#N/A',
-                        'Date_of_Contract': sup_data.get('Assignment_Date', 'N/A') or 'N/A',
-                        'DPD': sup_data.get('DPD', 'N/A') or 'N/A',
-                    }
-                    
-                    # Generate HTML dengan auto-screenshot JavaScript
-                    contract_html = generate_contract_detail_html(contract_data, include_screenshot_js=True)
-                    
-                    # Display dengan component HTML
-                    st.components.v1.html(contract_html, height=800, scrolling=True)
-                    
-                    st.success("""
-                    ✅ **Auto-Screenshot Aktif!** Klik tombol 📸 di contract detail, screenshot otomatis masuk clipboard. Ctrl+V di WhatsApp!
-                    """)
-                    
-                    # Tombol untuk hide contract detail
-                    if st.button("❌ Hide Contract Detail", key=f"hide_contract_{sel}"):
-                        st.session_state[f"show_contract_html_{sel}"] = False
-                        st.rerun()
             
             else:
                 st.info("Centang satu baris untuk melihat detail kasus.")
+        
+        # ===== CONTRACT DETAIL FULL WIDTH (DI BAWAH KEDUA KOLOM) =====
+        if sel and st.session_state.get(f"show_contract_html_{sel}", False):
+            st.markdown("---")
+            st.markdown("### 📸 Contract Detail")
+            
+            # Ambil data untuk contract detail
+            info = fetchone("SELECT Debtor_Name, NIK_KTP FROM assign_tracer WHERE Agreement_No=?", (sel,)) or {}
+            sup_data = fetchone("""
+                SELECT Phone_Number_1, Phone_Number_2, Principle_Outstanding, 
+                       Customer_name, email, Gender, Home_Address, 
+                       Customer_Occupation, DPD, Assignment_Date
+                FROM supervisor_data 
+                WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=? 
+                LIMIT 1
+            """, (sel, sel, sel)) or {}
+            
+            phone = sup_data.get('Phone_Number_1', '') or ''
+            
+            # Prepare data untuk contract detail
+            contract_data = {
+                'Debtor_Name': info.get('Debtor_Name', 'N/A') or sup_data.get('Customer_name', 'N/A'),
+                'PhoneNumber': phone or 'N/A',
+                'Gender': sup_data.get('Gender', 'N/A') or 'N/A',
+                'Legal_Address': sup_data.get('Home_Address', 'N/A') or 'N/A',
+                'DOB': '2025-10-24',
+                'Email': sup_data.get('email', 'N/A') or 'N/A',
+                'Last_Known_Office_Name': '',
+                'Last_Known_Job_Position': sup_data.get('Customer_Occupation', 'N/A') or 'Lainnya',
+                'Last_Known_Work_Phone': 'None',
+                'Debtor_Phone_Number_II': sup_data.get('Phone_Number_2', 'None') or 'None',
+                'Debtor_Other_Phone_Numbers': '#N/A',
+                'Date_of_Contract': sup_data.get('Assignment_Date', 'N/A') or 'N/A',
+                'DPD': sup_data.get('DPD', 'N/A') or 'N/A',
+            }
+            
+            # Generate HTML dengan auto-screenshot JavaScript
+            contract_html = generate_contract_detail_html(contract_data, include_screenshot_js=True)
+            
+            # Display dengan component HTML full width
+            st.components.v1.html(contract_html, height=800, scrolling=True)
+            
+            st.success("""
+            ✅ **Auto-Screenshot Aktif!** Klik tombol 📸 di contract detail, screenshot otomatis masuk clipboard. Ctrl+V di WhatsApp!
+            """)
+            
+            # Tombol untuk hide contract detail
+            if st.button("❌ Hide Contract Detail", key=f"hide_contract_{sel}", use_container_width=False):
+                st.session_state[f"show_contract_html_{sel}"] = False
+                st.rerun()
         
         # Inline sub-tabs for the selected case actions (di dalam tab Cases)
         st.markdown("---")
