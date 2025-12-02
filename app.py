@@ -5130,27 +5130,94 @@ def page_agent():
         with col_case_details:
             if sel:
                 st.subheader(f"Case Details: {sel}")
-                info = fetchone("SELECT Debtor_Name, NIK_KTP FROM assign_tracer WHERE Agreement_No=?", (sel,)) or {}
                 
-                # Ambil data lengkap dari supervisor_data untuk Contract Detail
+                # Ambil data lengkap dari assign_tracer dan supervisor_data
+                tracer_info = fetchone("""
+                    SELECT Debtor_Name, NIK_KTP, EMPLOYMENT_UPDATE, EMPLOYER, 
+                           Employee_Name, Decoded_Company_Name
+                    FROM assign_tracer 
+                    WHERE Agreement_No=?
+                """, (sel,)) or {}
+                
                 sup_data = fetchone("""
                     SELECT Phone_Number_1, Phone_Number_2, Principle_Outstanding, 
                            Customer_name, email, Gender, Home_Address, 
-                           Customer_Occupation, DPD, Assignment_Date
+                           Customer_Occupation, DPD, Assignment_Date, Return_Date,
+                           Loan_Type, DT, Lending_Entity
                     FROM supervisor_data 
                     WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=? 
                     LIMIT 1
                 """, (sel, sel, sel)) or {}
                 
-                st.text_input("Debtor Name", value=info.get('Debtor_Name',''), disabled=True, key=f"debtor_name_{sel}")
-                st.text_input("NIK", value=info.get('NIK_KTP',''), disabled=True, key=f"nik_{sel}")
-                phone = sup_data.get('Phone_Number_1', '') or ''
-                st.text_input("Phone", value=phone, disabled=True, key=f"phone_{sel}")
+                # Data untuk display
+                customer_name = tracer_info.get('Debtor_Name', '') or sup_data.get('Customer_name', 'N/A')
+                gender = sup_data.get('Gender', 'N/A') or 'N/A'
+                phone = sup_data.get('Phone_Number_1', '') or 'N/A'
+                email = sup_data.get('email', '') or 'N/A'
+                home_address = sup_data.get('Home_Address', '') or 'N/A'
+                occupation = sup_data.get('Customer_Occupation', '') or 'N/A'
                 principle_outstanding = sup_data.get('Principle_Outstanding', 'N/A') or 'N/A'
-                st.text_input("Principle Outstanding", value=principle_outstanding, disabled=True, key=f"po_{sel}")
+                dpd = sup_data.get('DPD', 'N/A') or 'N/A'
+                last_due_date = sup_data.get('Return_Date', 'N/A') or 'N/A'
+                loan_type = sup_data.get('Loan_Type', 'N/A') or 'N/A'
+                batch_code = sup_data.get('DT', '') or sup_data.get('Lending_Entity', 'N/A')
+                decoded_company = tracer_info.get('Decoded_Company_Name', '') or tracer_info.get('EMPLOYER', 'N/A')
+                employment_update = tracer_info.get('EMPLOYMENT_UPDATE', 'N/A') or 'N/A'
+                employee_name = tracer_info.get('Employee_Name', '') or 'N/A'
                 
-                if phone:
-                    st.markdown(f"[Click to call]({'tel:'+str(phone)})  |  [SIP]({'sip:'+str(phone)})")
+                # Display dalam 2 kolom yang compact
+                detail_col1, detail_col2 = st.columns(2)
+                
+                with detail_col1:
+                    st.markdown("**👤 Personal Info**")
+                    st.text_input("Customer Name", value=customer_name, disabled=True, key=f"cust_name_{sel}", label_visibility="collapsed")
+                    st.caption("Customer Name")
+                    
+                    st.text_input("Gender", value=gender, disabled=True, key=f"gender_{sel}", label_visibility="collapsed")
+                    st.caption("Gender")
+                    
+                    st.text_input("Phone Number", value=phone, disabled=True, key=f"phone_{sel}", label_visibility="collapsed")
+                    st.caption("Phone Number")
+                    
+                    st.text_input("Email", value=email, disabled=True, key=f"email_{sel}", label_visibility="collapsed")
+                    st.caption("Email")
+                    
+                    st.text_area("Home Address", value=home_address, disabled=True, height=60, key=f"address_{sel}", label_visibility="collapsed")
+                    st.caption("Home Address")
+                    
+                    st.text_input("Occupation", value=occupation, disabled=True, key=f"occupation_{sel}", label_visibility="collapsed")
+                    st.caption("Occupation")
+                
+                with detail_col2:
+                    st.markdown("**💰 Financial Info**")
+                    st.text_input("Outstanding Principle", value=principle_outstanding, disabled=True, key=f"po_{sel}", label_visibility="collapsed")
+                    st.caption("Outstanding Principle")
+                    
+                    st.text_input("DPD", value=dpd, disabled=True, key=f"dpd_{sel}", label_visibility="collapsed")
+                    st.caption("DPD (Days Past Due)")
+                    
+                    st.text_input("Last Due Date", value=last_due_date, disabled=True, key=f"due_date_{sel}", label_visibility="collapsed")
+                    st.caption("Last Due Date")
+                    
+                    st.text_input("Loan Type", value=loan_type, disabled=True, key=f"loan_type_{sel}", label_visibility="collapsed")
+                    st.caption("Loan Type")
+                    
+                    st.text_input("Batch Code", value=batch_code, disabled=True, key=f"batch_{sel}", label_visibility="collapsed")
+                    st.caption("Batch Code")
+                    
+                    st.markdown("**🏢 Employment Info**")
+                    st.text_input("Decoded Company", value=decoded_company, disabled=True, key=f"company_{sel}", label_visibility="collapsed")
+                    st.caption("Decoded Company Name")
+                    
+                    st.text_input("Employment Status", value=employment_update, disabled=True, key=f"emp_status_{sel}", label_visibility="collapsed")
+                    st.caption("Employment Update")
+                    
+                    st.text_input("Employee Name", value=employee_name, disabled=True, key=f"emp_name_{sel}", label_visibility="collapsed")
+                    st.caption("Employee Name")
+                
+                # Quick action links
+                if phone and phone != 'N/A':
+                    st.markdown(f"📞 [Click to call]({'tel:'+str(phone)})  |  [SIP]({'sip:'+str(phone)})")
                 
                 # Tombol untuk show/hide contract detail dan WhatsApp
                 st.markdown("---")
@@ -5161,7 +5228,7 @@ def page_agent():
                         st.session_state[f"show_contract_html_{sel}"] = True
                 
                 with col_btn2:
-                    if phone:
+                    if phone and phone != 'N/A':
                         wa_url = open_whatsapp_with_clipboard_instruction(phone)
                         st.link_button("💬 Open WhatsApp", wa_url, use_container_width=True, type="primary")
                     else:
