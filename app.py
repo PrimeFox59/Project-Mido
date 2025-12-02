@@ -5052,47 +5052,13 @@ def page_agent():
                 filter_email = st.text_input("Email", key="filter_email", placeholder="Cari email...")
                 filter_phone = st.text_input("Phone Number", key="filter_phone", placeholder="Cari nomor telepon...")
             
-            # Assignment Date filter dengan date range
-            st.markdown("**Assignment Date**")
-            
-            # Quick date shortcuts (using session state to trigger date picker values)
-            date_shortcut_cols = st.columns(4)
-            with date_shortcut_cols[0]:
-                btn_today = st.button("Hari Ini", use_container_width=True, key="btn_today")
-            with date_shortcut_cols[1]:
-                btn_yesterday = st.button("Kemarin", use_container_width=True, key="btn_yesterday")
-            with date_shortcut_cols[2]:
-                btn_7days = st.button("7 Hari Terakhir", use_container_width=True, key="btn_7days")
-            with date_shortcut_cols[3]:
-                btn_reset = st.button("Reset Filter", use_container_width=True, type="secondary", key="btn_reset")
-            
-            # Determine default values based on button clicks
-            default_from = None
-            default_to = None
-            
-            if btn_today:
-                default_from = today_wib()
-                default_to = today_wib()
-            elif btn_yesterday:
-                default_from = today_wib() - timedelta(days=1)
-                default_to = today_wib() - timedelta(days=1)
-            elif btn_7days:
-                default_from = today_wib() - timedelta(days=7)
-                default_to = today_wib()
-            elif btn_reset:
-                # Clear all filter values
+            # Reset Filter button
+            if st.button("🔄 Reset Filter", use_container_width=True, type="secondary"):
                 for key in ['filter_case_id', 'filter_customer_name', 'filter_employee_name', 
                            'filter_company', 'filter_email', 'filter_phone']:
                     if key in st.session_state:
-                        st.session_state[key] = ""
-                default_from = None
-                default_to = None
-            
-            date_filter_col1, date_filter_col2 = st.columns(2)
-            with date_filter_col1:
-                filter_date_from = st.date_input("Dari Tanggal", value=default_from, key="filter_date_from_input", help="Filter assignment dari tanggal ini")
-            with date_filter_col2:
-                filter_date_to = st.date_input("Sampai Tanggal", value=default_to, key="filter_date_to_input", help="Filter assignment sampai tanggal ini")
+                        del st.session_state[key]
+                st.rerun()
         
         # Apply filters
         filtered = rows
@@ -5114,14 +5080,6 @@ def page_agent():
         
         if filter_phone and filter_phone.strip():
             filtered = [r for r in filtered if filter_phone.strip() in str(r.get('Phone_Number', ''))]
-        
-        if filter_date_from:
-            date_from_str = filter_date_from.isoformat()
-            filtered = [r for r in filtered if str(r.get('Assignment_Date', '')).split(' ')[0] >= date_from_str]
-        
-        if filter_date_to:
-            date_to_str = filter_date_to.isoformat()
-            filtered = [r for r in filtered if str(r.get('Assignment_Date', '')).split(' ')[0] <= date_to_str]
         
         # Show filter results count
         st.caption(f"📊 Menampilkan **{len(filtered)}** dari **{len(rows)}** cases")
