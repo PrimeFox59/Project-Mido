@@ -778,6 +778,21 @@ def init_db():
     except Exception:
         pass
     
+    # Create indexes for performance optimization (after all table creations)
+    try:
+        c.execute("CREATE INDEX IF NOT EXISTS idx_supervisor_case_id ON supervisor_data(Case_ID)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_supervisor_customer_name ON supervisor_data(Customer_name)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_supervisor_phone1 ON supervisor_data(Phone_Number_1)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_supervisor_email ON supervisor_data(email)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_agent_assignments_agreement ON agent_assignments(Agreement_No, active)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_agent_assignments_active ON agent_assignments(active, assigned_at)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_payments_agreement ON payments(Agreement_No, status)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_payments_date ON payments(paid_date)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_agent_results_agreement ON agent_results(Agreement_No, approval_status)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_trace_results_agreement ON trace_results(Agreement_No)")
+    except Exception:
+        pass
+    
     conn.commit()
     conn.close()
 
@@ -1482,10 +1497,70 @@ def decode_company_name(masked_name: str) -> str:
 # -------------------------
 # Assignment Rotation & Mutual Exclusion Helpers
 # -------------------------
+def get_active_assignments_batch(agreement_nos: list) -> dict:
+    """Get active assignments for multiple cases in one query (PERFORMANCE OPTIMIZED).
+    
+    Args:
+        agreement_nos: List of Agreement_No to check
+    
+    Returns:
+        Dict mapping Agreement_No -> assignment info dict, or None if no active assignment
+    """
+    if not agreement_nos:
+        return {}
+    
+    try:
+        placeholders = ','.join(['?'] * len(agreement_nos))
+        query = f"""
+            SELECT Agreement_No, assigned_to, assignment_type, assigned_at, auto_return_date
+            FROM agent_assignments
+            WHERE Agreement_No IN ({placeholders}) AND active = 1
+        """
+        results = fetchall(query, tuple(agreement_nos))
+        return {row['Agreement_No']: row for row in results}
+    except Exception:
+        return {}
+
+def get_assignment_history_batch(agreement_nos: list) -> dict:
+    """Get assignment history for multiple cases in one query (PERFORMANCE OPTIMIZED).
+    
+    Args:
+        agreement_nos: List of Agreement_No to check
+    
+    Returns:
+        Dict mapping Agreement_No -> list of assignment history dicts
+    """
+    if not agreement_nos:
+        return {}
+    
+    try:
+        placeholders = ','.join(['?'] * len(agreement_nos))
+        query = f"""
+            SELECT Agreement_No, assigned_to, assignment_type, assigned_at, completed_at
+            FROM agent_assignments
+            WHERE Agreement_No IN ({placeholders})
+            ORDER BY assigned_at DESC
+        """
+        results = fetchall(query, tuple(agreement_nos))
+        
+        # Group by Agreement_No
+        history_map = {}
+        for row in results:
+            agr_no = row['Agreement_No']
+            if agr_no not in history_map:
+                history_map[agr_no] = []
+            history_map[agr_no].append(row)
+        
+        return history_map
+    except Exception:
+        return {}
+
 def get_active_assignment(agreement_no: str):
     """Get current active assignment for a case (agent or tracer).
     Returns dict with keys: Agreement_No, assigned_to, assignment_type, assigned_at, auto_return_date
     or None if no active assignment.
+    
+    NOTE: For batch operations, use get_active_assignments_batch() for better performance.
     """
     try:
         row = fetchone("""
@@ -7535,11 +7610,16 @@ def page_supervisor():
     # --- Monitoring Tab ---
     with tabs[0]:
 
-        # Quick KPI: total rows in system
-        try:
-            _total_rows_supervisor = (fetchone("SELECT COUNT(*) c FROM supervisor_data") or {}).get('c', 0)
-        except Exception:
-            _total_rows_supervisor = 0
+        # Quick KPI: total rows in system (cached for session)
+        if 'supervisor_total_rows' not in st.session_state or st.session_state.get('refresh_supervisor_stats', False):
+            try:
+                st.session_state['supervisor_total_rows'] = (fetchone("SELECT COUNT(*) c FROM supervisor_data") or {}).get('c', 0)
+                st.session_state['refresh_supervisor_stats'] = False
+            except Exception:
+                st.session_state['supervisor_total_rows'] = 0
+        
+        _total_rows_supervisor = st.session_state['supervisor_total_rows']
+        
         kpi_col = st.columns(4)
         with kpi_col[0]:
             st.metric("Total data di sistem", f"{_total_rows_supervisor:,}")
@@ -7617,8 +7697,15 @@ def page_supervisor():
         else:
             df = pd.DataFrame(rows)
             
-            # === ADD ASSIGNMENT STATUS COLUMNS ===
-            # Add columns: "Status Assignment", "Currently Assigned To", "Assignment History"
+            # === OPTIMIZED: BATCH QUERY FOR ASSIGNMENT STATUS ===
+            # Get all Case_IDs in current page
+            case_ids = [str(row.get('Case_ID', '')) for row in rows if row.get('Case_ID')]
+            
+            # Batch fetch active assignments and history (1 query each instead of N queries)
+            active_assignments_map = get_active_assignments_batch(case_ids)
+            history_map = get_assignment_history_batch(case_ids)
+            
+            # Build status columns using pre-fetched data
             assignment_statuses = []
             for _, row in df.iterrows():
                 case_id = str(row.get('Case_ID', ''))
@@ -7630,8 +7717,8 @@ def page_supervisor():
                     })
                     continue
                 
-                # Get active assignment
-                active = get_active_assignment(case_id)
+                # Get active assignment from batch result
+                active = active_assignments_map.get(case_id)
                 if active:
                     assign_type = active.get('assignment_type', 'agent').upper()
                     assigned_to = active.get('assigned_to', 'Unknown')
@@ -7642,8 +7729,8 @@ def page_supervisor():
                     else:
                         status = f"🔍 Tracer Active"
                     
-                    # Get history
-                    history = get_assignment_history(case_id)
+                    # Get history from batch result
+                    history = history_map.get(case_id, [])
                     history_str = ""
                     if history:
                         history_names = [f"{h.get('assigned_to', '?')} ({h.get('assignment_type', '?')})" 
@@ -7658,8 +7745,8 @@ def page_supervisor():
                         'Assignment_History': history_str
                     })
                 else:
-                    # Not assigned - check history
-                    history = get_assignment_history(case_id)
+                    # Not assigned - check history from batch result
+                    history = history_map.get(case_id, [])
                     if history:
                         history_names = [f"{h.get('assigned_to', '?')} ({h.get('assignment_type', '?')})" 
                                        for h in history[:5]]
@@ -7721,17 +7808,19 @@ def page_supervisor():
                 selected_ids = []
 
             # --- Detail Contract Section ---
-            # Tampilkan detail jika hanya 1 row yang dipilih
+            # Tampilkan detail jika hanya 1 row yang dipilih (LAZY LOADING)
             if len(selected_ids) == 1:
                 st.markdown("---")
                 
-                try:
-                    detail_row = fetchone("SELECT * FROM supervisor_data WHERE id = ?", (selected_ids[0],))
-                    
-                    if detail_row:
-                        # Get agent assignment info
-                        agent_assign = fetchone("SELECT Agent_Assigned_To, assigned_at FROM agent_assignments WHERE Agreement_No = ? AND active = 1", (detail_row.get('Case_ID', ''),))
-                        agent_name = agent_assign.get('Agent_Assigned_To', 'N/A') if agent_assign else 'N/A'
+                # Use expander for lazy loading (only render when expanded)
+                with st.expander("📋 View Contract Details", expanded=False):
+                    try:
+                        detail_row = fetchone("SELECT * FROM supervisor_data WHERE id = ?", (selected_ids[0],))
+                        
+                        if detail_row:
+                            # Get agent assignment info
+                            agent_assign = fetchone("SELECT Agent_Assigned_To, assigned_at FROM agent_assignments WHERE Agreement_No = ? AND active = 1", (detail_row.get('Case_ID', ''),))
+                            agent_name = agent_assign.get('Agent_Assigned_To', 'N/A') if agent_assign else 'N/A'
                         
                         # Top Info Card - Handling Agent Details
                         st.markdown(f"""
@@ -7914,12 +8003,9 @@ def page_supervisor():
                                 st.dataframe(payment_df, use_container_width=True, hide_index=True)
                             else:
                                 st.info("Belum ada riwayat pembayaran")
-                    
-                    else:
-                        st.warning("Data detail tidak ditemukan.")
-                        
-                except Exception as e:
-                    st.error(f"Error menampilkan detail: {e}")
+                                
+                    except Exception as e:
+                        st.error(f"Error menampilkan detail: {e}")
                 
                 st.markdown("---")
             
@@ -7958,6 +8044,9 @@ def page_supervisor():
                         except Exception:
                             pass
                         st.success(f"Berhasil menghapus {len(selected_ids)} baris.")
+                        # Refresh cached stats
+                        st.session_state['refresh_supervisor_stats'] = True
+                        st.session_state['refresh_payment_recap'] = True
                         st.rerun()
                     except Exception as e:
                         st.error(f"Gagal menghapus data: {e}")
@@ -7991,6 +8080,9 @@ def page_supervisor():
                             except Exception:
                                 pass
                             st.success(f"Berhasil menghapus semua data (±{deleted_before} baris).")
+                            # Refresh cached stats
+                            st.session_state['refresh_supervisor_stats'] = True
+                            st.session_state['refresh_payment_recap'] = True
                             st.rerun()
                         except Exception as e:
                             st.error(f"Gagal menghapus semua data: {e}")
@@ -8004,32 +8096,41 @@ def page_supervisor():
         # Summary Metrics
         col_m1, col_m2, col_m3, col_m4 = st.columns(4)
         
-        # Get payment recap data
-        recap_query = """
-            SELECT 
-                COALESCE(sd.Case_ID, p.Agreement_No) AS Case_ID,
-                sd.Product,
-                p.paid_date AS Date,
-                sd.Customer_name,
-                p.paid_amount AS Savings,
-                ar.agent_status AS Skema_Pelunasan,
-                COALESCE(sd.Paid_Off, 'NO') AS PAID_OFF,
-                COALESCE(ar.agent, p.uploaded_by) AS Agent,
-                strftime('%b, %Y', p.paid_date) AS Month,
-                'N/A' AS Case_Batch
-            FROM payments p
-            LEFT JOIN supervisor_data sd 
-                ON sd.Case_ID = p.Agreement_No 
-                OR sd.Virtual_Account_Number = p.Agreement_No
-                OR sd.Third_Uid = p.Agreement_No
-            LEFT JOIN agent_results ar 
-                ON ar.Agreement_No = p.Agreement_No
-                AND ar.approval_status = 'approved'
-            WHERE p.status = 'approved'
-            ORDER BY p.paid_date DESC
-        """
+        # OPTIMIZED: Cache payment recap data in session state (refresh only when needed)
+        cache_key = 'payment_recap_data'
+        if cache_key not in st.session_state or st.session_state.get('refresh_payment_recap', False):
+            # Get payment recap data with OPTIMIZED query (single JOIN with subquery)
+            recap_query = """
+                SELECT 
+                    COALESCE(sd.Case_ID, p.Agreement_No) AS Case_ID,
+                    sd.Product,
+                    p.paid_date AS Date,
+                    sd.Customer_name,
+                    p.paid_amount AS Savings,
+                    ar.agent_status AS Skema_Pelunasan,
+                    COALESCE(sd.Paid_Off, 'NO') AS PAID_OFF,
+                    COALESCE(ar.agent, p.uploaded_by) AS Agent,
+                    strftime('%b, %Y', p.paid_date) AS Month,
+                    'N/A' AS Case_Batch
+                FROM payments p
+                LEFT JOIN supervisor_data sd 
+                    ON sd.Case_ID = p.Agreement_No 
+                    OR sd.Virtual_Account_Number = p.Agreement_No
+                    OR sd.Third_Uid = p.Agreement_No
+                LEFT JOIN (
+                    SELECT Agreement_No, agent, agent_status
+                    FROM agent_results
+                    WHERE approval_status = 'approved'
+                    GROUP BY Agreement_No
+                ) ar ON ar.Agreement_No = p.Agreement_No
+                WHERE p.status = 'approved'
+                ORDER BY p.paid_date DESC
+            """
+            
+            st.session_state[cache_key] = pd.read_sql_query(recap_query, conn)
+            st.session_state['refresh_payment_recap'] = False
         
-        recap_df = pd.read_sql_query(recap_query, conn)
+        recap_df = st.session_state[cache_key]
         
         if not recap_df.empty:
             # Calculate metrics
