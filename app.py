@@ -829,55 +829,100 @@ def generate_contract_detail_html(case_data: dict, include_screenshot_js: bool =
         screenshot_js = """
         <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
         <script>
-        // Wait for EVERYTHING to fully load
+        // Wait for EVERYTHING to fully load - AGGRESSIVE WAITING STRATEGY
         let pageFullyLoaded = false;
+        let button = null;
+        let statusDiv = null;
         
         window.addEventListener('load', function() {
-            // Additional wait after load event
+            button = document.getElementById('screenshotBtn');
+            statusDiv = document.getElementById('status');
+            
+            // Disable button initially
+            if (button) {
+                button.disabled = true;
+                button.textContent = '⏳ Loading...';
+                button.style.opacity = '0.6';
+                button.style.cursor = 'wait';
+            }
+            
+            // Wait aggressively for all resources + fonts + rendering
             setTimeout(() => {
-                pageFullyLoaded = true;
-                console.log('Page and fonts fully loaded');
-            }, 1500);
+                // Check if fonts are really loaded
+                if (document.fonts) {
+                    document.fonts.ready.then(() => {
+                        // Extra wait after fonts ready
+                        setTimeout(() => {
+                            pageFullyLoaded = true;
+                            if (button) {
+                                button.disabled = false;
+                                button.textContent = '📋 Copy Screenshot to Clipboard';
+                                button.style.opacity = '1';
+                                button.style.cursor = 'pointer';
+                            }
+                            console.log('✅ Page fully ready for screenshot');
+                        }, 1000);
+                    });
+                } else {
+                    // Fallback if fonts API not available
+                    setTimeout(() => {
+                        pageFullyLoaded = true;
+                        if (button) {
+                            button.disabled = false;
+                            button.textContent = '📋 Copy Screenshot to Clipboard';
+                            button.style.opacity = '1';
+                            button.style.cursor = 'pointer';
+                        }
+                    }, 2000);
+                }
+            }, 1000);
         });
         
         function captureAndCopyToClipboard() {
             const container = document.querySelector('.container');
-            const button = document.getElementById('screenshotBtn');
-            const statusDiv = document.getElementById('status');
             
             if (!pageFullyLoaded) {
-                statusDiv.textContent = '⏳ Waiting for page to fully load...';
-                statusDiv.style.color = '#f59e0b';
-                setTimeout(captureAndCopyToClipboard, 500);
+                if (statusDiv) {
+                    statusDiv.textContent = '⏳ Please wait, page still loading...';
+                    statusDiv.style.color = '#f59e0b';
+                }
                 return;
             }
             
-            // Hide button before screenshot
-            button.style.display = 'none';
-            statusDiv.textContent = '📸 Capturing screenshot...';
-            statusDiv.style.color = '#6366F1';
+            // Hide button and show status BEFORE any timeout
+            if (button) button.style.display = 'none';
+            if (statusDiv) {
+                statusDiv.textContent = '📸 Capturing...';
+                statusDiv.style.color = '#6366F1';
+            }
             
-            // CRITICAL: Wait extra time for rendering to complete
+            // Force a full repaint before capturing
+            container.style.opacity = '0.9999';
+            setTimeout(() => {
+                container.style.opacity = '1';
+            }, 10);
+            
+            // Wait for repaint, THEN capture
             setTimeout(() => {
                 html2canvas(container, {
-                    scale: 4,  // Maximum scale for sharpest text
+                    scale: 4,
                     useCORS: true,
                     backgroundColor: null,
                     logging: false,
                     allowTaint: false,
                     removeContainer: false,
                     imageTimeout: 0,
-                    letterRendering: true,  // Better text rendering
-                    // Force font rendering in clone
+                    letterRendering: true,
+                    windowWidth: container.scrollWidth,
+                    windowHeight: container.scrollHeight,
                     onclone: function(clonedDoc) {
                         const clonedContainer = clonedDoc.querySelector('.container');
                         if (clonedContainer) {
-                            // Force proper font and anti-aliasing
                             clonedContainer.style.fontFamily = "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif";
                             clonedContainer.style.webkitFontSmoothing = 'antialiased';
                             clonedContainer.style.mozOsxFontSmoothing = 'grayscale';
+                            clonedContainer.style.transform = 'translateZ(0)';
                             
-                            // Ensure everything is visible
                             const allElems = clonedContainer.querySelectorAll('*');
                             allElems.forEach(el => {
                                 el.style.visibility = 'visible';
@@ -886,31 +931,36 @@ def generate_contract_detail_html(case_data: dict, include_screenshot_js: bool =
                         }
                     }
                 }).then(canvas => {
-                    // Convert canvas to blob with maximum quality
                     canvas.toBlob(blob => {
                         const item = new ClipboardItem({'image/png': blob});
                         navigator.clipboard.write([item]).then(() => {
-                            statusDiv.textContent = '✅ Screenshot copied to clipboard! Paste (Ctrl+V) in WhatsApp';
-                            statusDiv.style.color = '#10b981';
-                            button.style.display = 'inline-flex';
+                            if (statusDiv) {
+                                statusDiv.textContent = '✅ Screenshot copied! Paste (Ctrl+V) in WhatsApp';
+                                statusDiv.style.color = '#10b981';
+                            }
+                            if (button) button.style.display = 'inline-flex';
                             
                             setTimeout(() => {
-                                statusDiv.textContent = '';
+                                if (statusDiv) statusDiv.textContent = '';
                             }, 5000);
                         }).catch(err => {
-                            statusDiv.textContent = '❌ Failed to copy. Please use Windows + Shift + S manually';
-                            statusDiv.style.color = '#e74c3c';
-                            button.style.display = 'inline-flex';
+                            if (statusDiv) {
+                                statusDiv.textContent = '❌ Copy failed. Use Windows + Shift + S';
+                                statusDiv.style.color = '#e74c3c';
+                            }
+                            if (button) button.style.display = 'inline-flex';
                             console.error('Clipboard error:', err);
                         });
                     }, 'image/png', 1.0);
                 }).catch(err => {
-                    statusDiv.textContent = '❌ Screenshot failed. Please use Windows + Shift + S manually';
-                    statusDiv.style.color = '#e74c3c';
-                    button.style.display = 'inline-flex';
+                    if (statusDiv) {
+                        statusDiv.textContent = '❌ Screenshot failed';
+                        statusDiv.style.color = '#e74c3c';
+                    }
+                    if (button) button.style.display = 'inline-flex';
                     console.error('Screenshot error:', err);
                 });
-            }, 800);  // Increased to 800ms
+            }, 1000);
         }
         </script>
         """
