@@ -4854,6 +4854,11 @@ def page_agent():
                 COALESCE(sd.STATUS, '-') AS Status,
                 COALESCE(at.EMPLOYMENT_UPDATE, '-') AS Employment_Update,
                 COALESCE(at.EMPLOYER, '-') AS Employer,
+                COALESCE(at.Decoded_Company_Name, '') AS Decoded_Company_Name,
+                COALESCE(at.Employee_Name, '') AS Employee_Name,
+                COALESCE(sd.Customer_name, '') AS Customer_Name,
+                COALESCE(sd.email, '') AS Email,
+                COALESCE(sd.Phone_Number_1, '') AS Phone_Number,
                 COALESCE(sd.Additional_Contacts, '-') AS Updated_Company_Contacts,
                 (
                     COALESCE(
@@ -4973,6 +4978,11 @@ def page_agent():
                 COALESCE(sd.STATUS, '-') AS Status,
                 COALESCE(at.EMPLOYMENT_UPDATE, '-') AS Employment_Update,
                 COALESCE(at.EMPLOYER, '-') AS Employer,
+                COALESCE(at.Decoded_Company_Name, '') AS Decoded_Company_Name,
+                COALESCE(at.Employee_Name, '') AS Employee_Name,
+                COALESCE(sd.Customer_name, '') AS Customer_Name,
+                COALESCE(sd.email, '') AS Email,
+                COALESCE(sd.Phone_Number_1, '') AS Phone_Number,
                 COALESCE(sd.Additional_Contacts, '-') AS Updated_Company_Contacts,
                 CASE 
                     WHEN EXISTS (
@@ -5024,8 +5034,89 @@ def page_agent():
 
     # --- Cases tab ---
     with tabs[0]:
-        q_ag = st.text_input("Cari Case_ID", key="ag_q_no")
-        filtered = [r for r in rows if (not q_ag or q_ag.strip() in str(r.get('Case_ID') or ''))]
+        st.subheader("🔍 Filter Cases")
+        
+        # Filters dalam expandable section
+        with st.expander("Klik untuk buka/tutup filter", expanded=False):
+            filter_col1, filter_col2, filter_col3 = st.columns(3)
+            
+            with filter_col1:
+                filter_case_id = st.text_input("Case ID", key="filter_case_id", placeholder="Cari Case ID...")
+                filter_customer_name = st.text_input("Customer Name", key="filter_customer_name", placeholder="Cari nama customer...")
+            
+            with filter_col2:
+                filter_employee_name = st.text_input("Employee Name", key="filter_employee_name", placeholder="Cari nama employee...")
+                filter_company = st.text_input("Company Name", key="filter_company", placeholder="Cari nama perusahaan...")
+            
+            with filter_col3:
+                filter_email = st.text_input("Email", key="filter_email", placeholder="Cari email...")
+                filter_phone = st.text_input("Phone Number", key="filter_phone", placeholder="Cari nomor telepon...")
+            
+            # Assignment Date filter dengan date range
+            st.markdown("**Assignment Date**")
+            date_filter_col1, date_filter_col2 = st.columns(2)
+            with date_filter_col1:
+                filter_date_from = st.date_input("Dari Tanggal", value=None, key="filter_date_from", help="Filter assignment dari tanggal ini")
+            with date_filter_col2:
+                filter_date_to = st.date_input("Sampai Tanggal", value=None, key="filter_date_to", help="Filter assignment sampai tanggal ini")
+            
+            # Quick date shortcuts
+            date_shortcut_cols = st.columns(4)
+            with date_shortcut_cols[0]:
+                if st.button("Hari Ini", use_container_width=True):
+                    st.session_state['filter_date_from'] = today_wib()
+                    st.session_state['filter_date_to'] = today_wib()
+                    st.rerun()
+            with date_shortcut_cols[1]:
+                if st.button("Kemarin", use_container_width=True):
+                    yesterday = today_wib() - timedelta(days=1)
+                    st.session_state['filter_date_from'] = yesterday
+                    st.session_state['filter_date_to'] = yesterday
+                    st.rerun()
+            with date_shortcut_cols[2]:
+                if st.button("7 Hari Terakhir", use_container_width=True):
+                    st.session_state['filter_date_from'] = today_wib() - timedelta(days=7)
+                    st.session_state['filter_date_to'] = today_wib()
+                    st.rerun()
+            with date_shortcut_cols[3]:
+                if st.button("Reset Filter", use_container_width=True, type="secondary"):
+                    for key in ['filter_case_id', 'filter_customer_name', 'filter_employee_name', 
+                               'filter_company', 'filter_email', 'filter_phone', 'filter_date_from', 'filter_date_to']:
+                        if key in st.session_state:
+                            del st.session_state[key]
+                    st.rerun()
+        
+        # Apply filters
+        filtered = rows
+        
+        if filter_case_id and filter_case_id.strip():
+            filtered = [r for r in filtered if filter_case_id.strip().lower() in str(r.get('Case_ID', '')).lower()]
+        
+        if filter_customer_name and filter_customer_name.strip():
+            filtered = [r for r in filtered if filter_customer_name.strip().lower() in str(r.get('Customer_Name', '')).lower()]
+        
+        if filter_employee_name and filter_employee_name.strip():
+            filtered = [r for r in filtered if filter_employee_name.strip().lower() in str(r.get('Employee_Name', '')).lower()]
+        
+        if filter_company and filter_company.strip():
+            filtered = [r for r in filtered if filter_company.strip().lower() in (str(r.get('Employer', '')) + str(r.get('Decoded_Company_Name', ''))).lower()]
+        
+        if filter_email and filter_email.strip():
+            filtered = [r for r in filtered if filter_email.strip().lower() in str(r.get('Email', '')).lower()]
+        
+        if filter_phone and filter_phone.strip():
+            filtered = [r for r in filtered if filter_phone.strip() in str(r.get('Phone_Number', ''))]
+        
+        if filter_date_from:
+            date_from_str = filter_date_from.isoformat()
+            filtered = [r for r in filtered if str(r.get('Assignment_Date', '')).split(' ')[0] >= date_from_str]
+        
+        if filter_date_to:
+            date_to_str = filter_date_to.isoformat()
+            filtered = [r for r in filtered if str(r.get('Assignment_Date', '')).split(' ')[0] <= date_to_str]
+        
+        # Show filter results count
+        st.caption(f"📊 Menampilkan **{len(filtered)}** dari **{len(rows)}** cases")
 
         # Layout 2 kolom: Assignments table (kiri) & Case Details (kanan)
         col_assignments, col_case_details = st.columns([1.5, 1])
