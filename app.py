@@ -4908,21 +4908,10 @@ def page_agent():
         q_ag = st.text_input("Cari Case_ID", key="ag_q_no")
         filtered = [r for r in rows if (not q_ag or q_ag.strip() in str(r.get('Case_ID') or ''))]
 
-        # Select-all / clear options
-        col_sa, col_cl = st.columns([1, 1])
-        with col_sa:
-            select_all = st.checkbox("Pilih semua", key="ag_select_all")
-        with col_cl:
-            clear_all = st.checkbox("Kosongkan pilihan", key="ag_clear_all")
+        # Layout 2 kolom: Assignments table (kiri) & Case Details (kanan)
+        col_assignments, col_case_details = st.columns([1.5, 1])
         
-        # Initialize sel from session state BEFORE using it
-        prev_selected = set(st.session_state.get("agent_selected_list", []) or [])
-        sel = st.session_state.get("agent_selected") if st.session_state.get("agent_selected") in [r.get('Case_ID') for r in filtered] else None
-        
-        # ===== LAYOUT 2 KOLOM: Assignments di kiri, Case Details di kanan =====
-        assignments_col, details_col = st.columns([1.2, 1])
-        
-        with assignments_col:
+        with col_assignments:
             st.subheader("Assignments")
             
             # Build enhanced table dengan kolom baru
@@ -4942,10 +4931,19 @@ def page_agent():
                 if user_role in ("Superuser", "Supervisor"):
                     row_data["Agent"] = r.get("Agent_Assigned_To")
                     row_data["Principle_Outstanding"] = r.get("Principle_Outstanding")
+                    row_data["Total_Approved_Payment"] = r.get("Total_Approved_Payment")
                 
                 data.append(row_data)
             
             df = pd.DataFrame(data)
+            prev_selected = set(st.session_state.get("agent_selected_list", []) or [])
+            
+            # Select-all / clear options
+            col_sa, col_cl = st.columns([1, 1])
+            with col_sa:
+                select_all = st.checkbox("Pilih semua", key="ag_select_all")
+            with col_cl:
+                clear_all = st.checkbox("Kosongkan pilihan", key="ag_clear_all")
             
             if not df.empty:
                 if select_all:
@@ -4960,26 +4958,32 @@ def page_agent():
             # Enhanced column config dengan kolom baru
             col_config = {
                 "Selected": st.column_config.CheckboxColumn("Selected", help="Centang untuk memilih Case_ID"),
-                "Case_ID": st.column_config.TextColumn("Case ID", width="small"),
-                "Assignment_Date": st.column_config.TextColumn("Assignment Date", width="small"),
+                "Case_ID": st.column_config.TextColumn("Case ID", width="medium"),
+                "Assignment_Date": st.column_config.TextColumn("Assignment Date", width="medium"),
                 "Status": st.column_config.TextColumn("Status", width="small"),
-                "Employment_Update": st.column_config.TextColumn("Employment Update", width="small"),
+                "Employment_Update": st.column_config.TextColumn("Employment Update", width="medium"),
                 "Employer": st.column_config.TextColumn("Employer", width="medium"),
-                "Updated_Company_Contacts": st.column_config.TextColumn("Updated Company Contacts", width="medium"),
+                "Updated_Company_Contacts": st.column_config.TextColumn("Updated Company Contacts", width="large"),
                 "Work_Status": st.column_config.TextColumn("Work Status", width="small", help="Sudah dikerjakan atau belum"),
             }
             
             disabled_cols = ["Case_ID", "Assignment_Date", "Status", "Employment_Update", "Employer", "Updated_Company_Contacts", "Work_Status"]
             
             if user_role in ("Superuser", "Supervisor"):
-                col_config["Agent"] = st.column_config.TextColumn("Agent", width="small")
+                col_config["Agent"] = st.column_config.TextColumn("Agent", width="medium")
                 col_config["Principle_Outstanding"] = st.column_config.NumberColumn(
                     "Principle Outstanding",
                     help="Sisa pokok pinjaman yang belum dibayar",
                     format="Rp %.0f",
-                    width="small"
+                    width="medium"
                 )
-                disabled_cols.extend(["Agent", "Principle_Outstanding"])
+                col_config["Total_Approved_Payment"] = st.column_config.NumberColumn(
+                    "Total Approved Payment",
+                    help="Total pembayaran cicilan yang sudah di-approve",
+                    format="Rp %.0f",
+                    width="medium"
+                )
+                disabled_cols.extend(["Agent", "Principle_Outstanding", "Total_Approved_Payment"])
 
             edited = st.data_editor(
                 df,
@@ -4987,7 +4991,7 @@ def page_agent():
                 use_container_width=True,
                 column_config=col_config,
                 disabled=disabled_cols,
-                height=600  # Fixed height untuk tabel
+                height=600,
             )
 
             # Determine selections from edited table
@@ -5002,10 +5006,90 @@ def page_agent():
             st.session_state["agent_selected_list"] = selected_list
             sel = selected_list[0] if selected_list else None
             st.session_state["agent_selected"] = sel
-
-        # ===== KOLOM KANAN: CASE DETAILS =====
-        with details_col:
-            st.markdown("---")
+        
+        # Kolom kanan: Case Details
+        with col_case_details:
+            if sel:
+                st.subheader(f"Case Details: {sel}")
+                info = fetchone("SELECT Debtor_Name, NIK_KTP FROM assign_tracer WHERE Agreement_No=?", (sel,)) or {}
+                
+                # Ambil data lengkap dari supervisor_data untuk Contract Detail
+                sup_data = fetchone("""
+                    SELECT Phone_Number_1, Phone_Number_2, Principle_Outstanding, 
+                           Customer_name, email, Gender, Home_Address, 
+                           Customer_Occupation, DPD, Assignment_Date
+                    FROM supervisor_data 
+                    WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=? 
+                    LIMIT 1
+                """, (sel, sel, sel)) or {}
+                
+                st.text_input("Debtor Name", value=info.get('Debtor_Name',''), disabled=True, key=f"debtor_name_{sel}")
+                st.text_input("NIK", value=info.get('NIK_KTP',''), disabled=True, key=f"nik_{sel}")
+                phone = sup_data.get('Phone_Number_1', '') or ''
+                st.text_input("Phone", value=phone, disabled=True, key=f"phone_{sel}")
+                principle_outstanding = sup_data.get('Principle_Outstanding', 'N/A') or 'N/A'
+                st.text_input("Principle Outstanding", value=principle_outstanding, disabled=True, key=f"po_{sel}")
+                
+                if phone:
+                    st.markdown(f"[Click to call]({'tel:'+str(phone)})  |  [SIP]({'sip:'+str(phone)})")
+                
+                # ===== CONTRACT DETAIL SCREENSHOT & WHATSAPP FEATURE =====
+                st.markdown("---")
+                st.markdown("### 📸 Contract Detail")
+                
+                # Tombol untuk generate dan show contract detail
+                if st.button("📋 Show Contract Detail", key=f"show_contract_{sel}", use_container_width=True):
+                    st.session_state[f"show_contract_html_{sel}"] = True
+                
+                if phone:
+                    wa_url = open_whatsapp_with_clipboard_instruction(phone)
+                    st.link_button("💬 Open WhatsApp", wa_url, use_container_width=True, type="primary")
+                else:
+                    st.button("💬 WhatsApp Unavailable", key=f"open_wa_disabled_{sel}", use_container_width=True, disabled=True)
+                
+                st.caption("🎯 Klik 'Show Contract Detail' untuk tampilkan detail dengan tombol auto-screenshot")
+                
+                # Display Contract Detail HTML jika tombol diklik
+                if st.session_state.get(f"show_contract_html_{sel}", False):
+                    st.markdown("---")
+                    
+                    # Prepare data untuk contract detail
+                    contract_data = {
+                        'Debtor_Name': info.get('Debtor_Name', 'N/A') or sup_data.get('Customer_name', 'N/A'),
+                        'PhoneNumber': phone or 'N/A',
+                        'Gender': sup_data.get('Gender', 'N/A') or 'N/A',
+                        'Legal_Address': sup_data.get('Home_Address', 'N/A') or 'N/A',
+                        'DOB': '2025-10-24',
+                        'Email': sup_data.get('email', 'N/A') or 'N/A',
+                        'Last_Known_Office_Name': '',
+                        'Last_Known_Job_Position': sup_data.get('Customer_Occupation', 'N/A') or 'Lainnya',
+                        'Last_Known_Work_Phone': 'None',
+                        'Debtor_Phone_Number_II': sup_data.get('Phone_Number_2', 'None') or 'None',
+                        'Debtor_Other_Phone_Numbers': '#N/A',
+                        'Date_of_Contract': sup_data.get('Assignment_Date', 'N/A') or 'N/A',
+                        'DPD': sup_data.get('DPD', 'N/A') or 'N/A',
+                    }
+                    
+                    # Generate HTML dengan auto-screenshot JavaScript
+                    contract_html = generate_contract_detail_html(contract_data, include_screenshot_js=True)
+                    
+                    # Display dengan component HTML
+                    st.components.v1.html(contract_html, height=800, scrolling=True)
+                    
+                    st.success("""
+                    ✅ **Auto-Screenshot Aktif!** Klik tombol 📸 di contract detail, screenshot otomatis masuk clipboard. Ctrl+V di WhatsApp!
+                    """)
+                    
+                    # Tombol untuk hide contract detail
+                    if st.button("❌ Hide Contract Detail", key=f"hide_contract_{sel}"):
+                        st.session_state[f"show_contract_html_{sel}"] = False
+                        st.rerun()
+            
+            else:
+                st.info("Centang satu baris untuk melihat detail kasus.")
+        
+        # Inline sub-tabs for the selected case actions (di dalam tab Cases)
+        st.markdown("---")
         
         # Cek STATUS terlebih dahulu untuk menentukan tab yang ditampilkan
         sup_agent = fetchone(
