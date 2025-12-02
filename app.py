@@ -5183,7 +5183,7 @@ def page_agent():
             contract_html = generate_contract_detail_html(contract_data, include_screenshot_js=True)
             
             # Display dengan component HTML full width
-            st.components.v1.html(contract_html, height=800, scrolling=True)
+            st.components.v1.html(contract_html, height=1200, scrolling=True)
             
             st.success("""
             ✅ **Auto-Screenshot Aktif!** Klik tombol 📸 di contract detail, screenshot otomatis masuk clipboard. Ctrl+V di WhatsApp!
