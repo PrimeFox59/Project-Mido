@@ -856,7 +856,7 @@ def generate_contract_detail_html(case_data: dict, include_screenshot_js: bool =
                             pageFullyLoaded = true;
                             if (button) {
                                 button.disabled = false;
-                                button.textContent = '📋 Copy Screenshot to Clipboard';
+                                button.textContent = '📸 Copy Screenshot to Clipboard';
                                 button.style.opacity = '1';
                                 button.style.cursor = 'pointer';
                             }
@@ -869,7 +869,7 @@ def generate_contract_detail_html(case_data: dict, include_screenshot_js: bool =
                         pageFullyLoaded = true;
                         if (button) {
                             button.disabled = false;
-                            button.textContent = '📋 Copy Screenshot to Clipboard';
+                            button.textContent = '📸 Copy Screenshot to Clipboard';
                             button.style.opacity = '1';
                             button.style.cursor = 'pointer';
                         }
@@ -880,6 +880,7 @@ def generate_contract_detail_html(case_data: dict, include_screenshot_js: bool =
         
         function captureAndCopyToClipboard() {
             const container = document.querySelector('.container');
+            const screenshotControls = document.querySelector('.screenshot-controls');
             
             if (!pageFullyLoaded) {
                 if (statusDiv) {
@@ -889,39 +890,44 @@ def generate_contract_detail_html(case_data: dict, include_screenshot_js: bool =
                 return;
             }
             
-            // Hide button and show status BEFORE any timeout
-            if (button) button.style.display = 'none';
+            // Disable button and show status
+            if (button) {
+                button.disabled = true;
+                button.style.opacity = '0.6';
+                button.style.cursor = 'wait';
+            }
             if (statusDiv) {
-                statusDiv.textContent = '📸 Capturing...';
+                statusDiv.textContent = '📸 Capturing screenshot...';
                 statusDiv.style.color = '#6366F1';
             }
             
-            // Force a full repaint before capturing
-            container.style.opacity = '0.9999';
-            setTimeout(() => {
-                container.style.opacity = '1';
-            }, 10);
+            // Hide screenshot controls for cleaner capture
+            if (screenshotControls) screenshotControls.style.display = 'none';
             
-            // Wait for repaint, THEN capture
+            // Small delay to ensure DOM is updated
             setTimeout(() => {
                 html2canvas(container, {
-                    scale: 4,
+                    scale: 3,
                     useCORS: true,
-                    backgroundColor: null,
+                    backgroundColor: '#FFFFFF',
                     logging: false,
                     allowTaint: false,
                     removeContainer: false,
-                    imageTimeout: 0,
+                    imageTimeout: 15000,
                     letterRendering: true,
                     windowWidth: container.scrollWidth,
                     windowHeight: container.scrollHeight,
                     onclone: function(clonedDoc) {
                         const clonedContainer = clonedDoc.querySelector('.container');
+                        const clonedControls = clonedDoc.querySelector('.screenshot-controls');
+                        
+                        // Hide controls in cloned document too
+                        if (clonedControls) clonedControls.style.display = 'none';
+                        
                         if (clonedContainer) {
                             clonedContainer.style.fontFamily = "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif";
                             clonedContainer.style.webkitFontSmoothing = 'antialiased';
                             clonedContainer.style.mozOsxFontSmoothing = 'grayscale';
-                            clonedContainer.style.transform = 'translateZ(0)';
                             
                             const allElems = clonedContainer.querySelectorAll('*');
                             allElems.forEach(el => {
@@ -931,36 +937,58 @@ def generate_contract_detail_html(case_data: dict, include_screenshot_js: bool =
                         }
                     }
                 }).then(canvas => {
+                    // Show controls again
+                    if (screenshotControls) screenshotControls.style.display = 'block';
+                    
                     canvas.toBlob(blob => {
+                        if (!blob) {
+                            throw new Error('Failed to create image blob');
+                        }
+                        
                         const item = new ClipboardItem({'image/png': blob});
                         navigator.clipboard.write([item]).then(() => {
                             if (statusDiv) {
                                 statusDiv.textContent = '✅ Screenshot copied! Paste (Ctrl+V) in WhatsApp';
                                 statusDiv.style.color = '#10b981';
                             }
-                            if (button) button.style.display = 'inline-flex';
+                            if (button) {
+                                button.disabled = false;
+                                button.style.opacity = '1';
+                                button.style.cursor = 'pointer';
+                            }
                             
                             setTimeout(() => {
                                 if (statusDiv) statusDiv.textContent = '';
                             }, 5000);
                         }).catch(err => {
                             if (statusDiv) {
-                                statusDiv.textContent = '❌ Copy failed. Use Windows + Shift + S';
+                                statusDiv.textContent = '❌ Copy failed. Please allow clipboard access';
                                 statusDiv.style.color = '#e74c3c';
                             }
-                            if (button) button.style.display = 'inline-flex';
+                            if (button) {
+                                button.disabled = false;
+                                button.style.opacity = '1';
+                                button.style.cursor = 'pointer';
+                            }
                             console.error('Clipboard error:', err);
                         });
                     }, 'image/png', 1.0);
                 }).catch(err => {
+                    // Show controls again on error
+                    if (screenshotControls) screenshotControls.style.display = 'block';
+                    
                     if (statusDiv) {
-                        statusDiv.textContent = '❌ Screenshot failed';
+                        statusDiv.textContent = '❌ Screenshot failed. Try again';
                         statusDiv.style.color = '#e74c3c';
                     }
-                    if (button) button.style.display = 'inline-flex';
+                    if (button) {
+                        button.disabled = false;
+                        button.style.opacity = '1';
+                        button.style.cursor = 'pointer';
+                    }
                     console.error('Screenshot error:', err);
                 });
-            }, 1000);
+            }, 300);
         }
         </script>
         """
