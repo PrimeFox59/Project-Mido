@@ -5332,23 +5332,55 @@ def page_agent():
                             "NIS",  # O1011
                             "INS",  # O1012
                         ]
-                        v_status = st.selectbox(
-                            "STATUS",
-                            _status_options,
-                            index=(_status_options.index(sup_agent.get('STATUS','')) if sup_agent.get('STATUS','') in _status_options else 0),
-                            help="Status terkini dari case ini"
-                        )
                         
-                        # Paid Off dropdown
+                        # Tambahkan custom status yang baru ditambahkan
+                        if 'custom_status_added' in st.session_state:
+                            custom = st.session_state['custom_status_added']
+                            if custom not in _status_options:
+                                _status_options.append(custom)
+                        
+                        # Status dropdown dengan opsi tambah baru
+                        current_status = sup_agent.get('STATUS', '')
+                        if current_status and current_status not in _status_options:
+                            _status_options.append(current_status)
+                        
+                        status_col1, status_col2 = st.columns([3, 1])
+                        with status_col1:
+                            v_status = st.selectbox(
+                                "STATUS",
+                                _status_options,
+                                index=(_status_options.index(current_status) if current_status in _status_options else 0),
+                                help="Status terkini dari case ini"
+                            )
+                        with status_col2:
+                            if st.form_submit_button("➕ Tambah", help="Tambah status baru"):
+                                st.session_state['show_add_status_modal'] = True
+                        
+                        # Modal untuk tambah status baru (di luar form utama, akan ditampilkan setelah rerun)
+                        if st.session_state.get('show_add_status_modal', False):
+                            st.info("Silakan input status baru di bawah form ini setelah submit.")
+                        
+                        # Paid Off dropdown - hanya bisa diubah oleh Supervisor/Superuser
                         current_paid_off = sup_agent.get('Paid_Off', 'No') or 'No'
-                        v_paid_off = st.selectbox(
-                            "Paid Off",
-                            options=["No", "Yes"],
-                            index=0 if current_paid_off.upper() != 'YES' else 1,
-                            help="Apakah pinjaman sudah lunas?"
-                        )
+                        is_supervisor = user_role in ("Superuser", "Supervisor")
                         
-                        v_reg_phone = st.text_input("REGISTERED PHONE", value=sup_agent.get('REGISTERED_PHONE','') or "")
+                        if is_supervisor:
+                            v_paid_off = st.selectbox(
+                                "Paid Off",
+                                options=["No", "Yes"],
+                                index=0 if current_paid_off.upper() != 'YES' else 1,
+                                help="Apakah pinjaman sudah lunas? (Hanya Supervisor yang dapat mengubah)"
+                            )
+                        else:
+                            v_paid_off = current_paid_off
+                            st.text_input(
+                                "Paid Off",
+                                value=current_paid_off,
+                                disabled=True,
+                                help="Field ini hanya dapat diubah oleh Supervisor"
+                            )
+                        
+                        v_reg_phone = st.text_input("New Phone/Whatsapp Number Update", value=sup_agent.get('REGISTERED_PHONE','') or "", help="Update nomor telepon/WhatsApp terbaru debtor")
                     with csb:
                         v_add_contacts = st.text_area("Remarks", value=sup_agent.get('Additional_Contacts','') or "", height=80)
                         v_remarks = st.text_area("Suggested NIK", value=sup_agent.get('Remarks_Suggested_NIK_Prospect','') or "", height=80)
@@ -5377,6 +5409,32 @@ def page_agent():
                             st.rerun()
                         except Exception as e:
                             st.toast(f"❌ Gagal memperbarui data: {e}", icon="❌")
+                
+                # Form untuk menambah status baru (di luar form utama)
+                if st.session_state.get('show_add_status_modal', False):
+                    st.markdown("---")
+                    st.markdown("#### ➕ Tambah Status Baru")
+                    with st.form("add_new_status_form"):
+                        new_status_input = st.text_input(
+                            "Masukkan kode status baru (contoh: ABC, XYZ)",
+                            max_chars=10,
+                            help="Kode status baru yang akan ditambahkan ke dropdown"
+                        )
+                        col_submit, col_cancel = st.columns(2)
+                        with col_submit:
+                            submit_new_status = st.form_submit_button("✅ Tambahkan", use_container_width=True)
+                        with col_cancel:
+                            cancel_new_status = st.form_submit_button("❌ Batal", use_container_width=True)
+                        
+                        if submit_new_status and new_status_input.strip():
+                            # Simpan status baru ke session state atau database jika diperlukan
+                            st.session_state['custom_status_added'] = new_status_input.strip().upper()
+                            st.session_state['show_add_status_modal'] = False
+                            st.success(f"✅ Status '{new_status_input.strip().upper()}' berhasil ditambahkan!")
+                            st.rerun()
+                        elif cancel_new_status:
+                            st.session_state['show_add_status_modal'] = False
+                            st.rerun()
 
         # --- Report Payment/PTP sub-tab (hanya tampil jika STATUS = PTP) ---
         if current_status == "PTP":
