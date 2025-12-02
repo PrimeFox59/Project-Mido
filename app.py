@@ -5510,6 +5510,7 @@ def page_agent():
                             "CICIL LUNDIS",
                             "LUNAS POKOK",
                             "CICIL POKOK",
+                            "DP",
                         ],
                         index=0,
                         key=f"payment_scheme_select_{st.session_state.payment_form_counter}"
