@@ -829,6 +829,11 @@ def generate_contract_detail_html(case_data: dict, include_screenshot_js: bool =
         screenshot_js = """
         <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
         <script>
+        // Wait for page to fully load including fonts and images
+        window.addEventListener('load', function() {
+            console.log('Page fully loaded');
+        });
+        
         function captureAndCopyToClipboard() {
             const container = document.querySelector('.container');
             const button = document.getElementById('screenshotBtn');
@@ -837,39 +842,55 @@ def generate_contract_detail_html(case_data: dict, include_screenshot_js: bool =
             // Hide button before screenshot
             button.style.display = 'none';
             statusDiv.textContent = '📸 Capturing screenshot...';
+            statusDiv.style.color = '#6366F1';
             
-            html2canvas(container, {
-                scale: 2,
-                useCORS: true,
-                backgroundColor: null,
-                logging: false
-            }).then(canvas => {
-                // Convert canvas to blob
-                canvas.toBlob(blob => {
-                    // Copy to clipboard using Clipboard API
-                    const item = new ClipboardItem({'image/png': blob});
-                    navigator.clipboard.write([item]).then(() => {
-                        statusDiv.textContent = '✅ Screenshot copied to clipboard! Paste (Ctrl+V) in WhatsApp';
-                        statusDiv.style.color = '#10b981';
-                        button.style.display = 'block';
-                        
-                        // Reset message after 5 seconds
-                        setTimeout(() => {
-                            statusDiv.textContent = '';
-                        }, 5000);
-                    }).catch(err => {
-                        statusDiv.textContent = '❌ Failed to copy. Please use Windows + Shift + S manually';
-                        statusDiv.style.color = '#e74c3c';
-                        button.style.display = 'block';
-                        console.error('Clipboard error:', err);
-                    });
-                }, 'image/png');
-            }).catch(err => {
-                statusDiv.textContent = '❌ Screenshot failed. Please use Windows + Shift + S manually';
-                statusDiv.style.color = '#e74c3c';
-                button.style.display = 'block';
-                console.error('Screenshot error:', err);
-            });
+            // CRITICAL: Wait for any pending renders to complete before screenshot
+            // This ensures all text is sharp and fully rendered
+            setTimeout(() => {
+                html2canvas(container, {
+                    scale: 3,  // Increased from 2 to 3 for sharper text
+                    useCORS: true,
+                    backgroundColor: null,
+                    logging: false,
+                    allowTaint: false,
+                    removeContainer: false,
+                    imageTimeout: 0,
+                    // Force rendering to wait for fonts
+                    onclone: function(clonedDoc) {
+                        // Ensure fonts are loaded in cloned document
+                        const clonedContainer = clonedDoc.querySelector('.container');
+                        if (clonedContainer) {
+                            clonedContainer.style.fontFamily = "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif";
+                        }
+                    }
+                }).then(canvas => {
+                    // Convert canvas to blob with high quality
+                    canvas.toBlob(blob => {
+                        // Copy to clipboard using Clipboard API
+                        const item = new ClipboardItem({'image/png': blob});
+                        navigator.clipboard.write([item]).then(() => {
+                            statusDiv.textContent = '✅ Screenshot copied to clipboard! Paste (Ctrl+V) in WhatsApp';
+                            statusDiv.style.color = '#10b981';
+                            button.style.display = 'inline-flex';
+                            
+                            // Reset message after 5 seconds
+                            setTimeout(() => {
+                                statusDiv.textContent = '';
+                            }, 5000);
+                        }).catch(err => {
+                            statusDiv.textContent = '❌ Failed to copy. Please use Windows + Shift + S manually';
+                            statusDiv.style.color = '#e74c3c';
+                            button.style.display = 'inline-flex';
+                            console.error('Clipboard error:', err);
+                        });
+                    }, 'image/png', 1.0);  // Quality set to 1.0 (maximum)
+                }).catch(err => {
+                    statusDiv.textContent = '❌ Screenshot failed. Please use Windows + Shift + S manually';
+                    statusDiv.style.color = '#e74c3c';
+                    button.style.display = 'inline-flex';
+                    console.error('Screenshot error:', err);
+                });
+            }, 500);  // Wait 500ms for all rendering to complete
         }
         </script>
         """
