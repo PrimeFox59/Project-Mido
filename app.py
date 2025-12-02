@@ -5054,37 +5054,45 @@ def page_agent():
             
             # Assignment Date filter dengan date range
             st.markdown("**Assignment Date**")
-            date_filter_col1, date_filter_col2 = st.columns(2)
-            with date_filter_col1:
-                filter_date_from = st.date_input("Dari Tanggal", value=None, key="filter_date_from", help="Filter assignment dari tanggal ini")
-            with date_filter_col2:
-                filter_date_to = st.date_input("Sampai Tanggal", value=None, key="filter_date_to", help="Filter assignment sampai tanggal ini")
             
-            # Quick date shortcuts
+            # Quick date shortcuts (using session state to trigger date picker values)
             date_shortcut_cols = st.columns(4)
             with date_shortcut_cols[0]:
-                if st.button("Hari Ini", use_container_width=True):
-                    st.session_state['filter_date_from'] = today_wib()
-                    st.session_state['filter_date_to'] = today_wib()
-                    st.rerun()
+                btn_today = st.button("Hari Ini", use_container_width=True, key="btn_today")
             with date_shortcut_cols[1]:
-                if st.button("Kemarin", use_container_width=True):
-                    yesterday = today_wib() - timedelta(days=1)
-                    st.session_state['filter_date_from'] = yesterday
-                    st.session_state['filter_date_to'] = yesterday
-                    st.rerun()
+                btn_yesterday = st.button("Kemarin", use_container_width=True, key="btn_yesterday")
             with date_shortcut_cols[2]:
-                if st.button("7 Hari Terakhir", use_container_width=True):
-                    st.session_state['filter_date_from'] = today_wib() - timedelta(days=7)
-                    st.session_state['filter_date_to'] = today_wib()
-                    st.rerun()
+                btn_7days = st.button("7 Hari Terakhir", use_container_width=True, key="btn_7days")
             with date_shortcut_cols[3]:
-                if st.button("Reset Filter", use_container_width=True, type="secondary"):
-                    for key in ['filter_case_id', 'filter_customer_name', 'filter_employee_name', 
-                               'filter_company', 'filter_email', 'filter_phone', 'filter_date_from', 'filter_date_to']:
-                        if key in st.session_state:
-                            del st.session_state[key]
-                    st.rerun()
+                btn_reset = st.button("Reset Filter", use_container_width=True, type="secondary", key="btn_reset")
+            
+            # Determine default values based on button clicks
+            default_from = None
+            default_to = None
+            
+            if btn_today:
+                default_from = today_wib()
+                default_to = today_wib()
+            elif btn_yesterday:
+                default_from = today_wib() - timedelta(days=1)
+                default_to = today_wib() - timedelta(days=1)
+            elif btn_7days:
+                default_from = today_wib() - timedelta(days=7)
+                default_to = today_wib()
+            elif btn_reset:
+                # Clear all filter values
+                for key in ['filter_case_id', 'filter_customer_name', 'filter_employee_name', 
+                           'filter_company', 'filter_email', 'filter_phone']:
+                    if key in st.session_state:
+                        st.session_state[key] = ""
+                default_from = None
+                default_to = None
+            
+            date_filter_col1, date_filter_col2 = st.columns(2)
+            with date_filter_col1:
+                filter_date_from = st.date_input("Dari Tanggal", value=default_from, key="filter_date_from_input", help="Filter assignment dari tanggal ini")
+            with date_filter_col2:
+                filter_date_to = st.date_input("Sampai Tanggal", value=default_to, key="filter_date_to_input", help="Filter assignment sampai tanggal ini")
         
         # Apply filters
         filtered = rows
