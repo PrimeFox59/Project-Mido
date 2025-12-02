@@ -4981,131 +4981,205 @@ def page_agent():
             )
             disabled_cols.extend(["Agent", "Principle_Outstanding", "Total_Approved_Payment"])
 
-        edited = st.data_editor(
-            df,
-            hide_index=True,
-            use_container_width=True,
-            column_config=col_config,
-            disabled=disabled_cols,
-        )
-
-        # Determine selections from edited table
-        selected_list = []
-        if edited is not None and not edited.empty:
-            try:
-                selected_list = [
-                    str(row["Case_ID"]) for _, row in edited.iterrows() if bool(row.get("Selected"))
-                ]
-            except Exception:
-                selected_list = []
-        st.session_state["agent_selected_list"] = selected_list
-        sel = selected_list[0] if selected_list else None
-        st.session_state["agent_selected"] = sel
-
-        if sel:
-            st.markdown("---")
-            st.subheader(f"Case Details: {sel}")
-            info = fetchone("SELECT Debtor_Name, NIK_KTP FROM assign_tracer WHERE Agreement_No=?", (sel,)) or {}
+        # ===== LAYOUT: Assignments (Kiri) | Case Details (Kanan) =====
+        # Show layout dengan 2 kolom jika ada case yang dipilih
+        if not df.empty:
+            sel = st.session_state.get("agent_selected")
             
-            # Ambil data lengkap dari supervisor_data untuk Contract Detail
-            sup_data = fetchone("""
-                SELECT Phone_Number_1, Phone_Number_2, Principle_Outstanding, 
-                       Customer_name, email, Gender, Home_Address, 
-                       Customer_Occupation, DPD, Assignment_Date
-                FROM supervisor_data 
-                WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=? 
-                LIMIT 1
-            """, (sel, sel, sel)) or {}
-            
-            c1, c2, c3, c4 = st.columns(4)
-            with c1:
-                st.text_input("Debtor Name", value=info.get('Debtor_Name',''), disabled=True, key=f"debtor_name_{sel}")
-            with c2:
-                st.text_input("NIK", value=info.get('NIK_KTP',''), disabled=True, key=f"nik_{sel}")
-            with c3:
-                phone = sup_data.get('Phone_Number_1', '') or ''
-                st.text_input("Phone", value=phone, disabled=True, key=f"phone_{sel}")
-            with c4:
-                principle_outstanding = sup_data.get('Principle_Outstanding', 'N/A') or 'N/A'
-                st.text_input("Principle Outstanding", value=principle_outstanding, disabled=True, key=f"po_{sel}")
-            
-            if phone:
-                st.markdown(f"[Click to call]({'tel:'+str(phone)})  |  [SIP]({'sip:'+str(phone)})")
-            
-            # ===== CONTRACT DETAIL SCREENSHOT & WHATSAPP FEATURE =====
-            st.markdown("---")
-            st.markdown("### 📸 Contract Detail Screenshot & WhatsApp")
-            
-            # Tombol untuk generate dan show contract detail
-            col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 2])
-            
-            with col_btn1:
-                if st.button("📋 Show Contract Detail", key=f"show_contract_{sel}", use_container_width=True):
-                    st.session_state[f"show_contract_html_{sel}"] = True
-            
-            with col_btn2:
-                if phone:
-                    wa_url = open_whatsapp_with_clipboard_instruction(phone)
-                    # Gunakan link_button untuk membuka WhatsApp di tab baru
-                    st.link_button("💬 Open WhatsApp", wa_url, use_container_width=True, type="primary")
-                else:
-                    st.button("💬 WhatsApp Unavailable", key=f"open_wa_disabled_{sel}", use_container_width=True, disabled=True)
-            
-            with col_btn3:
-                st.caption("🎯 Klik 'Show Contract Detail' untuk tampilkan detail dengan tombol auto-screenshot")
-            
-            # Info message untuk fitur auto-screenshot
-            if not st.session_state.get(f"show_contract_html_{sel}", False):
-                st.markdown("---")            # Display Contract Detail HTML jika tombol diklik
-            if st.session_state.get(f"show_contract_html_{sel}", False):
+            if sel:
+                # Split layout: 55% assignments table, 45% case details
+                col_assignments, col_case_details = st.columns([11, 9])
+                
+                # --- LEFT COLUMN: Assignments Table ---
+                with col_assignments:
+                    edited = st.data_editor(
+                        df,
+                        hide_index=True,
+                        use_container_width=True,
+                        column_config=col_config,
+                        disabled=disabled_cols,
+                    )
+                
+                # --- RIGHT COLUMN: Case Details ---
+                with col_case_details:
+                    st.markdown(f"### 📋 Case Details: {sel}")
+                    
+                    # Ambil data dari assign_tracer (trace results)
+                    trace_info = fetchone("""
+                    SELECT Debtor_Name, NIK_KTP, EMPLOYMENT_UPDATE, EMPLOYER, 
+                           Decoded_Company_Name, Employee_Name
+                    FROM assign_tracer 
+                    WHERE Agreement_No=?
+                """, (sel,)) or {}
+                
+                # Ambil data dari supervisor_data
+                sup_data = fetchone("""
+                    SELECT Phone_Number_1, Phone_Number_2, Principle_Outstanding, 
+                           Customer_name, email, Gender, Home_Address, 
+                           Customer_Occupation, DPD, Assignment_Date
+                    FROM supervisor_data 
+                    WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=? 
+                    LIMIT 1
+                """, (sel, sel, sel)) or {}
+                
+                # Display Case Details dengan styling modern
+                st.markdown("""
+                <div style="background: linear-gradient(135deg, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0.3) 100%);
+                            backdrop-filter: blur(15px); border: 1px solid rgba(255,255,255,0.3);
+                            border-radius: 14px; padding: 18px; margin-bottom: 16px;
+                            box-shadow: 0 4px 16px rgba(0,0,0,0.08);">
+                    <div style="font-size: 13px; font-weight: 700; color: #6366F1; margin-bottom: 12px; 
+                                display: flex; align-items: center;">
+                        <span style="font-size: 18px; margin-right: 8px;">👤</span>
+                        Customer Information
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Debtor/Customer Name
+                customer_name = trace_info.get('Debtor_Name', '') or sup_data.get('Customer_name', '')
+                st.text_input("📝 Debtor/Customer Name", value=customer_name or 'N/A', disabled=True, key=f"debtor_name_{sel}")
+                
+                # Employment Update
+                employment_update = trace_info.get('EMPLOYMENT_UPDATE', '')
+                st.text_input("💼 Employment Update", value=employment_update or '-', disabled=True, key=f"employment_{sel}",
+                            help="Status: DEBTOR, SUAMI, ISTRI, dll")
+                
+                # Decoded Company Name
+                decoded_company = trace_info.get('Decoded_Company_Name', '') or trace_info.get('EMPLOYER', '')
+                st.text_input("🏢 Decoded Company Name", value=decoded_company or '-', disabled=True, key=f"company_{sel}")
+                
+                # Employee Name
+                employee_name = trace_info.get('Employee_Name', '')
+                st.text_input("👔 Employee Name", value=employee_name or '-', disabled=True, key=f"employee_{sel}")
+                
+                # Principle Outstanding
+                principle_outstanding = sup_data.get('Principle_Outstanding', '') or 'N/A'
+                try:
+                    po_val = float(principle_outstanding)
+                    po_display = f"Rp {po_val:,.0f}"
+                except:
+                    po_display = str(principle_outstanding)
+                
+                st.text_input("💰 Principle Outstanding", value=po_display, disabled=True, key=f"po_{sel}",
+                            help="Sisa pokok pinjaman yang belum dibayar")
+                
+                # Phone & Quick Actions
                 st.markdown("---")
+                phone = sup_data.get('Phone_Number_1', '') or ''
+                phone2 = sup_data.get('Phone_Number_2', '') or ''
                 
-                # Prepare data untuk contract detail
-                contract_data = {
-                    'Debtor_Name': info.get('Debtor_Name', 'N/A') or sup_data.get('Customer_name', 'N/A'),
-                    'PhoneNumber': phone or 'N/A',
-                    'Gender': sup_data.get('Gender', 'N/A') or 'N/A',
-                    'Legal_Address': sup_data.get('Home_Address', 'N/A') or 'N/A',
-                    'DOB': '2025-10-24',  # Default, could be enhanced with actual DOB field
-                    'Email': sup_data.get('email', 'N/A') or 'N/A',
-                    'Last_Known_Office_Name': '',
-                    'Last_Known_Job_Position': sup_data.get('Customer_Occupation', 'N/A') or 'Lainnya',
-                    'Last_Known_Work_Phone': 'None',
-                    'Debtor_Phone_Number_II': sup_data.get('Phone_Number_2', 'None') or 'None',
-                    'Debtor_Other_Phone_Numbers': '#N/A',
-                    'Date_of_Contract': sup_data.get('Assignment_Date', 'N/A') or 'N/A',
-                    'DPD': sup_data.get('DPD', 'N/A') or 'N/A',
-                }
+                st.text_input("📞 Phone 1", value=phone or 'N/A', disabled=True, key=f"phone1_{sel}")
+                st.text_input("📞 Phone 2", value=phone2 or 'N/A', disabled=True, key=f"phone2_{sel}")
                 
-                # Generate HTML dengan auto-screenshot JavaScript
-                contract_html = generate_contract_detail_html(contract_data, include_screenshot_js=True)
+                if phone:
+                    st.markdown(f"[📞 Click to call]({'tel:'+str(phone)})  |  [🎧 SIP]({'sip:'+str(phone)})")
                 
-                # Display dengan component HTML (tinggi lebih besar untuk tombol screenshot)
-                st.components.v1.html(contract_html, height=1200, scrolling=True)
+                # ===== CONTRACT DETAIL SCREENSHOT & WHATSAPP FEATURE =====
+                st.markdown("---")
+                st.markdown("### 📸 Contract Detail & WhatsApp")
                 
-                st.success("""
-                ✅ **Auto-Screenshot Aktif!**
+                # Tombol untuk generate dan show contract detail
+                col_btn1, col_btn2 = st.columns(2)
                 
-                **Cara Pakai:**
-                1. Scroll ke bawah Contract Detail di atas
-                2. Klik tombol **"📸 Copy Screenshot to Clipboard"** di bawah contract detail
-                3. Screenshot otomatis masuk ke clipboard
-                4. Buka WhatsApp (klik 'Open WhatsApp' di atas)
-                5. **Ctrl + V** untuk paste di chat
+                with col_btn1:
+                    if st.button("📋 Show Contract", key=f"show_contract_{sel}", use_container_width=True):
+                        st.session_state[f"show_contract_html_{sel}"] = True
                 
-                **No need to press Windows + Shift + S!** 🎉
-                """)
+                with col_btn2:
+                    if phone:
+                        wa_url = open_whatsapp_with_clipboard_instruction(phone)
+                        st.link_button("💬 WhatsApp", wa_url, use_container_width=True, type="primary")
+                    else:
+                        st.button("💬 No WhatsApp", key=f"open_wa_disabled_{sel}", use_container_width=True, disabled=True)
                 
-                # Tombol untuk hide contract detail
-                if st.button("❌ Hide Contract Detail", key=f"hide_contract_{sel}"):
-                    st.session_state[f"show_contract_html_{sel}"] = False
-                    st.rerun()
+                # Display Contract Detail HTML jika tombol diklik
+                if st.session_state.get(f"show_contract_html_{sel}", False):
+                    st.markdown("---")
+                # Display Contract Detail HTML jika tombol diklik
+                if st.session_state.get(f"show_contract_html_{sel}", False):
+                    st.markdown("---")
+                    
+                    # Prepare data untuk contract detail
+                    contract_data = {
+                        'Debtor_Name': customer_name or 'N/A',
+                        'PhoneNumber': phone or 'N/A',
+                        'Gender': sup_data.get('Gender', 'N/A') or 'N/A',
+                        'Legal_Address': sup_data.get('Home_Address', 'N/A') or 'N/A',
+                        'DOB': '2025-10-24',  # Default, could be enhanced with actual DOB field
+                        'Email': sup_data.get('email', 'N/A') or 'N/A',
+                        'Last_Known_Office_Name': decoded_company or '',
+                        'Last_Known_Job_Position': sup_data.get('Customer_Occupation', 'N/A') or 'Lainnya',
+                        'Last_Known_Work_Phone': 'None',
+                        'Debtor_Phone_Number_II': phone2 or 'None',
+                        'Debtor_Other_Phone_Numbers': '#N/A',
+                        'Date_of_Contract': sup_data.get('Assignment_Date', 'N/A') or 'N/A',
+                        'DPD': sup_data.get('DPD', 'N/A') or 'N/A',
+                    }
+                    
+                    # Generate HTML dengan auto-screenshot JavaScript
+                    contract_html = generate_contract_detail_html(contract_data, include_screenshot_js=True)
+                    
+                    # Display dengan component HTML
+                    st.components.v1.html(contract_html, height=1000, scrolling=True)
+                    
+                    st.success("""
+                    ✅ **Auto-Screenshot Aktif!**
+                    
+                    1. Scroll ke bawah Contract Detail
+                    2. Klik **"📸 Copy Screenshot to Clipboard"**
+                    3. Screenshot masuk clipboard
+                    4. Buka WhatsApp & Ctrl+V untuk paste
+                    """)
+                    
+                    # Tombol untuk hide contract detail
+                    if st.button("❌ Hide Contract", key=f"hide_contract_{sel}"):
+                        st.session_state[f"show_contract_html_{sel}"] = False
+                        st.rerun()
+                
+                # Update selection from edited table
+                selected_list = []
+                if edited is not None and not edited.empty:
+                    try:
+                        selected_list = [
+                            str(row["Case_ID"]) for _, row in edited.iterrows() if bool(row.get("Selected"))
+                        ]
+                    except Exception:
+                        selected_list = []
+                st.session_state["agent_selected_list"] = selected_list
+                st.session_state["agent_selected"] = selected_list[0] if selected_list else None
             
-        else:
-            st.info("Centang satu baris untuk melihat detail kasus.")
+            else:
+                # No selection - show full width table
+                edited = st.data_editor(
+                    df,
+                    hide_index=True,
+                    use_container_width=True,
+                    column_config=col_config,
+                    disabled=disabled_cols,
+                )
+                
+                # Update selection from edited table
+                selected_list = []
+                if edited is not None and not edited.empty:
+                    try:
+                        selected_list = [
+                            str(row["Case_ID"]) for _, row in edited.iterrows() if bool(row.get("Selected"))
+                        ]
+                    except Exception:
+                        selected_list = []
+                st.session_state["agent_selected_list"] = selected_list
+                st.session_state["agent_selected"] = selected_list[0] if selected_list else None
+                
+                if selected_list:
+                    st.rerun()  # Rerun to show detail panel
+                else:
+                    st.info("💡 Pilih satu Case ID dari tabel untuk melihat detail di sebelah kanan")
         
-        # Inline sub-tabs for the selected case actions (di dalam tab Cases)
         st.markdown("---")
+        
+        # Get current selection for sub-tabs
+        sel = st.session_state.get("agent_selected")
         
         # Cek STATUS terlebih dahulu untuk menentukan tab yang ditampilkan
         sup_agent = fetchone(
