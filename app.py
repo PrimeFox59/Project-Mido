@@ -5291,13 +5291,18 @@ def page_agent():
                 if phone and phone != 'N/A':
                     st.markdown(f"📞 [Click to call]({'tel:'+str(phone)})  |  [SIP]({'sip:'+str(phone)})")
                 
-                # Tombol untuk show/hide contract detail dan WhatsApp
+                # Tombol untuk toggle contract detail dan WhatsApp
                 st.markdown("---")
+                
+                # Toggle state untuk contract detail
+                show_contract = st.session_state.get(f"show_contract_html_{sel}", False)
                 
                 col_btn1, col_btn2 = st.columns(2)
                 with col_btn1:
-                    if st.button("📋 Show Contract Detail", key=f"show_contract_{sel}", use_container_width=True):
-                        st.session_state[f"show_contract_html_{sel}"] = True
+                    button_label = "📂 Hide Contract Detail" if show_contract else "📋 Show Contract Detail"
+                    if st.button(button_label, key=f"toggle_contract_{sel}", use_container_width=True):
+                        st.session_state[f"show_contract_html_{sel}"] = not show_contract
+                        st.rerun()
                 
                 with col_btn2:
                     if phone and phone != 'N/A':
@@ -5305,8 +5310,6 @@ def page_agent():
                         st.link_button("💬 Open WhatsApp", wa_url, use_container_width=True, type="primary")
                     else:
                         st.button("💬 WhatsApp Unavailable", key=f"open_wa_disabled_{sel}", use_container_width=True, disabled=True)
-                
-                st.caption("🎯 Klik 'Show Contract Detail' untuk tampilkan detail dengan tombol auto-screenshot")
             
             else:
                 st.info("Centang satu baris untuk melihat detail kasus.")
