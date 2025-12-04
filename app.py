@@ -46,13 +46,24 @@ st.markdown("""
        GLOBAL APP BACKGROUND & THEME
     ============================================ */
     
-    /* Hide Sidebar Toggle Button */
+    /* Hide Sidebar Toggle Button - Complete removal */
     button[data-testid="baseButton-header"],
     button[data-testid="collapsedControl"],
+    [data-testid="collapsedControl"],
     [data-testid="collapsedControl"] button,
-    section[data-testid="stSidebar"] button[kind="header"] {
+    section[data-testid="stSidebar"] button[kind="header"],
+    section[data-testid="stSidebar"] > div > button,
+    .css-1dp5vir,
+    [data-testid="stSidebarCollapse"],
+    [class*="collapsedControl"] {
         display: none !important;
         visibility: hidden !important;
+        opacity: 0 !important;
+        width: 0 !important;
+        height: 0 !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        pointer-events: none !important;
     }
     
     /* Ensure header toolbar maintains structure */
