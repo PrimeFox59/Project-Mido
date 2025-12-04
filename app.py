@@ -46,33 +46,42 @@ st.markdown("""
        GLOBAL APP BACKGROUND & THEME
     ============================================ */
     
-    /* Hide Sidebar Toggle Button - Complete removal */
+    /* Sidebar Toggle Button - CRITICAL: Always visible and accessible */
     button[data-testid="baseButton-header"],
     button[data-testid="collapsedControl"],
-    [data-testid="collapsedControl"],
     [data-testid="collapsedControl"] button,
-    section[data-testid="stSidebar"] button[kind="header"],
-    section[data-testid="stSidebar"] > div > button,
-    .css-1dp5vir,
-    [data-testid="stSidebarCollapse"],
-    [class*="collapsedControl"] {
-        display: none !important;
+    section[data-testid="stSidebar"] button[kind="header"] {
         visibility: hidden !important;
+        display: none !important;
         opacity: 0 !important;
-        width: 0 !important;
-        height: 0 !important;
-        padding: 0 !important;
-        margin: 0 !important;
         pointer-events: none !important;
+        z-index: -1 !important;
+        position: absolute !important;
     }
     
-    /* Ensure header toolbar maintains structure */
+    /* Block overlay layer di atas tombol sidebar collapse/expand */
+    button[data-testid="baseButton-header"]::before,
+    button[data-testid="collapsedControl"]::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: transparent;
+        z-index: 9999999 !important;
+        cursor: not-allowed !important;
+    }
+    
+    /* Hide header toolbar completely */
     header[data-testid="stHeader"],
     .stApp > header {
-        visibility: visible !important;
-        display: block !important;
-        height: auto !important;
-        min-height: 2.5rem !important;
+        visibility: hidden !important;
+        display: none !important;
+        height: 0 !important;
+        min-height: 0 !important;
+        max-height: 0 !important;
+        overflow: hidden !important;
     }
     
     /* Subtle gradient background for main app */
