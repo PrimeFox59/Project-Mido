@@ -180,12 +180,27 @@ st.markdown("""
         border-radius: 10px !important;
         padding: 10px 14px !important;
         transition: all 0.3s ease !important;
+        color: #000000 !important;
+        font-weight: 600 !important;
     }
     
     .stTextInput input:focus, .stTextArea textarea:focus, .stSelectbox select:focus {
         background: rgba(255, 255, 255, 0.8) !important;
         border-color: rgba(99, 102, 241, 0.5) !important;
         box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1) !important;
+    }
+    
+    /* Disabled Input Fields - Black Text for Readability */
+    .stTextInput input:disabled, .stTextArea textarea:disabled, 
+    .stSelectbox select:disabled, .stNumberInput input:disabled,
+    .stDateInput input:disabled, .stTimeInput input:disabled {
+        background: rgba(245, 245, 245, 0.8) !important;
+        color: #000000 !important;
+        font-weight: 600 !important;
+        border: 2px solid #000000 !important;
+        opacity: 1 !important;
+        -webkit-text-fill-color: #000000 !important;
+        cursor: not-allowed !important;
     }
     
     /* Tabs - Modern Glass Design */
