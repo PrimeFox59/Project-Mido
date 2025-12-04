@@ -59,31 +59,17 @@ st.markdown("""
         position: absolute !important;
     }
     
-    /* Ultra high-priority blocking layer in front of entire sidebar */
+    /* Targeted blocking layer only for collapse button area (top 60px) */
     section[data-testid="stSidebar"]::before {
         content: '';
         position: fixed;
         top: 0;
         left: 0;
         width: 350px;
-        height: 100vh;
+        height: 60px;
         background: transparent;
-        z-index: 999999999 !important;
+        z-index: 999999 !important;
         pointer-events: auto !important;
-        cursor: not-allowed !important;
-    }
-    
-    /* Block overlay layer di atas tombol sidebar collapse/expand */
-    button[data-testid="baseButton-header"]::before,
-    button[data-testid="collapsedControl"]::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: transparent;
-        z-index: 9999999 !important;
         cursor: not-allowed !important;
     }
     
