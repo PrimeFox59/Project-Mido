@@ -5394,6 +5394,7 @@ def page_agent():
                     with csa:
                         # Agent status codes (requested)
                         _status_options = [
+                            "(Pilih salah satu sesuai dengan hasil penanganan kamu)",
                             "PTP",  # O1001
                             "DIS",  # O1002
                             "CMP",  # O1003
@@ -5414,29 +5415,23 @@ def page_agent():
                             if custom not in _status_options:
                                 _status_options.append(custom)
                         
-                        # Status dropdown dengan opsi tambah baru
+                        # Status dropdown dengan opsi default
                         current_status = sup_agent.get('STATUS', '')
                         if current_status and current_status not in _status_options:
                             _status_options.append(current_status)
                         
+                        # Tentukan index: jika ada current_status yang valid, gunakan itu; jika tidak, default ke 0 (placeholder)
+                        if current_status and current_status in _status_options:
+                            default_index = _status_options.index(current_status)
+                        else:
+                            default_index = 0
+                        
                         v_status = st.selectbox(
                             "STATUS",
                             _status_options,
-                            index=(_status_options.index(current_status) if current_status in _status_options else 0),
-                            help="Status terkini dari case ini"
+                            index=default_index,
+                            help="Status terkini dari case ini. Pilih salah satu sesuai hasil penanganan."
                         )
-                        
-                        # Tambah status baru langsung di bawah STATUS field
-                        with st.expander("➕ Tambah Status Baru"):
-                            new_status_input = st.text_input(
-                                "Kode Status Baru",
-                                max_chars=10,
-                                placeholder="Contoh: ABC, XYZ",
-                                help="Masukkan kode status baru yang akan ditambahkan ke dropdown",
-                                key="new_status_input_field"
-                            )
-                            if new_status_input.strip():
-                                st.caption(f"Status baru: **{new_status_input.strip().upper()}** akan ditambahkan setelah form di-submit")
                         
                         # Paid Off dropdown - hanya bisa diubah oleh Supervisor/Superuser
                         current_paid_off = sup_agent.get('Paid_Off', 'No') or 'No'
@@ -5464,35 +5459,33 @@ def page_agent():
                         v_remarks = st.text_area("Suggested NIK", value=sup_agent.get('Remarks_Suggested_NIK_Prospect','') or "", height=80)
                     submit_sup = st.form_submit_button("Simpan ke supervisor_data")
                     if submit_sup:
-                        # Simpan custom status jika ada input baru
-                        new_status_from_input = st.session_state.get('new_status_input_field', '').strip().upper()
-                        if new_status_from_input:
-                            st.session_state['custom_status_added'] = new_status_from_input
-                            st.toast(f"✅ Status baru '{new_status_from_input}' ditambahkan!", icon="✅")
-                        
-                        try:
-                            if sup_agent.get('id') is not None:
-                                execute(
-                                    "UPDATE supervisor_data SET STATUS=?, Paid_Off=?, REGISTERED_PHONE=?, Additional_Contacts=?, Remarks_Suggested_NIK_Prospect=? WHERE id=?",
-                                    (v_status.strip(), v_paid_off, v_reg_phone.strip(), v_add_contacts.strip(), v_remarks.strip(), sup_agent.get('id'))
-                                )
-                            else:
-                                execute(
-                                    "UPDATE supervisor_data SET STATUS=?, Paid_Off=?, REGISTERED_PHONE=?, Additional_Contacts=?, Remarks_Suggested_NIK_Prospect=? WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=?",
-                                    (v_status.strip(), v_paid_off, v_reg_phone.strip(), v_add_contacts.strip(), v_remarks.strip(), sel, sel, sel)
-                                )
+                        # Validasi: pastikan status bukan placeholder
+                        if v_status == "(Pilih salah satu sesuai dengan hasil penanganan kamu)":
+                            st.error("❌ Silakan pilih status yang valid sebelum menyimpan!")
+                        else:
                             try:
-                                u = current_user() or {}
-                                execute(
-                                    "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
-                                    (u.get('id') if u else None, "AGENT_UPDATE_SUP_FIELDS", f"{sel} -> STATUS='{v_status}' PAID_OFF='{v_paid_off}' REG_PHONE='{v_reg_phone}'")
-                                )
-                            except Exception:
-                                pass
-                            st.toast("✅ Data supervisor berhasil diperbarui!", icon="✅")
-                            st.rerun()
-                        except Exception as e:
-                            st.toast(f"❌ Gagal memperbarui data: {e}", icon="❌")
+                                if sup_agent.get('id') is not None:
+                                    execute(
+                                        "UPDATE supervisor_data SET STATUS=?, Paid_Off=?, REGISTERED_PHONE=?, Additional_Contacts=?, Remarks_Suggested_NIK_Prospect=? WHERE id=?",
+                                        (v_status.strip(), v_paid_off, v_reg_phone.strip(), v_add_contacts.strip(), v_remarks.strip(), sup_agent.get('id'))
+                                    )
+                                else:
+                                    execute(
+                                        "UPDATE supervisor_data SET STATUS=?, Paid_Off=?, REGISTERED_PHONE=?, Additional_Contacts=?, Remarks_Suggested_NIK_Prospect=? WHERE Virtual_Account_Number=? OR Case_ID=? OR Third_Uid=?",
+                                        (v_status.strip(), v_paid_off, v_reg_phone.strip(), v_add_contacts.strip(), v_remarks.strip(), sel, sel, sel)
+                                    )
+                                try:
+                                    u = current_user() or {}
+                                    execute(
+                                        "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                                        (u.get('id') if u else None, "AGENT_UPDATE_SUP_FIELDS", f"{sel} -> STATUS='{v_status}' PAID_OFF='{v_paid_off}' REG_PHONE='{v_reg_phone}'")
+                                    )
+                                except Exception:
+                                    pass
+                                st.toast("✅ Data supervisor berhasil diperbarui!", icon="✅")
+                                st.rerun()
+                            except Exception as e:
+                                st.toast(f"❌ Gagal memperbarui data: {e}", icon="❌")
 
         # --- Report Payment/PTP sub-tab (hanya tampil jika STATUS = PTP) ---
         if current_status == "PTP":
