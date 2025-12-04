@@ -1093,7 +1093,7 @@ def generate_contract_detail_html(case_data: dict, include_screenshot_js: bool =
             .detail-row {{
                 display: flex;
                 padding: 16px 20px;
-                border-bottom: 1px solid #e9ecef;
+                border-bottom: 2px solid #000000;
                 transition: background 0.2s ease;
                 border-radius: 8px;
                 margin-bottom: 2px;
@@ -1104,14 +1104,14 @@ def generate_contract_detail_html(case_data: dict, include_screenshot_js: bool =
             }}
             
             .detail-row:last-child {{
-                border-bottom: none;
+                border-bottom: 2px solid #000000;
                 margin-bottom: 0;
             }}
             
             .detail-label {{
                 flex: 0 0 260px;
                 font-weight: 600;
-                color: #495057;
+                color: #000000;
                 font-size: 14px;
                 display: flex;
                 align-items: center;
@@ -1119,20 +1119,20 @@ def generate_contract_detail_html(case_data: dict, include_screenshot_js: bool =
             
             .detail-value {{
                 flex: 1;
-                color: #212529;
+                color: #000000;
                 font-size: 14px;
                 line-height: 1.5;
                 word-break: break-word;
             }}
             
             .detail-value.highlight {{
-                color: #667eea;
+                color: #000000;
                 font-weight: 700;
                 font-size: 15px;
             }}
             
             .detail-value.na {{
-                color: #e74c3c;
+                color: #000000;
                 font-weight: 600;
                 font-style: italic;
             }}
