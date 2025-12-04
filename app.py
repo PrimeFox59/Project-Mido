@@ -5433,31 +5433,21 @@ def page_agent():
                             help="Status terkini dari case ini. Pilih salah satu sesuai hasil penanganan."
                         )
                         
-                        # Paid Off dropdown - hanya bisa diubah oleh Supervisor/Superuser
+                        # Paid Off field - non-editable untuk semua user
                         current_paid_off = sup_agent.get('Paid_Off', 'No') or 'No'
-                        is_supervisor = user_role in ("Superuser", "Supervisor")
-                        
-                        if is_supervisor:
-                            v_paid_off = st.selectbox(
-                                "Paid Off",
-                                options=["No", "Yes"],
-                                index=0 if current_paid_off.upper() != 'YES' else 1,
-                                help="Apakah pinjaman sudah lunas? (Hanya Supervisor yang dapat mengubah)"
-                            )
-                        else:
-                            v_paid_off = current_paid_off
-                            st.text_input(
-                                "Paid Off",
-                                value=current_paid_off,
-                                disabled=True,
-                                help="Field ini hanya dapat diubah oleh Supervisor"
-                            )
+                        v_paid_off = current_paid_off
+                        st.text_input(
+                            "Paid Off",
+                            value=current_paid_off,
+                            disabled=True,
+                            help="Field ini dikelola otomatis oleh sistem"
+                        )
                         
                         v_reg_phone = st.text_input("New Phone/Whatsapp Number Update", value=sup_agent.get('REGISTERED_PHONE','') or "", help="Update nomor telepon/WhatsApp terbaru debtor")
                     with csb:
                         v_add_contacts = st.text_area("Remarks", value=sup_agent.get('Additional_Contacts','') or "", height=80)
                         v_remarks = st.text_area("Suggested NIK", value=sup_agent.get('Remarks_Suggested_NIK_Prospect','') or "", height=80)
-                    submit_sup = st.form_submit_button("Simpan ke supervisor_data")
+                    submit_sup = st.form_submit_button("SUBMIT")
                     if submit_sup:
                         # Validasi: pastikan status bukan placeholder
                         if v_status == "(Pilih salah satu sesuai dengan hasil penanganan kamu)":
