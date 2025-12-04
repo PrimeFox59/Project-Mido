@@ -46,7 +46,7 @@ st.markdown("""
        GLOBAL APP BACKGROUND & THEME
     ============================================ */
     
-    /* Sidebar Toggle Button - CRITICAL: Always visible and accessible */
+    /* Sidebar Toggle Button - Hidden completely */
     button[data-testid="baseButton-header"],
     button[data-testid="collapsedControl"],
     [data-testid="collapsedControl"] button,
@@ -57,6 +57,20 @@ st.markdown("""
         pointer-events: none !important;
         z-index: -1 !important;
         position: absolute !important;
+    }
+    
+    /* Ultra high-priority blocking layer in front of entire sidebar */
+    section[data-testid="stSidebar"]::before {
+        content: '';
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 350px;
+        height: 100vh;
+        background: transparent;
+        z-index: 999999999 !important;
+        pointer-events: auto !important;
+        cursor: not-allowed !important;
     }
     
     /* Block overlay layer di atas tombol sidebar collapse/expand */
