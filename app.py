@@ -46,20 +46,16 @@ st.markdown("""
        GLOBAL APP BACKGROUND & THEME
     ============================================ */
     
-    /* Sidebar Toggle Button - CRITICAL: Always visible and accessible */
+    /* Hide Sidebar Toggle Button */
     button[data-testid="baseButton-header"],
     button[data-testid="collapsedControl"],
     [data-testid="collapsedControl"] button,
     section[data-testid="stSidebar"] button[kind="header"] {
-        visibility: visible !important;
-        display: flex !important;
-        opacity: 1 !important;
-        pointer-events: auto !important;
-        z-index: 999999 !important;
-        position: relative !important;
+        display: none !important;
+        visibility: hidden !important;
     }
     
-    /* Ensure header toolbar is visible for sidebar toggle */
+    /* Ensure header toolbar maintains structure */
     header[data-testid="stHeader"],
     .stApp > header {
         visibility: visible !important;
