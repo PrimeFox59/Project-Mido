@@ -9770,14 +9770,31 @@ def page_supervisor():
             
             df['Principle_Outstanding'] = df['Principle_Outstanding'].apply(format_rupiah)
         
-        # Add touch count and priority indicator for each case
+        # OPTIMIZED: Add touch count and priority indicator - BATCH QUERY
         if not df.empty and 'Case_ID' in df.columns:
+            # Get all case IDs for batch query
+            case_ids = [str(row.get('Case_ID', '')) for row in df.to_dict('records') if row.get('Case_ID')]
+            
+            # Batch query touch counts (1 query instead of N queries)
+            touch_count_map = {}
+            if case_ids:
+                placeholders = ','.join(['?'] * len(case_ids))
+                touch_query = f"""
+                    SELECT Agreement_No, COUNT(*) as touch_count
+                    FROM trace_results
+                    WHERE Agreement_No IN ({placeholders})
+                    GROUP BY Agreement_No
+                """
+                touch_results = fetchall(touch_query, tuple(case_ids))
+                touch_count_map = {str(r.get('Agreement_No', '')): r.get('touch_count', 0) for r in touch_results}
+            
+            # Build lists efficiently
             touch_counts = []
             priorities = []
             for idx, row in df.iterrows():
-                case_id = row.get('Case_ID', '')
-                if case_id:
-                    count = get_case_touch_count(case_id)
+                case_id = str(row.get('Case_ID', ''))
+                if case_id and case_id in touch_count_map:
+                    count = touch_count_map[case_id]
                     touch_counts.append(count)
                     # Priority: 🔴 High (0-1 touches), 🟡 Medium (2-3), 🟢 Low (4+)
                     if count <= 1:
@@ -9847,11 +9864,13 @@ def page_supervisor():
         except Exception:
             selected_rows = _pd.DataFrame(columns=df.columns)
 
-        # Agent lists
-        agents = [
-            (r.get('n') or '-') for r in (fetchall("SELECT COALESCE(full_name, name, login_id) AS n FROM users WHERE role='Agent' AND approved=1 ORDER BY n") or [])
-        ]
-        agents = [a for a in agents if a and a.strip()]
+        # OPTIMIZED: Cache agent list in session state
+        if 'agent_list_cache' not in st.session_state or st.session_state.get('refresh_agent_list', False):
+            agents_raw = fetchall("SELECT COALESCE(full_name, name, login_id) AS n FROM users WHERE role='Agent' AND approved=1 ORDER BY n") or []
+            st.session_state['agent_list_cache'] = [a.get('n') for a in agents_raw if a.get('n') and str(a.get('n')).strip()]
+            st.session_state['refresh_agent_list'] = False
+        
+        agents = st.session_state['agent_list_cache']
 
         c1, c2 = st.columns(2)
         with c1:
