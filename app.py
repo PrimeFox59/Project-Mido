@@ -9615,21 +9615,23 @@ def page_supervisor():
             with fcol2:
                 # Get unique Employment Update values from assign_tracer
                 employment_updates = fetchall("SELECT DISTINCT EMPLOYMENT_UPDATE FROM assign_tracer WHERE EMPLOYMENT_UPDATE IS NOT NULL AND EMPLOYMENT_UPDATE != '' ORDER BY EMPLOYMENT_UPDATE")
-                emp_options = ["-- Semua Employment Update --"] + [emp.get('EMPLOYMENT_UPDATE') for emp in employment_updates if emp.get('EMPLOYMENT_UPDATE')]
-                selected_employment = st.selectbox(
+                emp_options = [emp.get('EMPLOYMENT_UPDATE') for emp in employment_updates if emp.get('EMPLOYMENT_UPDATE')]
+                selected_employment = st.multiselect(
                     "Filter by Employment Update",
                     options=emp_options,
+                    default=[],
                     key="aa_employment_filter",
-                    help="Filter berdasarkan status employment (DEBTOR/SPOUSE/dll) - berguna untuk produk tertentu seperti AkuLaku"
+                    help="Filter berdasarkan status employment (DEBTOR/SPOUSE/dll) - berguna untuk produk tertentu seperti AkuLaku. Pilih lebih dari 1 untuk kombinasi filter."
                 )
             
             # Show filter info
-            if selected_lending_entity != "-- Semua Lending Entity --" or selected_employment != "-- Semua Employment Update --":
+            if selected_lending_entity != "-- Semua Lending Entity --" or selected_employment:
                 filter_info = []
                 if selected_lending_entity != "-- Semua Lending Entity --":
                     filter_info.append(f"Lending Entity: **{selected_lending_entity}**")
-                if selected_employment != "-- Semua Employment Update --":
-                    filter_info.append(f"Employment: **{selected_employment}**")
+                if selected_employment:
+                    emp_list = ", ".join(selected_employment)
+                    filter_info.append(f"Employment: **{emp_list}**")
                 st.info("📌 Filter aktif: " + " | ".join(filter_info))
         
         # Basic Filters
@@ -9665,9 +9667,10 @@ def page_supervisor():
             wh.append("s.Lending_Entity = ?")
             par.append(selected_lending_entity)
         
-        if selected_employment and selected_employment != "-- Semua Employment Update --":
-            wh.append("t.EMPLOYMENT_UPDATE = ?")
-            par.append(selected_employment)
+        if selected_employment and len(selected_employment) > 0:
+            placeholders = ",".join(["?"] * len(selected_employment))
+            wh.append(f"t.EMPLOYMENT_UPDATE IN ({placeholders})")
+            par.extend(selected_employment)
         
         # Exclude data already assigned to tracer
         wh.append("s.Case_ID NOT IN (SELECT Agreement_No FROM assign_tracer WHERE IFNULL(Assigned_To,'')!='')")
