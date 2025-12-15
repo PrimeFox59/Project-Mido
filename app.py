@@ -8000,12 +8000,23 @@ def page_supervisor():
         except Exception:
             _lim = 100
         _lim = max(1, min(2000, _lim))
+        # Get total count matching filters (before LIMIT)
+        count_query = query.replace("SELECT *", "SELECT COUNT(*) as total", 1).replace(f" ORDER BY id DESC LIMIT {_lim}", "")
+        total_matching = (fetchone(count_query, tuple(params)) or {}).get('total', 0)
+        
         query += f" ORDER BY id DESC LIMIT {_lim}"
 
         rows = fetchall(query, tuple(params))
         if not rows:
-            st.info("Tidak ada data supervisor ditemukan.")
+            st.info("Tidak ada data supervisor ditemukan dengan filter yang dipilih.")
         else:
+            # Show filter result info
+            if q_case_id or q_customer or q_phone or q_email or any(extra_filters.values()):
+                if total_matching > _lim:
+                    st.info(f"🔍 Ditemukan **{total_matching:,}** data yang cocok dengan filter. Menampilkan **{len(rows):,}** data teratas (limit: {_lim}).")
+                else:
+                    st.success(f"✅ Ditemukan **{total_matching:,}** data yang cocok dengan filter.")
+            
             df = pd.DataFrame(rows)
             
             # === OPTIMIZED: BATCH QUERY FOR ASSIGNMENT STATUS ===
