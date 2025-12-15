@@ -9693,7 +9693,7 @@ def page_supervisor():
             sup_cols = {str(r.get('name')) for r in _sup_cols}
         except Exception:
             sup_cols = set()
-        base_cols = ["s.id", "s.Case_ID", "s.Customer_name", "s.NIK_KTP", "s.DPD", "s.Phone_Number_1", "s.Phone_Number_2", "s.Lending_Entity"]
+        base_cols = ["s.id", "s.Case_ID", "s.Customer_name", "s.NIK_KTP", "s.DPD", "s.Phone_Number_1", "s.Phone_Number_2", "s.Lending_Entity", "s.Principle_Outstanding"]
         extra_cols = [
             # employment details (for context)
             ("t.EMPLOYMENT_UPDATE", "EMPLOYMENT_UPDATE"), 
