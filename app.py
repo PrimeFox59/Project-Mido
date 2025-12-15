@@ -9752,6 +9752,24 @@ def page_supervisor():
             if col not in df.columns:
                 df[col] = ""
         
+        # Format Principle_Outstanding column to Rupiah
+        if 'Principle_Outstanding' in df.columns:
+            def format_rupiah(val):
+                try:
+                    if pd.isna(val) or val == '' or val is None:
+                        return "Rp 0"
+                    # Clean string: remove non-numeric except dots
+                    val_str = str(val).strip()
+                    val_clean = ''.join(c for c in val_str if c.isdigit() or c == '.')
+                    if not val_clean:
+                        return "Rp 0"
+                    val_num = float(val_clean)
+                    return f"Rp {val_num:,.0f}"
+                except Exception:
+                    return "Rp 0"
+            
+            df['Principle_Outstanding'] = df['Principle_Outstanding'].apply(format_rupiah)
+        
         # Add touch count and priority indicator for each case
         if not df.empty and 'Case_ID' in df.columns:
             touch_counts = []
@@ -9808,6 +9826,7 @@ def page_supervisor():
                     "Phone_Number_1": st.column_config.TextColumn("Phone 1", disabled=True),
                     "Phone_Number_2": st.column_config.TextColumn("Phone 2", disabled=True),
                     "Lending_Entity": st.column_config.TextColumn("Lending Entity", disabled=True),
+                    "Principle_Outstanding": st.column_config.TextColumn("Hutang (PO)", disabled=True, width="medium", help="Total Principle Outstanding"),
                     "EMPLOYMENT_UPDATE": st.column_config.TextColumn("Employment Update", disabled=True),
                     "EMPLOYER": st.column_config.TextColumn("Employer", disabled=True),
                     "STATUS": st.column_config.TextColumn("STATUS", disabled=True),
