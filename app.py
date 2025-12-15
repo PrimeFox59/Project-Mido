@@ -9937,22 +9937,15 @@ def page_supervisor():
                         # This helps balance distribution better
                         cases_with_po.sort(key=lambda x: x['po'], reverse=True)
                         
-                        # Initialize agent workload tracking
-                        agent_workload = {agent: {'count': 0, 'total_po': 0.0, 'cases': []} for agent in sel_agents}
-                        
-                        # Statistics tracking
-                        assigned = 0
+                        # Pre-filter: Remove frozen and already assigned to tracer
+                        valid_cases = []
                         frozen_skips = 0
                         already_tracer = 0
-                        rotation_blocked = 0
                         
-                        # BALANCED DISTRIBUTION ALGORITHM
-                        # For each case, assign to agent with LOWEST total_po (greedy algorithm)
                         for case_data in cases_with_po:
                             agr = case_data['case_id']
-                            po = case_data['po']
                             
-                            # Validation checks
+                            # Check frozen
                             try:
                                 if is_frozen_by_agreement(agr):
                                     frozen_skips += 1
@@ -9973,8 +9966,30 @@ def page_supervisor():
                             except Exception:
                                 pass
                             
-                            # Find agent with LOWEST total outstanding (greedy balance)
-                            target_agent = min(agent_workload.keys(), key=lambda a: agent_workload[a]['total_po'])
+                            valid_cases.append(case_data)
+                        
+                        # Initialize agent workload tracking
+                        agent_workload = {agent: {'count': 0, 'total_po': 0.0, 'cases': []} for agent in sel_agents}
+                        
+                        # Statistics tracking
+                        assigned = 0
+                        rotation_blocked = 0
+                        
+                        # BALANCED DISTRIBUTION ALGORITHM - ROUND ROBIN WITH SNAKE PATTERN
+                        # Snake pattern: Agent1, Agent2, Agent2, Agent1 to balance large PO values
+                        # Example with 200 cases sorted DESC by PO:
+                        # Agent1 gets: #1(largest), #4, #5, #8, #9... (alternating)
+                        # Agent2 gets: #2, #3, #6, #7... (alternating)
+                        
+                        agent_idx = 0
+                        direction = 1  # 1 = forward, -1 = backward
+                        
+                        for i, case_data in enumerate(valid_cases):
+                            agr = case_data['case_id']
+                            po = case_data['po']
+                            
+                            # Get current agent
+                            target_agent = sel_agents[agent_idx]
                             
                             # Try to assign
                             success, msg = assign_case_to_agent(agr, target_agent, by)
@@ -9988,6 +10003,17 @@ def page_supervisor():
                                     frozen_skips += 1
                                 elif "handle dulu" in msg.lower():
                                     rotation_blocked += 1
+                            
+                            # Move to next agent (round-robin)
+                            agent_idx += direction
+                            
+                            # Reverse direction at boundaries (snake pattern)
+                            if agent_idx >= len(sel_agents):
+                                agent_idx = len(sel_agents) - 1
+                                direction = -1
+                            elif agent_idx < 0:
+                                agent_idx = 0
+                                direction = 1
                         
                         # Show distribution summary
                         st.markdown("---")
