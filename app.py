@@ -9613,9 +9613,12 @@ def page_supervisor():
             fcol1, fcol2 = st.columns(2)
             
             with fcol1:
-                # Get unique Lending Entities
-                lending_entities = fetchall("SELECT DISTINCT Lending_Entity FROM supervisor_data WHERE Lending_Entity IS NOT NULL AND Lending_Entity != '' ORDER BY Lending_Entity")
-                le_options = ["-- Semua Lending Entity --"] + [le.get('Lending_Entity') for le in lending_entities if le.get('Lending_Entity')]
+                # OPTIMIZED: Cache lending entities
+                if 'aa_lending_entities_cache' not in st.session_state:
+                    lending_entities = fetchall("SELECT DISTINCT Lending_Entity FROM supervisor_data WHERE Lending_Entity IS NOT NULL AND Lending_Entity != '' ORDER BY Lending_Entity")
+                    st.session_state['aa_lending_entities_cache'] = ["-- Semua Lending Entity --"] + [le.get('Lending_Entity') for le in lending_entities if le.get('Lending_Entity')]
+                le_options = st.session_state['aa_lending_entities_cache']
+                
                 selected_lending_entity = st.selectbox(
                     "Filter by Lending Entity / Product",
                     options=le_options,
@@ -9624,9 +9627,12 @@ def page_supervisor():
                 )
             
             with fcol2:
-                # Get unique Employment Update values from assign_tracer
-                employment_updates = fetchall("SELECT DISTINCT EMPLOYMENT_UPDATE FROM assign_tracer WHERE EMPLOYMENT_UPDATE IS NOT NULL AND EMPLOYMENT_UPDATE != '' ORDER BY EMPLOYMENT_UPDATE")
-                emp_options = [emp.get('EMPLOYMENT_UPDATE') for emp in employment_updates if emp.get('EMPLOYMENT_UPDATE')]
+                # OPTIMIZED: Cache employment options
+                if 'aa_employment_options_cache' not in st.session_state:
+                    employment_updates = fetchall("SELECT DISTINCT EMPLOYMENT_UPDATE FROM assign_tracer WHERE EMPLOYMENT_UPDATE IS NOT NULL AND EMPLOYMENT_UPDATE != '' ORDER BY EMPLOYMENT_UPDATE")
+                    st.session_state['aa_employment_options_cache'] = [emp.get('EMPLOYMENT_UPDATE') for emp in employment_updates if emp.get('EMPLOYMENT_UPDATE')]
+                emp_options = st.session_state['aa_employment_options_cache']
+                
                 selected_employment = st.multiselect(
                     "Filter by Employment Update",
                     options=emp_options,
@@ -9635,15 +9641,24 @@ def page_supervisor():
                     help="Filter berdasarkan status employment (DEBTOR/SPOUSE/dll) - berguna untuk produk tertentu seperti AkuLaku. Pilih lebih dari 1 untuk kombinasi filter."
                 )
             
-            # Show filter info
-            if selected_lending_entity != "-- Semua Lending Entity --" or selected_employment:
-                filter_info = []
-                if selected_lending_entity != "-- Semua Lending Entity --":
-                    filter_info.append(f"Lending Entity: **{selected_lending_entity}**")
-                if selected_employment:
-                    emp_list = ", ".join(selected_employment)
-                    filter_info.append(f"Employment: **{emp_list}**")
-                st.info("📌 Filter aktif: " + " | ".join(filter_info))
+            # Show filter info and refresh button
+            fcol_info, fcol_refresh = st.columns([4, 1])
+            with fcol_info:
+                if selected_lending_entity != "-- Semua Lending Entity --" or selected_employment:
+                    filter_info = []
+                    if selected_lending_entity != "-- Semua Lending Entity --":
+                        filter_info.append(f"Lending Entity: **{selected_lending_entity}**")
+                    if selected_employment:
+                        emp_list = ", ".join(selected_employment)
+                        filter_info.append(f"Employment: **{emp_list}**")
+                    st.info("📌 Filter aktif: " + " | ".join(filter_info))
+            with fcol_refresh:
+                if st.button("🔄 Refresh Data", key="aa_refresh_cache", help="Refresh filter options dan data terbaru"):
+                    # Clear all caches
+                    for key in ['aa_lending_entities_cache', 'aa_employment_options_cache', 'aa_df_cache', 'aa_cache_key', 'agent_list_cache']:
+                        if key in st.session_state:
+                            del st.session_state[key]
+                    st.rerun()
         
         # Basic Filters
         q1, q2, q3, q4 = st.columns([1.2, 1.2, 1.2, 0.6])
@@ -9686,129 +9701,148 @@ def page_supervisor():
         # Exclude data already assigned to tracer
         wh.append("s.Case_ID NOT IN (SELECT Agreement_No FROM assign_tracer WHERE IFNULL(Assigned_To,'')!='')")
         wh_sql = " AND ".join(wh) if wh else "1=1"
-
-        # Determine available columns dynamically
-        try:
-            _sup_cols = fetchall("PRAGMA table_info(supervisor_data)") or []
-            sup_cols = {str(r.get('name')) for r in _sup_cols}
-        except Exception:
-            sup_cols = set()
-        base_cols = ["s.id", "s.Case_ID", "s.Customer_name", "s.NIK_KTP", "s.DPD", "s.Phone_Number_1", "s.Phone_Number_2", "s.Lending_Entity", "s.Principle_Outstanding"]
-        extra_cols = [
-            # employment details (for context)
-            ("t.EMPLOYMENT_UPDATE", "EMPLOYMENT_UPDATE"), 
-            ("t.EMPLOYER", "EMPLOYER"), 
-            ("s.Debtor_Legal_Name", "Debtor_Legal_Name"), 
-            ("s.Employee_Name", "Employee_Name"), 
-            ("s.Employee_ID_Number", "Employee_ID_Number"), 
-            ("s.Debtor_Relation_to_Employee", "Debtor_Relation_to_Employee"),
-            # agent-editable fields (for visibility)
-            ("s.STATUS", "STATUS"), 
-            ("s.REGISTERED_PHONE", "REGISTERED_PHONE"), 
-            ("s.Additional_Contacts", "Additional_Contacts"), 
-            ("s.Remarks_Suggested_NIK_Prospect", "Remarks_Suggested_NIK_Prospect"), 
-            ("s.Payment", "Payment"), 
-            ("s.Paid_Off_Status", "Paid_Off_Status")
-        ]
         
-        # Build SELECT clause
-        sel_parts = base_cols.copy()
-        for col_expr, col_alias in extra_cols:
-            # Check if base column exists in supervisor_data
-            base_col = col_expr.split('.')[-1]
-            if base_col in sup_cols or col_expr.startswith('t.'):
-                sel_parts.append(f"{col_expr} as {col_alias}")
+        # OPTIMIZATION: Create cache key from filter values to detect changes
+        emp_str = ','.join(sorted(selected_employment)) if selected_employment else ''
+        cache_key = f"{fa_case}|{fa_name}|{fa_phone}|{fa_limit}|{hide_assigned}|{selected_lending_entity}|{emp_str}"
         
-        rows_sup = fetchall(
-            f"""
-            SELECT {', '.join(sel_parts)}
-            FROM supervisor_data s
-            LEFT JOIN assign_tracer t ON s.Case_ID = t.Agreement_No
-            WHERE {wh_sql}
-            ORDER BY s.id DESC
-            LIMIT ?
-            """,
-            tuple(par + [int(fa_limit)])
+        # Check if we can use cached data (filters haven't changed)
+        use_cache = (
+            'aa_df_cache' in st.session_state and 
+            'aa_cache_key' in st.session_state and 
+            st.session_state['aa_cache_key'] == cache_key
         )
-        import pandas as _pd
-        
-        # Clean up column names for DataFrame
-        if rows_sup:
-            clean_rows = []
-            for row in rows_sup:
-                clean_row = {}
-                for k, v in row.items():
-                    # Remove table prefix (s. or t.)
-                    clean_key = k.split('.')[-1] if '.' in k else k
-                    clean_row[clean_key] = v
-                clean_rows.append(clean_row)
-            df = _pd.DataFrame(clean_rows)
+
+        # OPTIMIZATION: Use cached dataframe if filters haven't changed
+        if use_cache:
+            df = st.session_state['aa_df_cache'].copy()
         else:
-            df = _pd.DataFrame()
-        
-        # Ensure all expected columns exist
-        expected_cols = ["id", "Case_ID", "Customer_name", "NIK_KTP", "DPD", "Phone_Number_1", "Phone_Number_2", "Lending_Entity", "EMPLOYMENT_UPDATE", "EMPLOYER"]
-        for col in expected_cols:
-            if col not in df.columns:
-                df[col] = ""
-        
-        # Format Principle_Outstanding column to Rupiah
-        if 'Principle_Outstanding' in df.columns:
-            def format_rupiah(val):
-                try:
-                    if pd.isna(val) or val == '' or val is None:
+            # Determine available columns dynamically
+            try:
+                _sup_cols = fetchall("PRAGMA table_info(supervisor_data)") or []
+                sup_cols = {str(r.get('name')) for r in _sup_cols}
+            except Exception:
+                sup_cols = set()
+            base_cols = ["s.id", "s.Case_ID", "s.Customer_name", "s.NIK_KTP", "s.DPD", "s.Phone_Number_1", "s.Phone_Number_2", "s.Lending_Entity", "s.Principle_Outstanding"]
+            extra_cols = [
+                # employment details (for context)
+                ("t.EMPLOYMENT_UPDATE", "EMPLOYMENT_UPDATE"), 
+                ("t.EMPLOYER", "EMPLOYER"), 
+                ("s.Debtor_Legal_Name", "Debtor_Legal_Name"), 
+                ("s.Employee_Name", "Employee_Name"), 
+                ("s.Employee_ID_Number", "Employee_ID_Number"), 
+                ("s.Debtor_Relation_to_Employee", "Debtor_Relation_to_Employee"),
+                # agent-editable fields (for visibility)
+                ("s.STATUS", "STATUS"), 
+                ("s.REGISTERED_PHONE", "REGISTERED_PHONE"), 
+                ("s.Additional_Contacts", "Additional_Contacts"), 
+                ("s.Remarks_Suggested_NIK_Prospect", "Remarks_Suggested_NIK_Prospect"), 
+                ("s.Payment", "Payment"), 
+                ("s.Paid_Off_Status", "Paid_Off_Status")
+            ]
+            
+            # Build SELECT clause
+            sel_parts = base_cols.copy()
+            for col_expr, col_alias in extra_cols:
+                # Check if base column exists in supervisor_data
+                base_col = col_expr.split('.')[-1]
+                if base_col in sup_cols or col_expr.startswith('t.'):
+                    sel_parts.append(f"{col_expr} as {col_alias}")
+            
+            rows_sup = fetchall(
+                f"""
+                SELECT {', '.join(sel_parts)}
+                FROM supervisor_data s
+                LEFT JOIN assign_tracer t ON s.Case_ID = t.Agreement_No
+                WHERE {wh_sql}
+                ORDER BY s.id DESC
+                LIMIT ?
+                """,
+                tuple(par + [int(fa_limit)])
+            )
+            import pandas as _pd
+            
+            # Clean up column names for DataFrame
+            if rows_sup:
+                clean_rows = []
+                for row in rows_sup:
+                    clean_row = {}
+                    for k, v in row.items():
+                        # Remove table prefix (s. or t.)
+                        clean_key = k.split('.')[-1] if '.' in k else k
+                        clean_row[clean_key] = v
+                    clean_rows.append(clean_row)
+                df = _pd.DataFrame(clean_rows)
+            else:
+                df = _pd.DataFrame()
+            
+            # Ensure all expected columns exist
+            expected_cols = ["id", "Case_ID", "Customer_name", "NIK_KTP", "DPD", "Phone_Number_1", "Phone_Number_2", "Lending_Entity", "EMPLOYMENT_UPDATE", "EMPLOYER"]
+            for col in expected_cols:
+                if col not in df.columns:
+                    df[col] = ""
+            
+            # Format Principle_Outstanding column to Rupiah
+            if 'Principle_Outstanding' in df.columns:
+                def format_rupiah(val):
+                    try:
+                        if pd.isna(val) or val == '' or val is None:
+                            return "Rp 0"
+                        # Clean string: remove non-numeric except dots
+                        val_str = str(val).strip()
+                        val_clean = ''.join(c for c in val_str if c.isdigit() or c == '.')
+                        if not val_clean:
+                            return "Rp 0"
+                        val_num = float(val_clean)
+                        return f"Rp {val_num:,.0f}"
+                    except Exception:
                         return "Rp 0"
-                    # Clean string: remove non-numeric except dots
-                    val_str = str(val).strip()
-                    val_clean = ''.join(c for c in val_str if c.isdigit() or c == '.')
-                    if not val_clean:
-                        return "Rp 0"
-                    val_num = float(val_clean)
-                    return f"Rp {val_num:,.0f}"
-                except Exception:
-                    return "Rp 0"
+                
+                df['Principle_Outstanding'] = df['Principle_Outstanding'].apply(format_rupiah)
             
-            df['Principle_Outstanding'] = df['Principle_Outstanding'].apply(format_rupiah)
-        
-        # OPTIMIZED: Add touch count and priority indicator - BATCH QUERY
-        if not df.empty and 'Case_ID' in df.columns:
-            # Get all case IDs for batch query
-            case_ids = [str(row.get('Case_ID', '')) for row in df.to_dict('records') if row.get('Case_ID')]
-            
-            # Batch query touch counts (1 query instead of N queries)
-            touch_count_map = {}
-            if case_ids:
-                placeholders = ','.join(['?'] * len(case_ids))
-                touch_query = f"""
-                    SELECT Agreement_No, COUNT(*) as touch_count
-                    FROM trace_results
-                    WHERE Agreement_No IN ({placeholders})
-                    GROUP BY Agreement_No
-                """
-                touch_results = fetchall(touch_query, tuple(case_ids))
-                touch_count_map = {str(r.get('Agreement_No', '')): r.get('touch_count', 0) for r in touch_results}
-            
-            # Build lists efficiently
-            touch_counts = []
-            priorities = []
-            for idx, row in df.iterrows():
-                case_id = str(row.get('Case_ID', ''))
-                if case_id and case_id in touch_count_map:
-                    count = touch_count_map[case_id]
-                    touch_counts.append(count)
-                    # Priority: 🔴 High (0-1 touches), 🟡 Medium (2-3), 🟢 Low (4+)
-                    if count <= 1:
-                        priorities.append("🔴 High (Fresh)")
-                    elif count <= 3:
-                        priorities.append("🟡 Medium")
+            # OPTIMIZED: Add touch count and priority indicator - BATCH QUERY
+            if not df.empty and 'Case_ID' in df.columns:
+                # Get all case IDs for batch query
+                case_ids = [str(row.get('Case_ID', '')) for row in df.to_dict('records') if row.get('Case_ID')]
+                
+                # Batch query touch counts (1 query instead of N queries)
+                touch_count_map = {}
+                if case_ids:
+                    placeholders = ','.join(['?'] * len(case_ids))
+                    touch_query = f"""
+                        SELECT Agreement_No, COUNT(*) as touch_count
+                        FROM trace_results
+                        WHERE Agreement_No IN ({placeholders})
+                        GROUP BY Agreement_No
+                    """
+                    touch_results = fetchall(touch_query, tuple(case_ids))
+                    touch_count_map = {str(r.get('Agreement_No', '')): r.get('touch_count', 0) for r in touch_results}
+                
+                # Build lists efficiently
+                touch_counts = []
+                priorities = []
+                for idx, row in df.iterrows():
+                    case_id = str(row.get('Case_ID', ''))
+                    if case_id and case_id in touch_count_map:
+                        count = touch_count_map[case_id]
+                        touch_counts.append(count)
+                        # Priority: 🔴 High (0-1 touches), 🟡 Medium (2-3), 🟢 Low (4+)
+                        if count <= 1:
+                            priorities.append("🔴 High (Fresh)")
+                        elif count <= 3:
+                            priorities.append("🟡 Medium")
+                        else:
+                            priorities.append("🟢 Low (Handled)")
                     else:
-                        priorities.append("🟢 Low (Handled)")
-                else:
-                    touch_counts.append(0)
-                    priorities.append("🔴 High (Fresh)")
+                        touch_counts.append(0)
+                        priorities.append("🔴 High (Fresh)")
+                
+                df.insert(1, "Priority", priorities)
+                df.insert(2, "Touch_Count", touch_counts)
             
-            df.insert(1, "Priority", priorities)
-            df.insert(2, "Touch_Count", touch_counts)
+            # Store in cache
+            st.session_state['aa_df_cache'] = df.copy()
+            st.session_state['aa_cache_key'] = cache_key
 
         # Selection controls
         select_all = st.checkbox("Pilih semua yang ditampilkan", key="aa_select_all")
@@ -9832,6 +9866,8 @@ def page_supervisor():
                 df,
                 use_container_width=True,
                 hide_index=True,
+                disabled=False,
+                key="aa_data_editor",
                 column_config={
                     "Selected": st.column_config.CheckboxColumn("Selected", default=select_all),
                     "Priority": st.column_config.TextColumn("Priority", disabled=True, width="small", help="Prioritas berdasarkan jumlah penanganan"),
