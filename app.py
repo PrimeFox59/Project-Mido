@@ -809,6 +809,25 @@ def init_db():
     except Exception:
         pass
     
+    # Agent tiers table for AkuLaku batch prioritization
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS agent_tiers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        tier TEXT NOT NULL,
+        created_by TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(user_id) REFERENCES users(id),
+        UNIQUE(user_id)
+    );
+    """)
+    
+    try:
+        c.execute("CREATE INDEX IF NOT EXISTS idx_agent_tiers_user ON agent_tiers(user_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_agent_tiers_tier ON agent_tiers(tier)")
+    except Exception:
+        pass
+    
     # Create indexes for performance optimization (after all table creations)
     try:
         c.execute("CREATE INDEX IF NOT EXISTS idx_supervisor_case_id ON supervisor_data(Case_ID)")
@@ -1818,6 +1837,104 @@ def set_agent_allowed_dts(user_id: int, dt_list: list, created_by: str = None) -
         return False, f"Error setting DT restrictions: {e}"
 
 
+def get_agent_tier(agent_name: str) -> str:
+    """Get agent tier/priority (Priority_1, Priority_2, etc) for AkuLaku batch tiering.
+    
+    Returns: Tier name (e.g., 'Priority_1', 'Priority_2') or empty string if not set.
+    """
+    try:
+        user = fetchone("SELECT id FROM users WHERE COALESCE(full_name, name, login_id) = ?", (agent_name,))
+        if not user:
+            return ""
+        
+        tier_row = fetchone("SELECT tier FROM agent_tiers WHERE user_id = ?", (user['id'],))
+        return tier_row.get('tier', '') if tier_row else ''
+    except Exception:
+        return ""
+
+
+def set_agent_tier(agent_name: str, tier: str, created_by: str = None) -> tuple:
+    """Set agent tier for AkuLaku batch prioritization.
+    
+    Args:
+        agent_name: Agent name (full_name or login_id)
+        tier: Tier name (e.g., 'Priority_1', 'Priority_2', etc)
+        created_by: Name of user making the change
+    
+    Returns: (success: bool, message: str)
+    """
+    try:
+        user = fetchone("SELECT id FROM users WHERE COALESCE(full_name, name, login_id) = ?", (agent_name,))
+        if not user:
+            return False, f"Agent '{agent_name}' tidak ditemukan"
+        
+        user_id = user['id']
+        
+        # Delete existing tier
+        execute("DELETE FROM agent_tiers WHERE user_id = ?", (user_id,))
+        
+        # Set new tier if provided
+        if tier and tier.strip():
+            execute(
+                "INSERT INTO agent_tiers (user_id, tier, created_by) VALUES (?, ?, ?)",
+                (user_id, tier.strip(), created_by)
+            )
+            return True, f"Agent tier set to '{tier}' for {agent_name}"
+        else:
+            return True, f"Agent tier removed for {agent_name}"
+    except Exception as e:
+        return False, f"Error setting agent tier: {e}"
+
+
+def check_agent_tier_batch_access(agent_name: str, batch_code: str, lending_entity: str, prioritized_batch: str = None) -> tuple:
+    """Check if agent can access case from specific batch based on tier system.
+    
+    TIERING RULE (AkuLaku only):
+    - If prioritized_batch is set (e.g., '2025-12-15'):
+      - Priority_1 agents: CAN take cases from prioritized batch
+      - Priority_2 agents: CANNOT take cases from prioritized batch (blocked)
+      - Agents without tier: CAN take any batch (no restriction)
+    
+    Args:
+        agent_name: Agent name
+        batch_code: Case batch code (Assignment_Date)
+        lending_entity: Lending Entity name
+        prioritized_batch: Batch code that is prioritized (optional)
+    
+    Returns: (can_access: bool, reason: str)
+    """
+    # Tiering only applies to AkuLaku
+    if lending_entity != 'AkuLaku':
+        return True, "Tiering not applicable (non-AkuLaku)"
+    
+    # If no prioritized batch set, no restrictions
+    if not prioritized_batch or not prioritized_batch.strip():
+        return True, "No prioritized batch set"
+    
+    # Check if this case is from the prioritized batch
+    is_prioritized_batch = (batch_code == prioritized_batch)
+    if not is_prioritized_batch:
+        return True, "Case not from prioritized batch"
+    
+    # Get agent tier
+    agent_tier = get_agent_tier(agent_name)
+    
+    # No tier = can access any batch (backward compatibility)
+    if not agent_tier:
+        return True, "Agent has no tier (can access all batches)"
+    
+    # Priority_1 can access prioritized batch
+    if agent_tier == 'Priority_1':
+        return True, f"Priority_1 agent can access prioritized batch ({prioritized_batch})"
+    
+    # Priority_2 and lower CANNOT access prioritized batch
+    if agent_tier in ['Priority_2', 'Priority_3', 'Priority_4']:
+        return False, f"{agent_tier} agent cannot access prioritized batch ({prioritized_batch})"
+    
+    # Unknown tier = allow by default
+    return True, f"Unknown tier '{agent_tier}' - allowed by default"
+
+
 def check_agent_dt_restriction(agent_name: str, case_dt: str) -> tuple:
     """Check if agent is allowed to take case from this DT.
     
@@ -2079,8 +2196,14 @@ def get_available_cases_for_agent(agent_name: str, lending_entity_filter: list =
         return []
 
 
-def assign_case_to_agent(agreement_no: str, agent_name: str, assigned_by: str) -> tuple:
-    """Assign case to agent with 7-day auto-return.
+def assign_case_to_agent(agreement_no: str, agent_name: str, assigned_by: str, prioritized_batch: str = None) -> tuple:
+    """Assign case to agent with 7-day auto-return and tier checking for AkuLaku.
+    
+    Args:
+        agreement_no: Case ID to assign
+        agent_name: Agent name
+        assigned_by: Who is assigning
+        prioritized_batch: Prioritized batch code for AkuLaku tiering (optional)
     
     Returns: (success: bool, message: str)
     """
@@ -2089,6 +2212,26 @@ def assign_case_to_agent(agreement_no: str, agent_name: str, assigned_by: str) -
         can_assign, reason = can_agent_take_case(agent_name, agreement_no)
         if not can_assign:
             return False, reason
+        
+        # Check tier restrictions for AkuLaku (if prioritized_batch is set)
+        if prioritized_batch:
+            # Get case details to check lending entity and batch code
+            case_data = fetchone("""
+                SELECT s.Lending_Entity, s.Assignment_Date
+                FROM supervisor_data s
+                WHERE s.Case_ID = ?
+            """, (agreement_no,))
+            
+            if case_data:
+                lending_entity = case_data.get('Lending_Entity', '')
+                batch_code = case_data.get('Assignment_Date', '')
+                
+                # Check tier access
+                can_access, tier_reason = check_agent_tier_batch_access(
+                    agent_name, batch_code, lending_entity, prioritized_batch
+                )
+                if not can_access:
+                    return False, f"Tier restriction: {tier_reason}"
         
         # Calculate auto-return date (7 days from now)
         auto_return = (today_wib() + timedelta(days=7)).isoformat()
@@ -9607,6 +9750,165 @@ def page_supervisor():
         st.subheader("🎯 Auto Agent Assignment - Tanpa Checkbox")
         st.caption("✨ Tentukan agent dan jumlah case. Sistem otomatis pilih case terbaik berdasarkan prioritas dan aturan bisnis.")
         
+        # ========================================================================
+        # AKULAKU TIERING SETTINGS (Collapsible Section)
+        # ========================================================================
+        with st.expander("⚙️ AkuLaku Agent Tiering Settings", expanded=False):
+            st.markdown("### 🎖️ Agent Tier Configuration")
+            st.caption("Atur tier agent untuk kontrol akses batch AkuLaku. Priority_2 tidak bisa akses prioritized batch.")
+            
+            # Get all agents
+            if 'agent_list_cache' not in st.session_state or st.session_state.get('refresh_agent_list', False):
+                agents_raw = fetchall("SELECT id, COALESCE(full_name, name, login_id) AS n FROM users WHERE role='Agent' AND approved=1 ORDER BY n") or []
+                st.session_state['agent_list_cache'] = [a.get('n') for a in agents_raw if a.get('n') and str(a.get('n')).strip()]
+                st.session_state['refresh_agent_list'] = False
+            
+            agents_list = st.session_state['agent_list_cache']
+            
+            # Get all unique batch codes (Assignment_Date) for AkuLaku
+            try:
+                batch_codes_raw = fetchall("""
+                    SELECT DISTINCT Assignment_Date 
+                    FROM supervisor_data 
+                    WHERE Lending_Entity = 'AkuLaku' 
+                      AND Assignment_Date IS NOT NULL 
+                      AND Assignment_Date != ''
+                    ORDER BY Assignment_Date DESC
+                """)
+                batch_codes = [bc.get('Assignment_Date') for bc in batch_codes_raw if bc.get('Assignment_Date')]
+            except Exception:
+                batch_codes = []
+            
+            # Prioritized Batch Dropdown
+            st.markdown("#### 📅 Prioritized Batch Code")
+            st.caption("Batch code yang diprioritaskan untuk Priority_1 agents. Priority_2 tidak bisa akses batch ini.")
+            
+            col_batch1, col_batch2 = st.columns([3, 1])
+            with col_batch1:
+                # Get current prioritized batch from settings
+                current_prioritized = get_setting('akulaku_prioritized_batch', '')
+                
+                batch_options = ['-- No Prioritization --'] + batch_codes
+                default_idx = 0
+                if current_prioritized and current_prioritized in batch_codes:
+                    default_idx = batch_codes.index(current_prioritized) + 1
+                
+                selected_prioritized_batch = st.selectbox(
+                    "Select Prioritized Batch",
+                    options=batch_options,
+                    index=default_idx,
+                    key="akulaku_prioritized_batch_select",
+                    help="Batch code yang hanya bisa diambil oleh Priority_1 agents"
+                )
+            
+            with col_batch2:
+                st.markdown("<div style='margin-top: 25px;'></div>", unsafe_allow_html=True)
+                if st.button("💾 Save Batch", key="save_prioritized_batch"):
+                    if selected_prioritized_batch == '-- No Prioritization --':
+                        set_setting('akulaku_prioritized_batch', '')
+                        st.success("✅ Prioritized batch cleared")
+                    else:
+                        set_setting('akulaku_prioritized_batch', selected_prioritized_batch)
+                        st.success(f"✅ Prioritized batch set to: {selected_prioritized_batch}")
+                    st.rerun()
+            
+            if selected_prioritized_batch != '-- No Prioritization --':
+                st.info(f"🔒 Batch **{selected_prioritized_batch}** is prioritized. Only Priority_1 agents can access this batch.")
+            
+            st.markdown("---")
+            
+            # Agent Tier Management
+            st.markdown("#### 👥 Set Agent Tiers")
+            
+            # Show current tier assignments
+            try:
+                current_tiers = fetchall("""
+                    SELECT u.id, COALESCE(u.full_name, u.name, u.login_id) as agent_name, at.tier
+                    FROM users u
+                    LEFT JOIN agent_tiers at ON u.id = at.user_id
+                    WHERE u.role = 'Agent' AND u.approved = 1
+                    ORDER BY at.tier, agent_name
+                """)
+                
+                if current_tiers:
+                    st.markdown("**Current Agent Tiers:**")
+                    tier_data = []
+                    for t in current_tiers:
+                        tier_data.append({
+                            'Agent': t.get('agent_name', ''),
+                            'Tier': t.get('tier', 'Not Set'),
+                            'Access to Prioritized': '✅ Yes' if t.get('tier') == 'Priority_1' else '❌ No' if t.get('tier') in ['Priority_2', 'Priority_3'] else '✅ Yes (No tier)'
+                        })
+                    
+                    tier_df = pd.DataFrame(tier_data)
+                    st.dataframe(tier_df, use_container_width=True, hide_index=True)
+            except Exception as e:
+                st.warning(f"Could not load current tiers: {e}")
+            
+            st.markdown("---")
+            
+            # Set/Update Agent Tier Form
+            col_agent, col_tier, col_btn = st.columns([2, 1.5, 1])
+            with col_agent:
+                selected_agent_for_tier = st.selectbox(
+                    "Select Agent",
+                    options=agents_list,
+                    key="tier_agent_select"
+                )
+            
+            with col_tier:
+                tier_options = ['-- Remove Tier --', 'Priority_1', 'Priority_2', 'Priority_3', 'Priority_4']
+                selected_tier = st.selectbox(
+                    "Set Tier",
+                    options=tier_options,
+                    key="tier_select",
+                    help="Priority_1: Can access prioritized batch | Priority_2+: Cannot access prioritized batch"
+                )
+            
+            with col_btn:
+                st.markdown("<div style='margin-top: 25px;'></div>", unsafe_allow_html=True)
+                if st.button("💾 Update Tier", key="update_agent_tier"):
+                    u = current_user() or {}
+                    by = u.get('full_name') or u.get('login_id') or '-'
+                    
+                    tier_value = '' if selected_tier == '-- Remove Tier --' else selected_tier
+                    success, msg = set_agent_tier(selected_agent_for_tier, tier_value, by)
+                    
+                    if success:
+                        st.success(f"✅ {msg}")
+                        # Audit log
+                        try:
+                            execute(
+                                "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                                (u.get('id') if u else None, "SET_AGENT_TIER", f"{selected_agent_for_tier} tier set to '{tier_value}'")
+                            )
+                        except Exception:
+                            pass
+                        st.rerun()
+                    else:
+                        st.error(f"❌ {msg}")
+            
+            # Legend
+            st.markdown("---")
+            st.markdown("""
+            **Tier Legend:**
+            - 🥇 **Priority_1**: Can access ALL batches including prioritized batch
+            - 🥈 **Priority_2**: CANNOT access prioritized batch (blocked)
+            - 🥉 **Priority_3**: CANNOT access prioritized batch (blocked)
+            - 🏅 **Priority_4**: CANNOT access prioritized batch (blocked)
+            - ⚪ **No Tier**: Can access ALL batches (default behavior)
+            
+            **Example:**
+            If prioritized batch = `2025-12-15`:
+            - Priority_1 agents → CAN take cases from 2025-12-15 batch ✅
+            - Priority_2 agents → CANNOT take cases from 2025-12-15 batch ❌
+            - No tier agents → CAN take cases from 2025-12-15 batch ✅
+            """)
+        
+        # ========================================================================
+        # END AKULAKU TIERING SETTINGS
+        # ========================================================================
+        
         # Advanced Filters Section
         with st.expander("🔍 Filter Lanjutan", expanded=False):
             st.caption("Filter ini membantu memilih case yang sesuai untuk di-assign ke agent")
@@ -9725,7 +10027,7 @@ def page_supervisor():
                 sup_cols = {str(r.get('name')) for r in _sup_cols}
             except Exception:
                 sup_cols = set()
-            base_cols = ["s.id", "s.Case_ID", "s.Customer_name", "s.NIK_KTP", "s.DPD", "s.Phone_Number_1", "s.Phone_Number_2", "s.Lending_Entity", "s.Principle_Outstanding"]
+            base_cols = ["s.id", "s.Case_ID", "s.Customer_name", "s.NIK_KTP", "s.DPD", "s.Phone_Number_1", "s.Phone_Number_2", "s.Lending_Entity", "s.Principle_Outstanding", "s.Assignment_Date"]
             extra_cols = [
                 # employment details (for context)
                 ("t.EMPLOYMENT_UPDATE", "EMPLOYMENT_UPDATE"), 
@@ -9970,6 +10272,9 @@ def page_supervisor():
                     u = current_user() or {}
                     by = (u.get('full_name') or u.get('login_id') or '-')
                     
+                    # Get prioritized batch setting for AkuLaku tiering
+                    prioritized_batch = get_setting('akulaku_prioritized_batch', '')
+                    
                     # Sort dataframe by priority (High first) and touch count (ascending)
                     if not df.empty:
                         df_sorted = df.sort_values(['Priority_Score', 'Touch_Count'], ascending=[True, True]).reset_index(drop=True)
@@ -9983,6 +10288,7 @@ def page_supervisor():
                     total_frozen = 0
                     total_already_tracer = 0
                     total_rotation_blocked = 0
+                    total_tier_blocked = 0  # NEW: Track tier blocks
                     case_idx = 0  # Track position in sorted case list
                     
                     for allocation in st.session_state['agent_allocations']:
@@ -9993,6 +10299,7 @@ def page_supervisor():
                         frozen_count = 0
                         already_tracer_count = 0
                         rotation_blocked_count = 0
+                        tier_blocked_count = 0  # NEW: Track tier blocks per agent
                         
                         # Try to assign target_count cases to this agent
                         while assigned_count < target_count and case_idx < len(df_sorted):
@@ -10024,13 +10331,15 @@ def page_supervisor():
                             except Exception:
                                 pass
                             
-                            # Try to assign using rotation system
-                            success, msg = assign_case_to_agent(agr, agent_name, by)
+                            # Try to assign using rotation system with tier checking
+                            success, msg = assign_case_to_agent(agr, agent_name, by, prioritized_batch)
                             if success:
                                 assigned_count += 1
                             else:
                                 if "frozen" in msg.lower():
                                     frozen_count += 1
+                                elif "tier restriction" in msg.lower():
+                                    tier_blocked_count += 1
                                 elif "handle dulu" in msg.lower() or "rotation" in msg.lower():
                                     rotation_blocked_count += 1
                         
@@ -10041,20 +10350,22 @@ def page_supervisor():
                             'Assigned': assigned_count,
                             'Frozen': frozen_count,
                             'Already_Tracer': already_tracer_count,
-                            'Rotation_Blocked': rotation_blocked_count
+                            'Rotation_Blocked': rotation_blocked_count,
+                            'Tier_Blocked': tier_blocked_count
                         })
                         
                         total_assigned += assigned_count
                         total_frozen += frozen_count
                         total_already_tracer += already_tracer_count
                         total_rotation_blocked += rotation_blocked_count
+                        total_tier_blocked += tier_blocked_count
                     
                     # Display results
                     st.markdown("---")
                     st.markdown("### ✅ Assignment Completed!")
                     
                     # Summary metrics
-                    sum_col1, sum_col2, sum_col3, sum_col4 = st.columns(4)
+                    sum_col1, sum_col2, sum_col3, sum_col4, sum_col5 = st.columns(5)
                     with sum_col1:
                         st.metric("✅ Total Assigned", f"{total_assigned:,}")
                     with sum_col2:
@@ -10063,6 +10374,8 @@ def page_supervisor():
                         st.metric("🔍 Already Tracer", f"{total_already_tracer:,}")
                     with sum_col4:
                         st.metric("🔄 Rotation Blocked", f"{total_rotation_blocked:,}")
+                    with sum_col5:
+                        st.metric("🎖️ Tier Blocked", f"{total_tier_blocked:,}")
                     
                     # Detailed results table
                     results_df = pd.DataFrame(assignment_results)
@@ -10072,10 +10385,11 @@ def page_supervisor():
                     # Audit log
                     try:
                         summary_str = " | ".join([f"{r['Agent']}: {r['Assigned']}/{r['Target']}" for r in assignment_results])
+                        prioritized_info = f"Prioritized batch: {prioritized_batch}" if prioritized_batch else "No prioritized batch"
                         execute(
                             "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
                             (u.get('id') if u else None, "AUTO_AGENT_ASSIGN", 
-                             f"Auto-assigned {total_assigned} cases to {len(st.session_state['agent_allocations'])} agents. Frozen: {total_frozen}, Tracer: {total_already_tracer}, Rotation: {total_rotation_blocked}. Details: {summary_str}")
+                             f"Auto-assigned {total_assigned} cases to {len(st.session_state['agent_allocations'])} agents. {prioritized_info}. Frozen: {total_frozen}, Tracer: {total_already_tracer}, Rotation: {total_rotation_blocked}, Tier: {total_tier_blocked}. Details: {summary_str}")
                         )
                     except Exception:
                         pass
