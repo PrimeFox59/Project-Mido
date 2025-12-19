@@ -9604,7 +9604,8 @@ def page_supervisor():
 
     # --- Agent Assigning Tab ---
     with tabs[4]:
-        st.subheader("Assign ke Agent")
+        st.subheader("🎯 Auto Agent Assignment - Tanpa Checkbox")
+        st.caption("✨ Tentukan agent dan jumlah case. Sistem otomatis pilih case terbaik berdasarkan prioritas dan aturan bisnis.")
         
         # Advanced Filters Section
         with st.expander("🔍 Filter Lanjutan", expanded=False):
@@ -9669,11 +9670,11 @@ def page_supervisor():
         with q3:
             fa_phone = st.text_input("Filter Phone", key="aa_f_phone")
         with q4:
-            fa_limit = st.number_input("Limit Row", min_value=10, max_value=2000, value=200, step=10, key="aa_limit")
+            fa_limit = st.number_input("Limit Row", min_value=10, max_value=5000, value=1000, step=100, key="aa_limit")
 
-        hide_assigned = st.checkbox("Sembunyikan yang sudah di-assign ke Agent", value=True, key="aa_hide_assigned")
+        # No more checkbox for hiding assigned - always hide already assigned cases
 
-        # Build SQL with filters
+        # Build SQL with filters - always exclude assigned cases
         wh = ["s.Case_ID IS NOT NULL", "TRIM(s.Case_ID)<>''"]
         par = []
         if fa_case:
@@ -9685,8 +9686,9 @@ def page_supervisor():
         if fa_phone:
             wh.append("(s.Phone_Number_1 LIKE ? OR s.Phone_Number_2 LIKE ?)")
             par.extend([f"%{fa_phone.strip()}%", f"%{fa_phone.strip()}%"])
-        if hide_assigned:
-            wh.append("s.Case_ID NOT IN (SELECT Agreement_No FROM agent_assignments WHERE IFNULL(active,1)=1)")
+        
+        # ALWAYS exclude already assigned cases (mutual exclusion)
+        wh.append("s.Case_ID NOT IN (SELECT Agreement_No FROM agent_assignments WHERE IFNULL(active,1)=1)")
         
         # Apply advanced filters
         if selected_lending_entity and selected_lending_entity != "-- Semua Lending Entity --":
@@ -9704,7 +9706,7 @@ def page_supervisor():
         
         # OPTIMIZATION: Create cache key from filter values to detect changes
         emp_str = ','.join(sorted(selected_employment)) if selected_employment else ''
-        cache_key = f"{fa_case}|{fa_name}|{fa_phone}|{fa_limit}|{hide_assigned}|{selected_lending_entity}|{emp_str}"
+        cache_key = f"{fa_case}|{fa_name}|{fa_phone}|{fa_limit}|{selected_lending_entity}|{emp_str}"
         
         # Check if we can use cached data (filters haven't changed)
         use_cache = (
@@ -9818,9 +9820,10 @@ def page_supervisor():
                     touch_results = fetchall(touch_query, tuple(case_ids))
                     touch_count_map = {str(r.get('Agreement_No', '')): r.get('touch_count', 0) for r in touch_results}
                 
-                # Build lists efficiently
+                # Build lists efficiently with numeric priority for sorting
                 touch_counts = []
                 priorities = []
+                priority_scores = []  # Lower score = higher priority
                 for idx, row in df.iterrows():
                     case_id = str(row.get('Case_ID', ''))
                     if case_id and case_id in touch_count_map:
@@ -9829,76 +9832,62 @@ def page_supervisor():
                         # Priority: 🔴 High (0-1 touches), 🟡 Medium (2-3), 🟢 Low (4+)
                         if count <= 1:
                             priorities.append("🔴 High (Fresh)")
+                            priority_scores.append(1)
                         elif count <= 3:
                             priorities.append("🟡 Medium")
+                            priority_scores.append(2)
                         else:
                             priorities.append("🟢 Low (Handled)")
+                            priority_scores.append(3)
                     else:
                         touch_counts.append(0)
                         priorities.append("🔴 High (Fresh)")
+                        priority_scores.append(1)
                 
                 df.insert(1, "Priority", priorities)
                 df.insert(2, "Touch_Count", touch_counts)
+                df.insert(3, "Priority_Score", priority_scores)  # Hidden column for sorting
             
             # Store in cache
             st.session_state['aa_df_cache'] = df.copy()
             st.session_state['aa_cache_key'] = cache_key
 
-        # Selection controls
-        select_all = st.checkbox("Pilih semua yang ditampilkan", key="aa_select_all")
-        if "Selected" not in df.columns:
-            df.insert(0, "Selected", bool(select_all))
-        else:
-            try:
-                df["Selected"] = bool(select_all)
-            except Exception:
-                pass
-        st.caption(f"Menampilkan {len(df)} baris kandidat untuk assignment Agent")
+        # Display available case count
+        total_available = len(df)
+        st.markdown(f"### 📊 {total_available:,} case tersedia untuk assignment")
         
         # Show priority legend
         st.markdown("""
         **Prioritas Assignment:** 🔴 High (0-1x handled) → 🟡 Medium (2-3x) → 🟢 Low (4+ handled)  
-        💡 System otomatis prioritaskan case dengan touch count paling sedikit
+        💡 Sistem otomatis pilih case dengan prioritas tertinggi (touch count paling sedikit)
         """)
         
-        try:
-            edited = st.data_editor(
-                df,
+        # Show preview of available cases (without checkboxes)
+        with st.expander("📋 Preview Available Cases (Read-only)", expanded=False):
+            st.caption(f"Menampilkan {min(100, len(df))} case teratas yang tersedia")
+            # Display preview without Selection column
+            preview_df = df.head(100).copy()
+            # Hide Priority_Score column (internal use only)
+            display_cols = [c for c in preview_df.columns if c != 'Priority_Score' and c != 'id']
+            st.dataframe(
+                preview_df[display_cols],
                 use_container_width=True,
                 hide_index=True,
-                disabled=False,
-                key="aa_data_editor",
                 column_config={
-                    "Selected": st.column_config.CheckboxColumn("Selected", default=select_all),
-                    "Priority": st.column_config.TextColumn("Priority", disabled=True, width="small", help="Prioritas berdasarkan jumlah penanganan"),
-                    "Touch_Count": st.column_config.NumberColumn("Handled", disabled=True, width="small", help="Berapa kali case ini sudah di-handle"),
-                    "Case_ID": st.column_config.TextColumn("Case_ID", disabled=True),
-                    "Customer_name": st.column_config.TextColumn("Customer", disabled=True),
-                    "NIK_KTP": st.column_config.TextColumn("NIK", disabled=True),
-                    "DPD": st.column_config.TextColumn("DPD", disabled=True),
-                    "Phone_Number_1": st.column_config.TextColumn("Phone 1", disabled=True),
-                    "Phone_Number_2": st.column_config.TextColumn("Phone 2", disabled=True),
-                    "Lending_Entity": st.column_config.TextColumn("Lending Entity", disabled=True),
-                    "Principle_Outstanding": st.column_config.TextColumn("Hutang (PO)", disabled=True, width="medium", help="Total Principle Outstanding"),
-                    "EMPLOYMENT_UPDATE": st.column_config.TextColumn("Employment Update", disabled=True),
-                    "EMPLOYER": st.column_config.TextColumn("Employer", disabled=True),
-                    "STATUS": st.column_config.TextColumn("STATUS", disabled=True),
-                    "REGISTERED_PHONE": st.column_config.TextColumn("REGISTERED PHONE", disabled=True),
-                    "Additional_Contacts": st.column_config.TextColumn("Remarks", disabled=True),
-                    "Remarks_Suggested_NIK_Prospect": st.column_config.TextColumn("Suggested NIK", disabled=True),
-                    "Payment": st.column_config.TextColumn("Payment", disabled=True),
-                    "Paid_Off_Status": st.column_config.TextColumn("Paid Off Status", disabled=True),
-                },
-                num_rows="fixed"
+                    "Priority": st.column_config.TextColumn("Priority", width="small", help="Prioritas berdasarkan jumlah penanganan"),
+                    "Touch_Count": st.column_config.NumberColumn("Handled", width="small", help="Berapa kali case ini sudah di-handle"),
+                    "Case_ID": st.column_config.TextColumn("Case_ID"),
+                    "Customer_name": st.column_config.TextColumn("Customer"),
+                    "NIK_KTP": st.column_config.TextColumn("NIK"),
+                    "DPD": st.column_config.TextColumn("DPD"),
+                    "Phone_Number_1": st.column_config.TextColumn("Phone 1"),
+                    "Phone_Number_2": st.column_config.TextColumn("Phone 2"),
+                    "Lending_Entity": st.column_config.TextColumn("Lending Entity"),
+                    "Principle_Outstanding": st.column_config.TextColumn("Hutang (PO)", width="medium", help="Total Principle Outstanding"),
+                    "EMPLOYMENT_UPDATE": st.column_config.TextColumn("Employment Update"),
+                    "EMPLOYER": st.column_config.TextColumn("Employer"),
+                }
             )
-        except Exception:
-            edited = df
-            st.dataframe(df, use_container_width=True, hide_index=True)
-
-        try:
-            selected_rows = edited[edited["Selected"] == True]
-        except Exception:
-            selected_rows = _pd.DataFrame(columns=df.columns)
 
         # OPTIMIZED: Cache agent list in session state
         if 'agent_list_cache' not in st.session_state or st.session_state.get('refresh_agent_list', False):
@@ -9908,240 +9897,202 @@ def page_supervisor():
         
         agents = st.session_state['agent_list_cache']
 
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown("#### Assign ke satu Agent")
-            sel_agent = st.selectbox("Pilih agent", options= agents, index=0, key="aa_single_agent")
-            btn_single = st.button("Assign ke agent ini", type="primary", key="aa_btn_single")
-            if btn_single:
-                if not len(selected_rows):
-                    st.warning("Pilih minimal satu baris dahulu.")
-                else:
-                    try:
-                        u = current_user() or {}
-                        by = (u.get('full_name') or u.get('login_id') or '-')
-                        frozen_skips = 0
-                        already_tracer = 0
-                        assigned = 0
-                        for _, r in selected_rows.iterrows():
-                            agr = str(r.get('Case_ID') or '').strip()
+        st.markdown("---")
+        st.markdown("### 🎯 Auto Assignment Configuration")
+        st.caption("Tentukan agent dan jumlah case yang akan diterima. Sistem akan otomatis memilih case terbaik berdasarkan prioritas.")
+        
+        # Initialize session state for dynamic agent allocations
+        if 'agent_allocations' not in st.session_state:
+            st.session_state['agent_allocations'] = []
+        
+        # Add Agent Allocation Form
+        st.markdown("#### ➕ Tambah Agent & Alokasi")
+        col_agent, col_count, col_btn = st.columns([2, 1, 1])
+        with col_agent:
+            new_agent = st.selectbox("Pilih Agent", options=agents, key="aa_new_agent")
+        with col_count:
+            new_count = st.number_input("Jumlah Case", min_value=1, max_value=1000, value=10, step=10, key="aa_new_count")
+        with col_btn:
+            st.markdown("<div style='margin-top: 25px;'></div>", unsafe_allow_html=True)
+            if st.button("➕ Tambah", key="aa_add_allocation"):
+                st.session_state['agent_allocations'].append({
+                    'agent': new_agent,
+                    'count': new_count
+                })
+                st.rerun()
+        
+        # Display Current Allocations
+        if st.session_state['agent_allocations']:
+            st.markdown("---")
+            st.markdown("#### 📋 Daftar Agent & Alokasi")
+            
+            total_cases_to_assign = sum([a['count'] for a in st.session_state['agent_allocations']])
+            
+            # Show summary metrics
+            metric_col1, metric_col2, metric_col3 = st.columns(3)
+            with metric_col1:
+                st.metric("Total Agent", len(st.session_state['agent_allocations']))
+            with metric_col2:
+                st.metric("Total Case akan di-assign", f"{total_cases_to_assign:,}")
+            with metric_col3:
+                st.metric("Case Tersedia", f"{total_available:,}")
+            
+            # Show allocation table with delete buttons
+            for idx, allocation in enumerate(st.session_state['agent_allocations']):
+                col1, col2, col3 = st.columns([2, 1, 0.5])
+                with col1:
+                    st.markdown(f"**{allocation['agent']}**")
+                with col2:
+                    st.markdown(f"{allocation['count']:,} case")
+                with col3:
+                    if st.button("🗑️", key=f"aa_delete_{idx}", help="Hapus alokasi ini"):
+                        st.session_state['agent_allocations'].pop(idx)
+                        st.rerun()
+            
+            st.markdown("---")
+            
+            # Validation warnings
+            if total_cases_to_assign > total_available:
+                st.warning(f"⚠️ Total case yang diminta ({total_cases_to_assign:,}) melebihi case tersedia ({total_available:,}). Sistem akan assign sebanyak mungkin.")
+            
+            # Main Assignment Button
+            col_btn1, col_btn2 = st.columns([1, 1])
+            with col_btn1:
+                btn_execute = st.button("🚀 Execute Auto Assignment", type="primary", key="aa_execute", 
+                                       help="Sistem akan otomatis pilih case terbaik dan assign ke agent sesuai alokasi")
+            with col_btn2:
+                if st.button("🗑️ Clear Semua Alokasi", key="aa_clear_all"):
+                    st.session_state['agent_allocations'] = []
+                    st.rerun()
+            
+            if btn_execute:
+                try:
+                    u = current_user() or {}
+                    by = (u.get('full_name') or u.get('login_id') or '-')
+                    
+                    # Sort dataframe by priority (High first) and touch count (ascending)
+                    if not df.empty:
+                        df_sorted = df.sort_values(['Priority_Score', 'Touch_Count'], ascending=[True, True]).reset_index(drop=True)
+                    else:
+                        st.error("Tidak ada case tersedia untuk assignment.")
+                        st.stop()
+                    
+                    # Execute assignment for each agent allocation
+                    assignment_results = []
+                    total_assigned = 0
+                    total_frozen = 0
+                    total_already_tracer = 0
+                    total_rotation_blocked = 0
+                    case_idx = 0  # Track position in sorted case list
+                    
+                    for allocation in st.session_state['agent_allocations']:
+                        agent_name = allocation['agent']
+                        target_count = allocation['count']
+                        
+                        assigned_count = 0
+                        frozen_count = 0
+                        already_tracer_count = 0
+                        rotation_blocked_count = 0
+                        
+                        # Try to assign target_count cases to this agent
+                        while assigned_count < target_count and case_idx < len(df_sorted):
+                            row = df_sorted.iloc[case_idx]
+                            case_idx += 1
+                            
+                            agr = str(row.get('Case_ID') or '').strip()
                             if not agr:
                                 continue
-                            # Freeze check by Agreement_No
+                            
+                            # Check frozen by Agreement_No
                             try:
                                 if is_frozen_by_agreement(agr):
-                                    frozen_skips += 1
+                                    frozen_count += 1
                                     continue
                             except Exception:
                                 pass
+                            
                             # Check if already assigned to tracer
                             try:
                                 conn_check = get_db()
                                 cur = conn_check.cursor()
                                 cur.execute("SELECT COUNT(*) as cnt FROM assign_tracer WHERE Agreement_No=? AND IFNULL(Assigned_To,'')!=''", (agr,))
                                 if cur.fetchone()['cnt'] > 0:
-                                    already_tracer += 1
+                                    already_tracer_count += 1
                                     conn_check.close()
                                     continue
                                 conn_check.close()
                             except Exception:
                                 pass
                             
-                            # Use new assignment system with rotation
-                            success, msg = assign_case_to_agent(agr, sel_agent, by)
+                            # Try to assign using rotation system
+                            success, msg = assign_case_to_agent(agr, agent_name, by)
                             if success:
-                                assigned += 1
+                                assigned_count += 1
                             else:
-                                # Count specific rejection reasons
                                 if "frozen" in msg.lower():
-                                    frozen_skips += 1
-                                
-                        # Audit
-                        try:
-                            execute(
-                                "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
-                                (u.get('id') if u else None, "AGENT_ASSIGN_FROM_SUP_TABLE", f"Assigned {assigned} to {sel_agent}; frozen: {frozen_skips}; already_tracer: {already_tracer}")
-                            )
-                        except Exception:
-                            pass
-                        st.success(f"✅ Berhasil assign: {assigned} case. ❄️ Frozen: {frozen_skips}. 🔍 Sudah di tracer: {already_tracer}.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Gagal assign: {e}")
-
-        with c2:
-            st.markdown("#### Distribusi Seimbang ke beberapa Agent")
-            st.caption("⚖️ Distribusi berdasarkan keseimbangan jumlah case DAN total hutang (Principle Outstanding)")
-            sel_agents = st.multiselect("Pilih beberapa agent", options=agents, key="aa_multi_agents")
-            btn_multi = st.button("Balanced Distribution (by Outstanding)", key="aa_btn_multi", type="primary")
-            if btn_multi:
-                if not len(selected_rows):
-                    st.warning("Pilih minimal satu baris dahulu.")
-                elif not sel_agents:
-                    st.warning("Pilih minimal satu agent.")
-                else:
+                                    frozen_count += 1
+                                elif "handle dulu" in msg.lower() or "rotation" in msg.lower():
+                                    rotation_blocked_count += 1
+                        
+                        # Record results for this agent
+                        assignment_results.append({
+                            'Agent': agent_name,
+                            'Target': target_count,
+                            'Assigned': assigned_count,
+                            'Frozen': frozen_count,
+                            'Already_Tracer': already_tracer_count,
+                            'Rotation_Blocked': rotation_blocked_count
+                        })
+                        
+                        total_assigned += assigned_count
+                        total_frozen += frozen_count
+                        total_already_tracer += already_tracer_count
+                        total_rotation_blocked += rotation_blocked_count
+                    
+                    # Display results
+                    st.markdown("---")
+                    st.markdown("### ✅ Assignment Completed!")
+                    
+                    # Summary metrics
+                    sum_col1, sum_col2, sum_col3, sum_col4 = st.columns(4)
+                    with sum_col1:
+                        st.metric("✅ Total Assigned", f"{total_assigned:,}")
+                    with sum_col2:
+                        st.metric("❄️ Frozen", f"{total_frozen:,}")
+                    with sum_col3:
+                        st.metric("🔍 Already Tracer", f"{total_already_tracer:,}")
+                    with sum_col4:
+                        st.metric("🔄 Rotation Blocked", f"{total_rotation_blocked:,}")
+                    
+                    # Detailed results table
+                    results_df = pd.DataFrame(assignment_results)
+                    st.markdown("#### 📊 Hasil Assignment per Agent")
+                    st.dataframe(results_df, use_container_width=True, hide_index=True)
+                    
+                    # Audit log
                     try:
-                        import random as _rand
-                        u = current_user() or {}
-                        by = (u.get('full_name') or u.get('login_id') or '-')
-                        
-                        # Prepare case list with principle outstanding
-                        cases_with_po = []
-                        for _, r in selected_rows.iterrows():
-                            agr = str(r.get('Case_ID') or '').strip()
-                            if not agr:
-                                continue
-                            
-                            # Get principle outstanding (hutang)
-                            po_str = str(r.get('Principle_Outstanding', '0') or '0').strip()
-                            try:
-                                # Clean string: remove currency symbols, commas, etc.
-                                po_clean = ''.join(c for c in po_str if c.isdigit() or c == '.')
-                                po_value = float(po_clean) if po_clean else 0.0
-                            except Exception:
-                                po_value = 0.0
-                            
-                            cases_with_po.append({
-                                'case_id': agr,
-                                'po': po_value,
-                                'row': r
-                            })
-                        
-                        # Sort cases by principle outstanding DESC (largest first)
-                        # This helps balance distribution better
-                        cases_with_po.sort(key=lambda x: x['po'], reverse=True)
-                        
-                        # Pre-filter: Remove frozen and already assigned to tracer
-                        valid_cases = []
-                        frozen_skips = 0
-                        already_tracer = 0
-                        
-                        for case_data in cases_with_po:
-                            agr = case_data['case_id']
-                            
-                            # Check frozen
-                            try:
-                                if is_frozen_by_agreement(agr):
-                                    frozen_skips += 1
-                                    continue
-                            except Exception:
-                                pass
-                            
-                            # Check if already assigned to tracer
-                            try:
-                                conn_check2 = get_db()
-                                cur = conn_check2.cursor()
-                                cur.execute("SELECT COUNT(*) as cnt FROM assign_tracer WHERE Agreement_No=? AND IFNULL(Assigned_To,'')!=''", (agr,))
-                                if cur.fetchone()['cnt'] > 0:
-                                    already_tracer += 1
-                                    conn_check2.close()
-                                    continue
-                                conn_check2.close()
-                            except Exception:
-                                pass
-                            
-                            valid_cases.append(case_data)
-                        
-                        # Initialize agent workload tracking
-                        agent_workload = {agent: {'count': 0, 'total_po': 0.0, 'cases': []} for agent in sel_agents}
-                        
-                        # Statistics tracking
-                        assigned = 0
-                        rotation_blocked = 0
-                        
-                        # BALANCED DISTRIBUTION ALGORITHM - ROUND ROBIN WITH SNAKE PATTERN
-                        # Snake pattern: Agent1, Agent2, Agent2, Agent1 to balance large PO values
-                        # Example with 200 cases sorted DESC by PO:
-                        # Agent1 gets: #1(largest), #4, #5, #8, #9... (alternating)
-                        # Agent2 gets: #2, #3, #6, #7... (alternating)
-                        
-                        agent_idx = 0
-                        direction = 1  # 1 = forward, -1 = backward
-                        
-                        for i, case_data in enumerate(valid_cases):
-                            agr = case_data['case_id']
-                            po = case_data['po']
-                            
-                            # Get current agent
-                            target_agent = sel_agents[agent_idx]
-                            
-                            # Try to assign
-                            success, msg = assign_case_to_agent(agr, target_agent, by)
-                            if success:
-                                assigned += 1
-                                agent_workload[target_agent]['count'] += 1
-                                agent_workload[target_agent]['total_po'] += po
-                                agent_workload[target_agent]['cases'].append(agr)
-                            else:
-                                if "frozen" in msg.lower():
-                                    frozen_skips += 1
-                                elif "handle dulu" in msg.lower():
-                                    rotation_blocked += 1
-                            
-                            # Move to next agent (round-robin)
-                            agent_idx += direction
-                            
-                            # Reverse direction at boundaries (snake pattern)
-                            if agent_idx >= len(sel_agents):
-                                agent_idx = len(sel_agents) - 1
-                                direction = -1
-                            elif agent_idx < 0:
-                                agent_idx = 0
-                                direction = 1
-                        
-                        # Show distribution summary
-                        st.markdown("---")
-                        st.markdown("### 📊 Hasil Distribusi Seimbang")
-                        
-                        summary_data = []
-                        for agent, wl in agent_workload.items():
-                            summary_data.append({
-                                'Agent': agent,
-                                'Jumlah Case': wl['count'],
-                                'Total Hutang (PO)': f"Rp {wl['total_po']:,.0f}",
-                                'Rata-rata per Case': f"Rp {(wl['total_po'] / wl['count']):,.0f}" if wl['count'] > 0 else "Rp 0"
-                            })
-                        
-                        summary_df = pd.DataFrame(summary_data)
-                        st.dataframe(summary_df, use_container_width=True, hide_index=True)
-                        
-                        # Calculate balance metrics
-                        case_counts = [wl['count'] for wl in agent_workload.values()]
-                        po_totals = [wl['total_po'] for wl in agent_workload.values()]
-                        
-                        if case_counts and max(case_counts) > 0:
-                            case_variance = max(case_counts) - min(case_counts)
-                            po_variance = max(po_totals) - min(po_totals)
-                            
-                            col1, col2, col3 = st.columns(3)
-                            with col1:
-                                st.metric("📈 Variance Case", f"{case_variance} case", 
-                                         help="Selisih jumlah case terbanyak - tersedikit")
-                            with col2:
-                                st.metric("💰 Variance Hutang", f"Rp {po_variance:,.0f}",
-                                         help="Selisih total hutang terbesar - terkecil")
-                            with col3:
-                                balance_score = "⭐⭐⭐ Excellent" if po_variance < (sum(po_totals)/len(po_totals) * 0.1) else \
-                                              "⭐⭐ Good" if po_variance < (sum(po_totals)/len(po_totals) * 0.2) else \
-                                              "⭐ Fair"
-                                st.metric("⚖️ Balance Score", balance_score,
-                                         help="Excellent: variance < 10% avg | Good: < 20% avg")
-                        
-                        # Audit
-                        try:
-                            summary_str = " | ".join([f"{a}: {wl['count']} case (Rp {wl['total_po']:,.0f})" 
-                                                     for a, wl in agent_workload.items()])
-                            execute(
-                                "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
-                                (u.get('id') if u else None, "AGENT_ASSIGN_BALANCED_FROM_SUP_TABLE", 
-                                 f"Assigned {assigned} among {len(sel_agents)} agents (BALANCED); frozen: {frozen_skips}; tracer: {already_tracer}; rotation_blocked: {rotation_blocked}; Distribution: {summary_str}")
-                            )
-                        except Exception:
-                            pass
-                        st.success(f"✅ Berhasil assign: {assigned} case. ❄️ Frozen: {frozen_skips}. 🔍 Sudah di tracer: {already_tracer}. 🔄 Rotation blocked: {rotation_blocked}.")
+                        summary_str = " | ".join([f"{r['Agent']}: {r['Assigned']}/{r['Target']}" for r in assignment_results])
+                        execute(
+                            "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                            (u.get('id') if u else None, "AUTO_AGENT_ASSIGN", 
+                             f"Auto-assigned {total_assigned} cases to {len(st.session_state['agent_allocations'])} agents. Frozen: {total_frozen}, Tracer: {total_already_tracer}, Rotation: {total_rotation_blocked}. Details: {summary_str}")
+                        )
+                    except Exception:
+                        pass
+                    
+                    # Clear allocations and rerun
+                    st.session_state['agent_allocations'] = []
+                    st.success(f"🎉 Assignment berhasil! Total {total_assigned:,} case berhasil di-assign.")
+                    
+                    if st.button("🔄 Refresh Page", type="primary"):
                         st.rerun()
-                    except Exception as e:
-                        st.error(f"Gagal melakukan distribusi: {e}")
+                    
+                except Exception as e:
+                    st.error(f"❌ Error saat melakukan assignment: {e}")
+                    import traceback
+                    st.code(traceback.format_exc())
+        else:
+            st.info("💡 Tambahkan agent dan alokasi case menggunakan form di atas untuk memulai auto-assignment.")
         
 
     # --- Freeze Manager Tab ---
