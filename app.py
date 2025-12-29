@@ -10266,21 +10266,27 @@ def page_supervisor():
             st.session_state['agent_allocations'] = []
         
         # Add Agent Allocation Form
+        # IMPORTANT: Wrap in st.form so that changing dropdown / number input
+        # TIDAK memicu rerun (dan loading). Rerun hanya terjadi saat tombol
+        # "➕ Tambah" ditekan.
         st.markdown("#### ➕ Tambah Agent & Alokasi")
-        col_agent, col_count, col_btn = st.columns([2, 1, 1])
-        with col_agent:
-            # Use pre-loaded cached data (no loading on dropdown interaction)
-            new_agent = st.selectbox("Pilih Agent", options=cached_agents, key="aa_new_agent")
-        with col_count:
-            new_count = st.number_input("Jumlah Case", min_value=1, max_value=1000, value=10, step=10, key="aa_new_count")
-        with col_btn:
-            st.markdown("<div style='margin-top: 25px;'></div>", unsafe_allow_html=True)
-            if st.button("➕ Tambah", key="aa_add_allocation"):
+        with st.form("aa_add_agent_allocation_form", clear_on_submit=False):
+            col_agent, col_count, col_btn = st.columns([2, 1, 1])
+            with col_agent:
+                # Use pre-loaded cached data (no loading on dropdown interaction)
+                new_agent = st.selectbox("Pilih Agent", options=cached_agents, key="aa_new_agent")
+            with col_count:
+                new_count = st.number_input("Jumlah Case", min_value=1, max_value=1000, value=10, step=10, key="aa_new_count")
+            with col_btn:
+                st.markdown("<div style='margin-top: 25px;'></div>", unsafe_allow_html=True)
+                submit_add = st.form_submit_button("➕ Tambah")
+
+            # Handle form submit
+            if submit_add and new_agent:
                 st.session_state['agent_allocations'].append({
                     'agent': new_agent,
                     'count': new_count
                 })
-                st.rerun()
         
         # Display Current Allocations
         if st.session_state['agent_allocations']:
