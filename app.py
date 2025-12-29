@@ -10258,6 +10258,9 @@ def page_supervisor():
         st.markdown("### 🎯 Auto Assignment Configuration")
         st.caption("Tentukan agent dan jumlah case yang akan diterima. Sistem akan otomatis memilih case terbaik berdasarkan prioritas.")
         
+        # CRITICAL: Pre-load cached data BEFORE any UI elements to prevent loading on dropdown interaction
+        cached_agents = get_cached_active_agents()
+        
         # Initialize session state for dynamic agent allocations
         if 'agent_allocations' not in st.session_state:
             st.session_state['agent_allocations'] = []
@@ -10266,8 +10269,7 @@ def page_supervisor():
         st.markdown("#### ➕ Tambah Agent & Alokasi")
         col_agent, col_count, col_btn = st.columns([2, 1, 1])
         with col_agent:
-            # Use cached version to prevent loading on dropdown interaction
-            cached_agents = get_cached_active_agents()
+            # Use pre-loaded cached data (no loading on dropdown interaction)
             new_agent = st.selectbox("Pilih Agent", options=cached_agents, key="aa_new_agent")
         with col_count:
             new_count = st.number_input("Jumlah Case", min_value=1, max_value=1000, value=10, step=10, key="aa_new_count")
@@ -11090,6 +11092,10 @@ def page_supervisor():
             st.markdown("#### 📊 Enriched Monitoring")
             st.caption("Gabungan data dari multiple tables untuk monitoring komprehensif")
             
+            # CRITICAL: Pre-load ALL cached data BEFORE filter UI to prevent loading on dropdown interaction
+            cached_tracers = get_cached_active_tracers()
+            cached_all_agents = get_cached_all_agents_and_supervisors()
+            
             # Enhanced Filters - Row 1
             fcol1, fcol2, fcol3, fcol4 = st.columns(4)
             with fcol1:
@@ -11097,12 +11103,10 @@ def page_supervisor():
             with fcol2:
                 f_nik = st.text_input("🆔 NIK", key="en_nik", placeholder="Search...")
             with fcol3:
-                # Use cached tracers to prevent loading
-                cached_tracers = get_cached_active_tracers()
+                # Use pre-loaded cached data (no loading on dropdown interaction)
                 f_tracer = st.selectbox("👤 Tracer", options=["(All)"] + cached_tracers, index=0, key="en_tracer")
             with fcol4:
-                # Use cached agents to prevent loading
-                cached_all_agents = get_cached_all_agents_and_supervisors()
+                # Use pre-loaded cached data (no loading on dropdown interaction)
                 f_agent = st.selectbox("🎯 Agent", options=["(All)"] + cached_all_agents, index=0, key="en_agent")
 
             # Enhanced Filters - Row 2
