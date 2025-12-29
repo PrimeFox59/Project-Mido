@@ -1796,6 +1796,61 @@ def get_all_active_agents():
     except Exception:
         return []
 
+@st.cache_data(ttl=300)
+def get_cached_active_agents():
+    """Cached version of get_all_active_agents to prevent loading on dropdown interaction.
+    Cache expires after 5 minutes (300 seconds).
+    """
+    return get_all_active_agents()
+
+@st.cache_data(ttl=300)
+def get_cached_lending_entities():
+    """Get unique Lending Entities from supervisor_data (cached).
+    Cache expires after 5 minutes (300 seconds).
+    """
+    try:
+        rows = fetchall("""
+            SELECT DISTINCT Lending_Entity 
+            FROM supervisor_data 
+            WHERE Lending_Entity IS NOT NULL AND TRIM(Lending_Entity) != ''
+            ORDER BY Lending_Entity
+        """)
+        return [r['Lending_Entity'] for r in rows if r.get('Lending_Entity')]
+    except Exception:
+        return []
+
+@st.cache_data(ttl=300)
+def get_cached_active_tracers():
+    """Get list of all active tracers/supervisors (cached).
+    Cache expires after 5 minutes (300 seconds).
+    """
+    try:
+        rows = fetchall("""
+            SELECT DISTINCT COALESCE(full_name, name) AS full_name 
+            FROM users 
+            WHERE approved=1 AND role IN ('Tracer', 'Superuser', 'Supervisor') 
+            ORDER BY 1
+        """)
+        return [r['full_name'] for r in rows if r.get('full_name')]
+    except Exception:
+        return []
+
+@st.cache_data(ttl=300)
+def get_cached_all_agents_and_supervisors():
+    """Get list of all agents and supervisors (cached).
+    Cache expires after 5 minutes (300 seconds).
+    """
+    try:
+        rows = fetchall("""
+            SELECT DISTINCT COALESCE(full_name, name) AS full_name 
+            FROM users 
+            WHERE approved=1 AND role IN ('Agent', 'Superuser', 'Supervisor') 
+            ORDER BY 1
+        """)
+        return [r['full_name'] for r in rows if r.get('full_name')]
+    except Exception:
+        return []
+
 def get_agent_allowed_dts(user_id: int) -> list:
     """Get list of allowed DTs (Lending Entities) for an agent.
     
@@ -10211,7 +10266,9 @@ def page_supervisor():
         st.markdown("#### ➕ Tambah Agent & Alokasi")
         col_agent, col_count, col_btn = st.columns([2, 1, 1])
         with col_agent:
-            new_agent = st.selectbox("Pilih Agent", options=agents, key="aa_new_agent")
+            # Use cached version to prevent loading on dropdown interaction
+            cached_agents = get_cached_active_agents()
+            new_agent = st.selectbox("Pilih Agent", options=cached_agents, key="aa_new_agent")
         with col_count:
             new_count = st.number_input("Jumlah Case", min_value=1, max_value=1000, value=10, step=10, key="aa_new_count")
         with col_btn:
@@ -11040,13 +11097,13 @@ def page_supervisor():
             with fcol2:
                 f_nik = st.text_input("🆔 NIK", key="en_nik", placeholder="Search...")
             with fcol3:
-                # Get tracer list
-                tracers = [r['full_name'] for r in fetchall("SELECT DISTINCT COALESCE(full_name,name) AS full_name FROM users WHERE approved=1 AND role IN ('Tracer', 'Superuser', 'Supervisor') ORDER BY 1") if r.get('full_name')]
-                f_tracer = st.selectbox("👤 Tracer", options=["(All)"] + tracers, index=0, key="en_tracer")
+                # Use cached tracers to prevent loading
+                cached_tracers = get_cached_active_tracers()
+                f_tracer = st.selectbox("👤 Tracer", options=["(All)"] + cached_tracers, index=0, key="en_tracer")
             with fcol4:
-                # Get agent list
-                agents = [r['full_name'] for r in fetchall("SELECT DISTINCT COALESCE(full_name,name) AS full_name FROM users WHERE approved=1 AND role IN ('Agent', 'Superuser', 'Supervisor') ORDER BY 1") if r.get('full_name')]
-                f_agent = st.selectbox("🎯 Agent", options=["(All)"] + agents, index=0, key="en_agent")
+                # Use cached agents to prevent loading
+                cached_all_agents = get_cached_all_agents_and_supervisors()
+                f_agent = st.selectbox("🎯 Agent", options=["(All)"] + cached_all_agents, index=0, key="en_agent")
 
             # Enhanced Filters - Row 2
             fcol5, fcol6, fcol7, fcol8 = st.columns(4)
