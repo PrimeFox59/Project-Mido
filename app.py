@@ -9858,22 +9858,52 @@ def page_supervisor():
             
             # Get current prioritized batch from settings
             current_prioritized = get_setting('akulaku_prioritized_batch', '')
-            batch_options = ['-- No Prioritization --'] + batch_codes
+            
+            # Get minimum OS for each batch code
+            batch_os_map = {}
+            for batch in batch_codes:
+                min_os_result = fetchone(
+                    "SELECT MIN(CAST(Principle_Outstanding AS REAL)) as min_os FROM supervisor_data WHERE Lending_Entity='AkuLaku' AND Date=?",
+                    (batch,)
+                )
+                min_os = min_os_result.get('min_os') if min_os_result else None
+                batch_os_map[batch] = min_os
+            
+            # Format batch options with minimum OS info
+            batch_options = ['-- No Prioritization --']
+            batch_display_to_actual = {'-- No Prioritization --': '-- No Prioritization --'}
+            
+            for batch in batch_codes:
+                min_os = batch_os_map.get(batch)
+                if min_os is not None:
+                    display_text = f"{batch} (Min OS: Rp {min_os:,.0f})"
+                else:
+                    display_text = f"{batch} (Min OS: N/A)"
+                batch_options.append(display_text)
+                batch_display_to_actual[display_text] = batch
+            
+            # Find default index
             default_idx = 0
-            if current_prioritized and current_prioritized in batch_codes:
-                default_idx = batch_codes.index(current_prioritized) + 1
+            if current_prioritized:
+                for idx, display_text in enumerate(batch_options):
+                    if batch_display_to_actual.get(display_text) == current_prioritized:
+                        default_idx = idx
+                        break
             
             # Wrap in form to prevent loading on dropdown change
             with st.form("form_prioritized_batch", clear_on_submit=False):
                 col_batch1, col_batch2 = st.columns([3, 1])
                 with col_batch1:
-                    selected_prioritized_batch = st.selectbox(
+                    selected_display = st.selectbox(
                         "Select Prioritized Batch",
                         options=batch_options,
                         index=default_idx,
                         key="akulaku_prioritized_batch_select",
-                        help="Batch code yang hanya bisa diambil oleh Priority_1 agents"
+                        help="Batch code yang hanya bisa diambil oleh Priority_1 agents. Menampilkan minimum Outstanding Saldo (OS) per batch."
                     )
+                    
+                    # Get actual batch code from display text
+                    selected_prioritized_batch = batch_display_to_actual.get(selected_display, '-- No Prioritization --')
                 
                 with col_batch2:
                     st.markdown("<div style='margin-top: 25px;'></div>", unsafe_allow_html=True)
