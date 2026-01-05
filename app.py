@@ -1869,6 +1869,23 @@ def get_cached_akulaku_batch_codes():
     except Exception:
         return []
 
+@st.cache_data(ttl=300)
+def get_cached_current_agent_tiers():
+    """Get current agent tiers (cached)."""
+    try:
+        rows = fetchall(
+            """
+            SELECT u.id, COALESCE(u.full_name, u.name, u.login_id) AS agent_name, at.tier
+            FROM users u
+            LEFT JOIN agent_tiers at ON u.id = at.user_id
+            WHERE u.role = 'Agent' AND u.approved = 1
+            ORDER BY at.tier, agent_name
+            """
+        )
+        return rows
+    except Exception:
+        return []
+
 def get_agent_allowed_dts(user_id: int) -> list:
     """Get list of allowed DTs (Lending Entities) for an agent.
     
@@ -9830,11 +9847,10 @@ def page_supervisor():
             st.markdown("### 🎖️ Agent Tier Configuration")
             st.caption("Atur tier agent untuk kontrol akses batch AkuLaku. Priority_2 tidak bisa akses prioritized batch.")
             
-            # Get all agents (cached)
+            # Pre-load cached data (hindari loading di dropdown)
             agents_list = get_cached_active_agents()
-            
-            # Get all unique batch codes (cached)
             batch_codes = get_cached_akulaku_batch_codes()
+            current_tiers_cached = get_cached_current_agent_tiers()
             
             # Prioritized Batch Dropdown
             st.markdown("#### 📅 Prioritized Batch Code")
@@ -9877,26 +9893,17 @@ def page_supervisor():
             # Agent Tier Management
             st.markdown("#### 👥 Set Agent Tiers")
             
-            # Show current tier assignments
+            # Show current tier assignments (cached)
             try:
-                current_tiers = fetchall("""
-                    SELECT u.id, COALESCE(u.full_name, u.name, u.login_id) as agent_name, at.tier
-                    FROM users u
-                    LEFT JOIN agent_tiers at ON u.id = at.user_id
-                    WHERE u.role = 'Agent' AND u.approved = 1
-                    ORDER BY at.tier, agent_name
-                """)
-                
-                if current_tiers:
+                if current_tiers_cached:
                     st.markdown("**Current Agent Tiers:**")
                     tier_data = []
-                    for t in current_tiers:
+                    for t in current_tiers_cached:
                         tier_data.append({
                             'Agent': t.get('agent_name', ''),
                             'Tier': t.get('tier', 'Not Set'),
                             'Access to Prioritized': '✅ Yes' if t.get('tier') == 'Priority_1' else '❌ No' if t.get('tier') in ['Priority_2', 'Priority_3'] else '✅ Yes (No tier)'
                         })
-                    
                     tier_df = pd.DataFrame(tier_data)
                     st.dataframe(tier_df, use_container_width=True, hide_index=True)
             except Exception as e:
@@ -9905,7 +9912,7 @@ def page_supervisor():
             st.markdown("---")
             
             # Set/Update Agent Tier Form
-            # Dibungkus form agar perubahan dropdown tidak memicu rerun; hanya klik "Update Tier" yang rerun
+            # Pola sama dengan Auto Assignment: pre-load, form, rerun hanya saat submit
             with st.form("form_set_agent_tier", clear_on_submit=False):
                 col_agent, col_tier, col_btn = st.columns([2, 1.5, 1])
                 with col_agent:
@@ -9945,6 +9952,8 @@ def page_supervisor():
                             )
                         except Exception:
                             pass
+                        # Clear caches that depend on tiers
+                        get_cached_current_agent_tiers.clear()
                         st.rerun()
                     else:
                         st.error(f"❌ {msg}")
