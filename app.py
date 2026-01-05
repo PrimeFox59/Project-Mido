@@ -9856,33 +9856,37 @@ def page_supervisor():
             st.markdown("#### 📅 Prioritized Batch Code")
             st.caption("Batch code yang diprioritaskan untuk Priority_1 agents. Priority_2 tidak bisa akses batch ini.")
             
-            col_batch1, col_batch2 = st.columns([3, 1])
-            with col_batch1:
-                # Get current prioritized batch from settings
-                current_prioritized = get_setting('akulaku_prioritized_batch', '')
-                
-                batch_options = ['-- No Prioritization --'] + batch_codes
-                default_idx = 0
-                if current_prioritized and current_prioritized in batch_codes:
-                    default_idx = batch_codes.index(current_prioritized) + 1
-                
-                selected_prioritized_batch = st.selectbox(
-                    "Select Prioritized Batch",
-                    options=batch_options,
-                    index=default_idx,
-                    key="akulaku_prioritized_batch_select",
-                    help="Batch code yang hanya bisa diambil oleh Priority_1 agents"
-                )
+            # Get current prioritized batch from settings
+            current_prioritized = get_setting('akulaku_prioritized_batch', '')
+            batch_options = ['-- No Prioritization --'] + batch_codes
+            default_idx = 0
+            if current_prioritized and current_prioritized in batch_codes:
+                default_idx = batch_codes.index(current_prioritized) + 1
             
-            with col_batch2:
-                st.markdown("<div style='margin-top: 25px;'></div>", unsafe_allow_html=True)
-                if st.button("💾 Save Batch", key="save_prioritized_batch"):
+            # Wrap in form to prevent loading on dropdown change
+            with st.form("form_prioritized_batch", clear_on_submit=False):
+                col_batch1, col_batch2 = st.columns([3, 1])
+                with col_batch1:
+                    selected_prioritized_batch = st.selectbox(
+                        "Select Prioritized Batch",
+                        options=batch_options,
+                        index=default_idx,
+                        key="akulaku_prioritized_batch_select",
+                        help="Batch code yang hanya bisa diambil oleh Priority_1 agents"
+                    )
+                
+                with col_batch2:
+                    st.markdown("<div style='margin-top: 25px;'></div>", unsafe_allow_html=True)
+                    submit_batch = st.form_submit_button("💾 Save Batch")
+                
+                if submit_batch:
                     if selected_prioritized_batch == '-- No Prioritization --':
                         set_setting('akulaku_prioritized_batch', '')
                         st.success("✅ Prioritized batch cleared")
                     else:
                         set_setting('akulaku_prioritized_batch', selected_prioritized_batch)
                         st.success(f"✅ Prioritized batch set to: {selected_prioritized_batch}")
+                    st.rerun()
                     st.rerun()
             
             if selected_prioritized_batch != '-- No Prioritization --':
