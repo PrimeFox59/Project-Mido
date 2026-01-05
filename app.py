@@ -1851,6 +1851,24 @@ def get_cached_all_agents_and_supervisors():
     except Exception:
         return []
 
+@st.cache_data(ttl=300)
+def get_cached_akulaku_batch_codes():
+    """Get distinct Assignment_Date for AkuLaku (cached)."""
+    try:
+        rows = fetchall(
+            """
+            SELECT DISTINCT Assignment_Date 
+            FROM supervisor_data 
+            WHERE Lending_Entity = 'AkuLaku' 
+              AND Assignment_Date IS NOT NULL 
+              AND Assignment_Date != ''
+            ORDER BY Assignment_Date DESC
+            """
+        )
+        return [r.get('Assignment_Date') for r in rows if r.get('Assignment_Date')]
+    except Exception:
+        return []
+
 def get_agent_allowed_dts(user_id: int) -> list:
     """Get list of allowed DTs (Lending Entities) for an agent.
     
@@ -9812,27 +9830,11 @@ def page_supervisor():
             st.markdown("### 🎖️ Agent Tier Configuration")
             st.caption("Atur tier agent untuk kontrol akses batch AkuLaku. Priority_2 tidak bisa akses prioritized batch.")
             
-            # Get all agents
-            if 'agent_list_cache' not in st.session_state or st.session_state.get('refresh_agent_list', False):
-                agents_raw = fetchall("SELECT id, COALESCE(full_name, name, login_id) AS n FROM users WHERE role='Agent' AND approved=1 ORDER BY n") or []
-                st.session_state['agent_list_cache'] = [a.get('n') for a in agents_raw if a.get('n') and str(a.get('n')).strip()]
-                st.session_state['refresh_agent_list'] = False
+            # Get all agents (cached)
+            agents_list = get_cached_active_agents()
             
-            agents_list = st.session_state['agent_list_cache']
-            
-            # Get all unique batch codes (Assignment_Date) for AkuLaku
-            try:
-                batch_codes_raw = fetchall("""
-                    SELECT DISTINCT Assignment_Date 
-                    FROM supervisor_data 
-                    WHERE Lending_Entity = 'AkuLaku' 
-                      AND Assignment_Date IS NOT NULL 
-                      AND Assignment_Date != ''
-                    ORDER BY Assignment_Date DESC
-                """)
-                batch_codes = [bc.get('Assignment_Date') for bc in batch_codes_raw if bc.get('Assignment_Date')]
-            except Exception:
-                batch_codes = []
+            # Get all unique batch codes (cached)
+            batch_codes = get_cached_akulaku_batch_codes()
             
             # Prioritized Batch Dropdown
             st.markdown("#### 📅 Prioritized Batch Code")
