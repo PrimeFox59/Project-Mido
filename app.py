@@ -9903,26 +9903,30 @@ def page_supervisor():
             st.markdown("---")
             
             # Set/Update Agent Tier Form
-            col_agent, col_tier, col_btn = st.columns([2, 1.5, 1])
-            with col_agent:
-                selected_agent_for_tier = st.selectbox(
-                    "Select Agent",
-                    options=agents_list,
-                    key="tier_agent_select"
-                )
-            
-            with col_tier:
-                tier_options = ['-- Remove Tier --', 'Priority_1', 'Priority_2', 'Priority_3', 'Priority_4']
-                selected_tier = st.selectbox(
-                    "Set Tier",
-                    options=tier_options,
-                    key="tier_select",
-                    help="Priority_1: Can access prioritized batch | Priority_2+: Cannot access prioritized batch"
-                )
-            
-            with col_btn:
-                st.markdown("<div style='margin-top: 25px;'></div>", unsafe_allow_html=True)
-                if st.button("💾 Update Tier", key="update_agent_tier"):
+            # Dibungkus form agar perubahan dropdown tidak memicu rerun; hanya klik "Update Tier" yang rerun
+            with st.form("form_set_agent_tier", clear_on_submit=False):
+                col_agent, col_tier, col_btn = st.columns([2, 1.5, 1])
+                with col_agent:
+                    selected_agent_for_tier = st.selectbox(
+                        "Select Agent",
+                        options=agents_list,
+                        key="tier_agent_select"
+                    )
+                
+                with col_tier:
+                    tier_options = ['-- Remove Tier --', 'Priority_1', 'Priority_2', 'Priority_3', 'Priority_4']
+                    selected_tier = st.selectbox(
+                        "Set Tier",
+                        options=tier_options,
+                        key="tier_select",
+                        help="Priority_1: Can access prioritized batch | Priority_2+: Cannot access prioritized batch"
+                    )
+                
+                with col_btn:
+                    st.markdown("<div style='margin-top: 25px;'></div>", unsafe_allow_html=True)
+                    submit_tier = st.form_submit_button("💾 Update Tier")
+
+                if submit_tier and selected_agent_for_tier:
                     u = current_user() or {}
                     by = u.get('full_name') or u.get('login_id') or '-'
                     
