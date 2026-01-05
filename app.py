@@ -9980,58 +9980,88 @@ def page_supervisor():
         # ========================================================================
         
         # Advanced Filters Section
+        # Gunakan pola "Set Filter" (submit) agar dropdown tidak memicu query berat sebelum tombol ditekan
+        # State committed vs pending
+        if 'aa_committed_lending' not in st.session_state:
+            st.session_state['aa_committed_lending'] = "-- Semua Lending Entity --"
+        if 'aa_committed_employment' not in st.session_state:
+            st.session_state['aa_committed_employment'] = []
+        if 'aa_pending_lending' not in st.session_state:
+            st.session_state['aa_pending_lending'] = st.session_state['aa_committed_lending']
+        if 'aa_pending_employment' not in st.session_state:
+            st.session_state['aa_pending_employment'] = list(st.session_state['aa_committed_employment'])
+
         with st.expander("🔍 Filter Lanjutan", expanded=False):
             st.caption("Filter ini membantu memilih case yang sesuai untuk di-assign ke agent")
             
-            fcol1, fcol2 = st.columns(2)
-            
-            with fcol1:
-                # OPTIMIZED: Cache lending entities
-                if 'aa_lending_entities_cache' not in st.session_state:
-                    lending_entities = fetchall("SELECT DISTINCT Lending_Entity FROM supervisor_data WHERE Lending_Entity IS NOT NULL AND Lending_Entity != '' ORDER BY Lending_Entity")
-                    st.session_state['aa_lending_entities_cache'] = ["-- Semua Lending Entity --"] + [le.get('Lending_Entity') for le in lending_entities if le.get('Lending_Entity')]
-                le_options = st.session_state['aa_lending_entities_cache']
-                
-                selected_lending_entity = st.selectbox(
-                    "Filter by Lending Entity / Product",
-                    options=le_options,
-                    key="aa_lending_entity_filter",
-                    help="Filter case berdasarkan produk/lending entity tertentu"
-                )
-            
-            with fcol2:
-                # OPTIMIZED: Cache employment options
-                if 'aa_employment_options_cache' not in st.session_state:
-                    employment_updates = fetchall("SELECT DISTINCT EMPLOYMENT_UPDATE FROM assign_tracer WHERE EMPLOYMENT_UPDATE IS NOT NULL AND EMPLOYMENT_UPDATE != '' ORDER BY EMPLOYMENT_UPDATE")
-                    st.session_state['aa_employment_options_cache'] = [emp.get('EMPLOYMENT_UPDATE') for emp in employment_updates if emp.get('EMPLOYMENT_UPDATE')]
-                emp_options = st.session_state['aa_employment_options_cache']
-                
-                selected_employment = st.multiselect(
-                    "Filter by Employment Update",
-                    options=emp_options,
-                    default=[],
-                    key="aa_employment_filter",
-                    help="Filter berdasarkan status employment (DEBTOR/SPOUSE/dll) - berguna untuk produk tertentu seperti AkuLaku. Pilih lebih dari 1 untuk kombinasi filter."
-                )
-            
-            # Show filter info and refresh button
-            fcol_info, fcol_refresh = st.columns([4, 1])
-            with fcol_info:
-                if selected_lending_entity != "-- Semua Lending Entity --" or selected_employment:
-                    filter_info = []
-                    if selected_lending_entity != "-- Semua Lending Entity --":
-                        filter_info.append(f"Lending Entity: **{selected_lending_entity}**")
-                    if selected_employment:
-                        emp_list = ", ".join(selected_employment)
-                        filter_info.append(f"Employment: **{emp_list}**")
-                    st.info("📌 Filter aktif: " + " | ".join(filter_info))
-            with fcol_refresh:
-                if st.button("🔄 Refresh Data", key="aa_refresh_cache", help="Refresh filter options dan data terbaru"):
-                    # Clear all caches
-                    for key in ['aa_lending_entities_cache', 'aa_employment_options_cache', 'aa_df_cache', 'aa_cache_key', 'agent_list_cache']:
-                        if key in st.session_state:
-                            del st.session_state[key]
-                    st.rerun()
+            # Cache options
+            if 'aa_lending_entities_cache' not in st.session_state:
+                lending_entities = fetchall("SELECT DISTINCT Lending_Entity FROM supervisor_data WHERE Lending_Entity IS NOT NULL AND Lending_Entity != '' ORDER BY Lending_Entity")
+                st.session_state['aa_lending_entities_cache'] = ["-- Semua Lending Entity --"] + [le.get('Lending_Entity') for le in lending_entities if le.get('Lending_Entity')]
+            le_options = st.session_state['aa_lending_entities_cache']
+
+            if 'aa_employment_options_cache' not in st.session_state:
+                employment_updates = fetchall("SELECT DISTINCT EMPLOYMENT_UPDATE FROM assign_tracer WHERE EMPLOYMENT_UPDATE IS NOT NULL AND EMPLOYMENT_UPDATE != '' ORDER BY EMPLOYMENT_UPDATE")
+                st.session_state['aa_employment_options_cache'] = [emp.get('EMPLOYMENT_UPDATE') for emp in employment_updates if emp.get('EMPLOYMENT_UPDATE')]
+            emp_options = st.session_state['aa_employment_options_cache']
+
+            # Form to set filters; pending values won't trigger heavy query until submit
+            with st.form("aa_filter_form", clear_on_submit=False):
+                fcol1, fcol2 = st.columns(2)
+                with fcol1:
+                    pending_lending = st.selectbox(
+                        "Filter by Lending Entity / Product",
+                        options=le_options,
+                        index=le_options.index(st.session_state['aa_pending_lending']) if st.session_state['aa_pending_lending'] in le_options else 0,
+                        key="aa_lending_entity_filter_pending",
+                        help="Filter case berdasarkan produk/lending entity tertentu"
+                    )
+                with fcol2:
+                    pending_employment = st.multiselect(
+                        "Filter by Employment Update",
+                        options=emp_options,
+                        default=st.session_state['aa_pending_employment'],
+                        key="aa_employment_filter_pending",
+                        help="Filter berdasarkan status employment (DEBTOR/SPOUSE/dll). Klik Set Filter untuk menerapkan."
+                    )
+
+                fcol_info, fcol_refresh = st.columns([4, 1])
+                with fcol_info:
+                    st.caption("Set pilihan, lalu klik Set Filter untuk menerapkan ke data.")
+                with fcol_refresh:
+                    refresh_clicked = st.form_submit_button("🔄 Refresh Data")
+
+                submit_filters = st.form_submit_button("✅ Set Filter")
+
+            # Handle form actions
+            if refresh_clicked:
+                for key in ['aa_lending_entities_cache', 'aa_employment_options_cache', 'aa_df_cache', 'aa_cache_key', 'agent_list_cache']:
+                    if key in st.session_state:
+                        del st.session_state[key]
+                st.rerun()
+
+            if submit_filters:
+                st.session_state['aa_pending_lending'] = pending_lending
+                st.session_state['aa_pending_employment'] = list(pending_employment)
+                st.session_state['aa_committed_lending'] = pending_lending
+                st.session_state['aa_committed_employment'] = list(pending_employment)
+                # Clear df cache so data will refresh with new filters
+                for key in ['aa_df_cache', 'aa_cache_key']:
+                    if key in st.session_state:
+                        del st.session_state[key]
+                st.rerun()
+
+            # Info for currently applied (committed) filters
+            applied_lending = st.session_state['aa_committed_lending']
+            applied_employment = st.session_state['aa_committed_employment']
+            if applied_lending != "-- Semua Lending Entity --" or applied_employment:
+                filter_info = []
+                if applied_lending != "-- Semua Lending Entity --":
+                    filter_info.append(f"Lending Entity: **{applied_lending}**")
+                if applied_employment:
+                    emp_list = ", ".join(applied_employment)
+                    filter_info.append(f"Employment: **{emp_list}**")
+                st.info("📌 Filter aktif (committed): " + " | ".join(filter_info))
         
         # Basic Filters
         q1, q2, q3, q4 = st.columns([1.2, 1.2, 1.2, 0.6])
@@ -10062,7 +10092,10 @@ def page_supervisor():
         # ALWAYS exclude already assigned cases (mutual exclusion)
         wh.append("s.Case_ID NOT IN (SELECT Agreement_No FROM agent_assignments WHERE IFNULL(active,1)=1)")
         
-        # Apply advanced filters
+        # Apply advanced filters (use committed values only)
+        selected_lending_entity = st.session_state.get('aa_committed_lending', "-- Semua Lending Entity --")
+        selected_employment = st.session_state.get('aa_committed_employment', [])
+
         if selected_lending_entity and selected_lending_entity != "-- Semua Lending Entity --":
             wh.append("s.Lending_Entity = ?")
             par.append(selected_lending_entity)
