@@ -1853,19 +1853,60 @@ def get_cached_all_agents_and_supervisors():
 
 @st.cache_data(ttl=300)
 def get_cached_akulaku_batch_codes():
-    """Get distinct Assignment_Date for AkuLaku (cached)."""
+    """Get AkuLaku batches with their minimum Principle_Outstanding (cached)."""
+
+    def _to_float(val):
+        if val is None:
+            return None
+        s = str(val).strip()
+        if not s:
+            return None
+        # Remove currency markers and thousand separators
+        for token in ["Rp", "rp", "IDR", "idr", ":", "="]:
+            s = s.replace(token, "")
+        s = s.replace(",", "").replace(" ", "")
+        # Keep only digits, minus, and dot (last dot kept as decimal separator)
+        s_clean = "".join(ch for ch in s if ch.isdigit() or ch in {"-", "."})
+        if s_clean.count(".") > 1:
+            parts = s_clean.split(".")
+            s_clean = "".join(parts[:-1]) + "." + parts[-1]
+        try:
+            return float(s_clean)
+        except Exception:
+            return None
+
     try:
         rows = fetchall(
             """
-            SELECT DISTINCT Assignment_Date 
-            FROM supervisor_data 
-            WHERE Lending_Entity = 'AkuLaku' 
-              AND Assignment_Date IS NOT NULL 
-              AND Assignment_Date != ''
-            ORDER BY Assignment_Date DESC
+            SELECT Assignment_Date, Principle_Outstanding
+            FROM supervisor_data
+            WHERE Lending_Entity = 'AkuLaku'
+              AND Assignment_Date IS NOT NULL
+              AND TRIM(Assignment_Date) != ''
             """
         )
-        return [r.get('Assignment_Date') for r in rows if r.get('Assignment_Date')]
+
+        batch_min = {}
+        for row in rows:
+            code = row.get('Assignment_Date')
+            if not code:
+                continue
+            amount = _to_float(row.get('Principle_Outstanding'))
+            if code not in batch_min:
+                batch_min[code] = amount
+            elif amount is not None and (batch_min[code] is None or amount < batch_min[code]):
+                batch_min[code] = amount
+
+        batch_list = []
+        for code in sorted(batch_min.keys(), reverse=True):
+            min_os = batch_min.get(code)
+            if min_os is None:
+                label = f"{code} (Min OS: N/A)"
+            else:
+                label = f"{code} (Min OS: Rp {min_os:,.0f})"
+            batch_list.append({"code": code, "label": label, "min_os": min_os})
+
+        return batch_list
     except Exception:
         return []
 
@@ -9850,6 +9891,7 @@ def page_supervisor():
             # Pre-load cached data (hindari loading di dropdown)
             agents_list = get_cached_active_agents()
             batch_codes = get_cached_akulaku_batch_codes()
+            label_map = {b["code"]: b["label"] for b in batch_codes}
             current_tiers_cached = get_cached_current_agent_tiers()
             
             # Prioritized Batch Dropdown
@@ -9858,52 +9900,23 @@ def page_supervisor():
             
             # Get current prioritized batch from settings
             current_prioritized = get_setting('akulaku_prioritized_batch', '')
-            
-            # Get minimum OS for each batch code
-            batch_os_map = {}
-            for batch in batch_codes:
-                min_os_result = fetchone(
-                    "SELECT MIN(CAST(Principle_Outstanding AS REAL)) as min_os FROM supervisor_data WHERE Lending_Entity='AkuLaku' AND Date=?",
-                    (batch,)
-                )
-                min_os = min_os_result.get('min_os') if min_os_result else None
-                batch_os_map[batch] = min_os
-            
-            # Format batch options with minimum OS info
-            batch_options = ['-- No Prioritization --']
-            batch_display_to_actual = {'-- No Prioritization --': '-- No Prioritization --'}
-            
-            for batch in batch_codes:
-                min_os = batch_os_map.get(batch)
-                if min_os is not None:
-                    display_text = f"{batch} (Min OS: Rp {min_os:,.0f})"
-                else:
-                    display_text = f"{batch} (Min OS: N/A)"
-                batch_options.append(display_text)
-                batch_display_to_actual[display_text] = batch
-            
-            # Find default index
+            batch_options = ['-- No Prioritization --'] + [b["code"] for b in batch_codes]
             default_idx = 0
-            if current_prioritized:
-                for idx, display_text in enumerate(batch_options):
-                    if batch_display_to_actual.get(display_text) == current_prioritized:
-                        default_idx = idx
-                        break
+            if current_prioritized and current_prioritized in label_map:
+                default_idx = batch_options.index(current_prioritized)
             
             # Wrap in form to prevent loading on dropdown change
             with st.form("form_prioritized_batch", clear_on_submit=False):
                 col_batch1, col_batch2 = st.columns([3, 1])
                 with col_batch1:
-                    selected_display = st.selectbox(
+                    selected_prioritized_batch = st.selectbox(
                         "Select Prioritized Batch",
                         options=batch_options,
                         index=default_idx,
                         key="akulaku_prioritized_batch_select",
-                        help="Batch code yang hanya bisa diambil oleh Priority_1 agents. Menampilkan minimum Outstanding Saldo (OS) per batch."
+                        help="Batch code yang hanya bisa diambil oleh Priority_1 agents",
+                        format_func=lambda x: label_map.get(x, x)
                     )
-                    
-                    # Get actual batch code from display text
-                    selected_prioritized_batch = batch_display_to_actual.get(selected_display, '-- No Prioritization --')
                 
                 with col_batch2:
                     st.markdown("<div style='margin-top: 25px;'></div>", unsafe_allow_html=True)
@@ -9917,10 +9930,9 @@ def page_supervisor():
                         set_setting('akulaku_prioritized_batch', selected_prioritized_batch)
                         st.success(f"✅ Prioritized batch set to: {selected_prioritized_batch}")
                     st.rerun()
-                    st.rerun()
             
             if selected_prioritized_batch != '-- No Prioritization --':
-                st.info(f"🔒 Batch **{selected_prioritized_batch}** is prioritized. Only Priority_1 agents can access this batch.")
+                st.info(f"🔒 Batch **{label_map.get(selected_prioritized_batch, selected_prioritized_batch)}** is prioritized. Only Priority_1 agents can access this batch.")
             
             st.markdown("---")
             
