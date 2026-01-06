@@ -9521,15 +9521,13 @@ def page_supervisor():
     # --- Trace Assigning Tab ---
     with tabs[3]:
         st.subheader("Assign ke Tracer")
-        q1, q2, q3, q4 = st.columns([1.2, 1.2, 1.2, 0.6])
+        q1, q2, q3 = st.columns([1.2, 1.2, 1.2])
         with q1:
             f_case = st.text_input("Filter Case_ID", key="ta_f_case")
         with q2:
             f_name = st.text_input("Filter Customer", key="ta_f_name")
         with q3:
             f_phone = st.text_input("Filter Phone", key="ta_f_phone")
-        with q4:
-            limit_rows = st.number_input("Limit Row (0=Semua)", min_value=0, max_value=2000, value=200, step=10, key="ta_limit")
 
     # Build SQL with filters + exclude yang sudah di-assign ke Agent
         where = ["Case_ID IS NOT NULL", "TRIM(Case_ID)<>''"]
@@ -9564,17 +9562,14 @@ def page_supervisor():
         ]
         select_cols = base_cols + [c for c in extra_cols if c in sup_cols]
         select_sql = ", ".join(select_cols)
-        limit_clause = "LIMIT ?" if limit_rows and limit_rows > 0 else ""
-        limit_params = params + ([int(limit_rows)] if limit_rows and limit_rows > 0 else [])
         rows_sup = fetchall(
             f"""
             SELECT {select_sql}
             FROM supervisor_data
             WHERE {where_sql}
             ORDER BY id DESC
-            {limit_clause}
             """,
-            tuple(limit_params)
+            tuple(params)
         )
         import pandas as _pd
         df_sup = _pd.DataFrame(rows_sup) if rows_sup else _pd.DataFrame(columns=select_cols)
@@ -10099,15 +10094,13 @@ def page_supervisor():
                 st.info("📌 Filter aktif: " + " | ".join(filter_info))
         
         # Basic Filters
-        q1, q2, q3, q4 = st.columns([1.2, 1.2, 1.2, 0.6])
+        q1, q2, q3 = st.columns([1.2, 1.2, 1.2])
         with q1:
             fa_case = st.text_input("Filter Case_ID", key="aa_f_case")
         with q2:
             fa_name = st.text_input("Filter Customer", key="aa_f_name")
         with q3:
             fa_phone = st.text_input("Filter Phone", key="aa_f_phone")
-        with q4:
-            fa_limit = st.number_input("Limit Row (0=Semua)", min_value=0, max_value=5000, value=1000, step=100, key="aa_limit")
 
         # No more checkbox for hiding assigned - always hide already assigned cases
 
@@ -10143,8 +10136,7 @@ def page_supervisor():
         
         # OPTIMIZATION: Create cache key from filter values to detect changes
         emp_str = ','.join(sorted(selected_employment)) if selected_employment else ''
-        limit_key = fa_limit if fa_limit and fa_limit > 0 else "ALL"
-        cache_key = f"{fa_case}|{fa_name}|{fa_phone}|{limit_key}|{selected_lending_entity}|{emp_str}"
+        cache_key = f"{fa_case}|{fa_name}|{fa_phone}|ALL|{selected_lending_entity}|{emp_str}"
         
         # Check if we can use cached data (filters haven't changed)
         use_cache = (
@@ -10189,8 +10181,6 @@ def page_supervisor():
                 if base_col in sup_cols or col_expr.startswith('t.'):
                     sel_parts.append(f"{col_expr} as {col_alias}")
             
-            limit_clause = "LIMIT ?" if fa_limit and fa_limit > 0 else ""
-            limit_params = par + ([int(fa_limit)] if fa_limit and fa_limit > 0 else [])
             rows_sup = fetchall(
                 f"""
                 SELECT {', '.join(sel_parts)}
@@ -10198,9 +10188,8 @@ def page_supervisor():
                 LEFT JOIN assign_tracer t ON s.Case_ID = t.Agreement_No
                 WHERE {wh_sql}
                 ORDER BY s.id DESC
-                {limit_clause}
                 """,
-                tuple(limit_params)
+                tuple(par)
             )
             import pandas as _pd
             
