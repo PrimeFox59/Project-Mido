@@ -8247,161 +8247,173 @@ def page_supervisor():
             q_phone = st.text_input("Phone Number", key="monitor_phone")
         with fc4:
             q_email = st.text_input("Email", key="monitor_email")
+        load_col1, load_col2 = st.columns([1,3])
+        with load_col1:
+            load_monitor = st.button("Load data", key="monitor_load_btn")
+        with load_col2:
+            st.caption("Klik untuk memuat Monitoring. Tidak otomatis agar halaman lebih ringan.")
 
-    # Build query
-        query = "SELECT * FROM supervisor_data WHERE 1=1"
-        params = []
-        # Primary
-        if q_case_id:
-            query += " AND Case_ID LIKE ?"
-            params.append(f"%{q_case_id}%")
-        if q_customer:
-            query += " AND Customer_name LIKE ?"
-            params.append(f"%{q_customer}%")
-        if q_phone:
-            query += " AND (Phone_Number_1 LIKE ? OR Phone_Number_2 LIKE ?)"
-            params.extend([f"%{q_phone}%", f"%{q_phone}%"])
-        if q_email:
-            query += " AND email LIKE ?"
-            params.append(f"%{q_email}%")
-        # Extras
-        for f, v in extra_filters.items():
-            if v:
-                query += f" AND {f} LIKE ?"
-                params.append(f"%{v}%")
-        try:
-            _lim = int(rows_limit) if rows_limit else 100
-        except Exception:
-            _lim = 100
-        _lim = max(1, min(2000, _lim))
-        # Get total count matching filters (before LIMIT)
-        count_query = query.replace("SELECT *", "SELECT COUNT(*) as total", 1).replace(f" ORDER BY id DESC LIMIT {_lim}", "")
-        total_matching = (fetchone(count_query, tuple(params)) or {}).get('total', 0)
-        
-        query += f" ORDER BY id DESC LIMIT {_lim}"
+        if load_monitor:
+            st.session_state["monitoring_loaded"] = True
+            st.session_state.pop("monitor_table_editor", None)
 
-        rows = fetchall(query, tuple(params))
-        if not rows:
-            st.info("Tidak ada data supervisor ditemukan dengan filter yang dipilih.")
+        monitoring_loaded = st.session_state.get("monitoring_loaded", False)
+
+        if not monitoring_loaded:
+            st.info("Klik \"Load data\" untuk menampilkan tabel Monitoring.")
         else:
-            # Show filter result info
-            if q_case_id or q_customer or q_phone or q_email or any(extra_filters.values()):
-                if total_matching > _lim:
-                    st.info(f"🔍 Ditemukan **{total_matching:,}** data yang cocok dengan filter. Menampilkan **{len(rows):,}** data teratas (limit: {_lim}).")
-                else:
-                    st.success(f"✅ Ditemukan **{total_matching:,}** data yang cocok dengan filter.")
+            # Build query
+            query = "SELECT id, Case_ID, Customer_name, Phone_Number_1, Phone_Number_2, email, Lending_Entity, DPD, Assignment_Date FROM supervisor_data WHERE 1=1"
+            params = []
+            # Primary
+            if q_case_id:
+                query += " AND Case_ID LIKE ?"
+                params.append(f"%{q_case_id}%")
+            if q_customer:
+                query += " AND Customer_name LIKE ?"
+                params.append(f"%{q_customer}%")
+            if q_phone:
+                query += " AND (Phone_Number_1 LIKE ? OR Phone_Number_2 LIKE ?)"
+                params.extend([f"%{q_phone}%", f"%{q_phone}%"])
+            if q_email:
+                query += " AND email LIKE ?"
+                params.append(f"%{q_email}%")
+            # Extras
+            for f, v in extra_filters.items():
+                if v:
+                    query += f" AND {f} LIKE ?"
+                    params.append(f"%{v}%")
+            try:
+                _lim = int(rows_limit) if rows_limit else 100
+            except Exception:
+                _lim = 100
+            _lim = max(1, min(2000, _lim))
+            # Get total count matching filters (before LIMIT)
+            count_query = query.replace("SELECT id, Case_ID, Customer_name, Phone_Number_1, Phone_Number_2, email, Lending_Entity, DPD, Assignment_Date", "SELECT COUNT(*) as total", 1)
+            total_matching = (fetchone(count_query, tuple(params)) or {}).get('total', 0)
             
-            df = pd.DataFrame(rows)
-            
-            # === OPTIMIZED: BATCH QUERY FOR ASSIGNMENT STATUS ===
-            # Get all Case_IDs in current page
-            case_ids = [str(row.get('Case_ID', '')) for row in rows if row.get('Case_ID')]
-            
-            # Batch fetch active assignments and history (1 query each instead of N queries)
-            active_assignments_map = get_active_assignments_batch(case_ids)
-            history_map = get_assignment_history_batch(case_ids)
-            
-            # Build status columns using pre-fetched data
-            assignment_statuses = []
-            for _, row in df.iterrows():
-                case_id = str(row.get('Case_ID', ''))
-                if not case_id:
-                    assignment_statuses.append({
-                        'Status_Assignment': '-',
-                        'Currently_Assigned_To': '-',
-                        'Assignment_History': '-'
-                    })
-                    continue
+            query += f" ORDER BY id DESC LIMIT {_lim}"
+
+            rows = fetchall(query, tuple(params))
+            if not rows:
+                st.info("Tidak ada data supervisor ditemukan dengan filter yang dipilih.")
+            else:
+                # Show filter result info
+                if q_case_id or q_customer or q_phone or q_email or any(extra_filters.values()):
+                    if total_matching > _lim:
+                        st.info(f"🔍 Ditemukan **{total_matching:,}** data yang cocok dengan filter. Menampilkan **{len(rows):,}** data teratas (limit: {_lim}).")
+                    else:
+                        st.success(f"✅ Ditemukan **{total_matching:,}** data yang cocok dengan filter.")
                 
-                # Get active assignment from batch result
-                active = active_assignments_map.get(case_id)
-                if active:
-                    assign_type = active.get('assignment_type', 'agent').upper()
-                    assigned_to = active.get('assigned_to', 'Unknown')
-                    auto_return = active.get('auto_return_date', '')
-                    
-                    if assign_type == 'AGENT':
-                        status = f"🎯 Agent Active (Return: {auto_return[:10] if auto_return else 'N/A'})"
-                    else:
-                        status = f"🔍 Tracer Active"
-                    
-                    # Get history from batch result
-                    history = history_map.get(case_id, [])
-                    history_str = ""
-                    if history:
-                        history_names = [f"{h.get('assigned_to', '?')} ({h.get('assignment_type', '?')})" 
-                                       for h in history[:5]]  # Show last 5
-                        history_str = " → ".join(history_names)
-                    else:
-                        history_str = "First assignment"
-                    
-                    assignment_statuses.append({
-                        'Status_Assignment': status,
-                        'Currently_Assigned_To': f"{assign_type}: {assigned_to}",
-                        'Assignment_History': history_str
-                    })
-                else:
-                    # Not assigned - check history from batch result
-                    history = history_map.get(case_id, [])
-                    if history:
-                        history_names = [f"{h.get('assigned_to', '?')} ({h.get('assignment_type', '?')})" 
-                                       for h in history[:5]]
-                        history_str = " → ".join(history_names)
+                df = pd.DataFrame(rows)
+                
+                # === OPTIMIZED: BATCH QUERY FOR ASSIGNMENT STATUS ===
+                # Get all Case_IDs in current page
+                case_ids = [str(row.get('Case_ID', '')) for row in rows if row.get('Case_ID')]
+                
+                # Batch fetch active assignments and history (1 query each instead of N queries)
+                active_assignments_map = get_active_assignments_batch(case_ids)
+                history_map = get_assignment_history_batch(case_ids)
+                
+                # Build status columns using pre-fetched data
+                assignment_statuses = []
+                for _, row in df.iterrows():
+                    case_id = str(row.get('Case_ID', ''))
+                    if not case_id:
                         assignment_statuses.append({
-                            'Status_Assignment': '📂 Available (Returned)',
+                            'Status_Assignment': '-',
                             'Currently_Assigned_To': '-',
+                            'Assignment_History': '-'
+                        })
+                        continue
+                    
+                    # Get active assignment from batch result
+                    active = active_assignments_map.get(case_id)
+                    if active:
+                        assign_type = active.get('assignment_type', 'agent').upper()
+                        assigned_to = active.get('assigned_to', 'Unknown')
+                        auto_return = active.get('auto_return_date', '')
+                        
+                        if assign_type == 'AGENT':
+                            status = f"🎯 Agent Active (Return: {auto_return[:10] if auto_return else 'N/A'})"
+                        else:
+                            status = f"🔍 Tracer Active"
+                        
+                        # Get history from batch result
+                        history = history_map.get(case_id, [])
+                        history_str = ""
+                        if history:
+                            history_names = [f"{h.get('assigned_to', '?')} ({h.get('assignment_type', '?')})" 
+                                           for h in history[:5]]  # Show last 5
+                            history_str = " → ".join(history_names)
+                        else:
+                            history_str = "First assignment"
+                        
+                        assignment_statuses.append({
+                            'Status_Assignment': status,
+                            'Currently_Assigned_To': f"{assign_type}: {assigned_to}",
                             'Assignment_History': history_str
                         })
                     else:
-                        assignment_statuses.append({
-                            'Status_Assignment': '📂 Available (Fresh)',
-                            'Currently_Assigned_To': '-',
-                            'Assignment_History': 'Never assigned'
-                        })
-            
-            # Add status columns to dataframe
-            status_df = pd.DataFrame(assignment_statuses)
-            df = pd.concat([df, status_df], axis=1)
-            
-            # Optional small caption to indicate filtered vs total
-        
-            # Pastikan kolom id ada untuk identifikasi & hapus
-            if 'id' not in df.columns:
-                # Jika tidak ada, buat id sementara dari index (tidak digunakan untuk hapus DB)
-                df.insert(0, 'id', pd.RangeIndex(start=1, stop=len(df)+1, step=1))
+                        # Not assigned - check history from batch result
+                        history = history_map.get(case_id, [])
+                        if history:
+                            history_names = [f"{h.get('assigned_to', '?')} ({h.get('assignment_type', '?')})" 
+                                           for h in history[:5]]
+                            history_str = " → ".join(history_names)
+                            assignment_statuses.append({
+                                'Status_Assignment': '📂 Available (Returned)',
+                                'Currently_Assigned_To': '-',
+                                'Assignment_History': history_str
+                            })
+                        else:
+                            assignment_statuses.append({
+                                'Status_Assignment': '📂 Available (Fresh)',
+                                'Currently_Assigned_To': '-',
+                                'Assignment_History': 'Never assigned'
+                            })
+                
+                # Add status columns to dataframe
+                status_df = pd.DataFrame(assignment_statuses)
+                df = pd.concat([df, status_df], axis=1)
+                
+                # Pastikan kolom id ada untuk identifikasi & hapus
+                if 'id' not in df.columns:
+                    # Jika tidak ada, buat id sementara dari index (tidak digunakan untuk hapus DB)
+                    df.insert(0, 'id', pd.RangeIndex(start=1, stop=len(df)+1, step=1))
 
-            select_all = st.checkbox("Pilih semua pada tabel ini", value=False, key="monitor_select_all")
+                select_all = st.checkbox("Pilih semua pada tabel ini", value=False, key="monitor_select_all")
 
-            # Tambahkan kolom checkbox untuk memilih baris
-            if 'Selected' not in df.columns:
-                df.insert(0, 'Selected', select_all)
-            else:
-                df['Selected'] = df['Selected'].fillna(False) | bool(select_all)
+                # Tambahkan kolom checkbox untuk memilih baris
+                if 'Selected' not in df.columns:
+                    df.insert(0, 'Selected', select_all)
+                else:
+                    df['Selected'] = df['Selected'].fillna(False) | bool(select_all)
 
-            # Render editable table: hanya kolom 'Selected' yang bisa diubah
-            try:
-                edited_df = st.data_editor(
-                    df,
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        'Selected': st.column_config.CheckboxColumn(
-                            label=' ', help='Centang untuk memilih baris', default=select_all
-                        )
-                    },
-                    disabled=[c for c in df.columns if c != 'Selected'],
-                    key='monitor_table_editor'
-                )
-            except Exception:
-                # Fallback untuk versi Streamlit lama tanpa data_editor: tampilkan tabel biasa
-                edited_df = df.copy()
-                st.dataframe(df, use_container_width=True, hide_index=True)
+                # Render editable table: hanya kolom 'Selected' yang bisa diubah
+                try:
+                    edited_df = st.data_editor(
+                        df,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            'Selected': st.column_config.CheckboxColumn(
+                                label=' ', help='Centang untuk memilih baris', default=select_all
+                            )
+                        },
+                        disabled=[c for c in df.columns if c != 'Selected'],
+                        key='monitor_table_editor'
+                    )
+                except Exception:
+                    # Fallback untuk versi Streamlit lama tanpa data_editor: tampilkan tabel biasa
+                    edited_df = df.copy()
+                    st.dataframe(df, use_container_width=True, hide_index=True)
 
-            # Kumpulkan id yang dipilih
-            try:
-                selected_ids = [int(x) for x in edited_df.loc[edited_df['Selected'] == True, 'id'].tolist()]
-            except Exception:
-                selected_ids = []
+                # Kumpulkan id yang dipilih
+                try:
+                    selected_ids = [int(x) for x in edited_df.loc[edited_df['Selected'] == True, 'id'].tolist()]
+                except Exception:
+                    selected_ids = []
 
             # --- Detail Contract Section ---
             # Tampilkan detail jika hanya 1 row yang dipilih (LAZY LOADING)
