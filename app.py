@@ -10122,6 +10122,7 @@ def page_supervisor():
                 fa_name = st.text_input("Filter Customer", key="aa_f_name")
             with q3:
                 fa_phone = st.text_input("Filter Phone", key="aa_f_phone")
+            limit_rows = st.number_input("Limit rows", min_value=50, max_value=5000, value=500, step=50, key="aa_limit_rows")
             load_agents = st.form_submit_button("🔍 Terapkan & Load")
 
         # No more checkbox for hiding assigned - always hide already assigned cases
@@ -10158,7 +10159,7 @@ def page_supervisor():
         
         # OPTIMIZATION: Create cache key from filter values to detect changes
         emp_str = ','.join(sorted(selected_employment)) if selected_employment else ''
-        cache_key = f"{fa_case}|{fa_name}|{fa_phone}|ALL|{selected_lending_entity}|{emp_str}"
+        cache_key = f"{fa_case}|{fa_name}|{fa_phone}|ALL|{selected_lending_entity}|{emp_str}|{limit_rows}"
         
         use_cache = (
             'aa_df_cache' in st.session_state and 
@@ -10201,6 +10202,8 @@ def page_supervisor():
                 if base_col in sup_cols or col_expr.startswith('t.'):
                     sel_parts.append(f"{col_expr} as {col_alias}")
             
+            # Apply safety limit to prevent loading entire table
+            query_params = list(par) + [int(limit_rows)]
             rows_sup = fetchall(
                 f"""
                 SELECT {', '.join(sel_parts)}
@@ -10208,8 +10211,9 @@ def page_supervisor():
                 LEFT JOIN assign_tracer t ON s.Case_ID = t.Agreement_No
                 WHERE {wh_sql}
                 ORDER BY s.id DESC
+                LIMIT ?
                 """,
-                tuple(par)
+                tuple(query_params)
             )
             import pandas as _pd
             
@@ -10289,7 +10293,7 @@ def page_supervisor():
 
         # Display available case count
         total_available = len(df)
-        st.markdown(f"### 📊 {total_available:,} case tersedia untuk assignment")
+        st.markdown(f"### 📊 {total_available:,} case tersedia untuk assignment (limit {int(limit_rows):,})")
         
         # Show priority legend
         st.markdown("""
@@ -10594,17 +10598,19 @@ def page_supervisor():
         frozen_agrs = fetchone("SELECT COUNT(*) c FROM frozen_entities WHERE active=1 AND Agreement_No IS NOT NULL AND Agreement_No != ''")['c'] or 0
         
         # Count affected cases
-        affected_cases = 0
-        frozen_rows = fetchall("SELECT NIK_KTP, Agreement_No FROM frozen_entities WHERE active=1")
-        for r in frozen_rows:
-            nik = (r.get('NIK_KTP') or '').strip()
-            agr = (r.get('Agreement_No') or '').strip()
-            if nik:
-                cnt = (fetchone("SELECT COUNT(*) c FROM assign_tracer WHERE COALESCE(NIK_KTP,'')=?", (nik,)) or {}).get('c', 0)
-                affected_cases += cnt
-            elif agr:
-                cnt = (fetchone("SELECT COUNT(*) c FROM assign_tracer WHERE Agreement_No=?", (agr,)) or {}).get('c', 0)
-                affected_cases += cnt
+        affected_cases = (fetchone(
+            """
+            SELECT COUNT(*) c FROM assign_tracer
+            WHERE Agreement_No IN (
+                SELECT Agreement_No FROM frozen_entities 
+                WHERE active=1 AND Agreement_No IS NOT NULL AND Agreement_No != ''
+            )
+            OR NIK_KTP IN (
+                SELECT NIK_KTP FROM frozen_entities 
+                WHERE active=1 AND NIK_KTP IS NOT NULL AND NIK_KTP != ''
+            )
+            """
+        ) or {}).get('c', 0)
         
         with stat_col1:
             st.markdown(f"""
@@ -11037,108 +11043,114 @@ def page_supervisor():
         # View Logs - Enhanced Filter
         st.markdown("### 🔍 Search & Filter Trace Logs")
         
-        # Filter row 1
-        fc1, fc2, fc3, fc4 = st.columns(4)
-        with fc1:
-            f_agr = st.text_input("🔖 Case ID", key="trace_q_agr", placeholder="Search...")
-        with fc2:
-            f_tracer = st.text_input("👤 Tracer", key="trace_q_tracer", placeholder="Search...")
-        with fc3:
-            f_status = st.multiselect("📊 Status", ["TRACED", "CONTACTED", "RTP", "PTP", "PAYING", "UNREACHABLE", "REFUSED", "PROMISE_BROKEN", "OTHER"], key="trace_f_status")
-        with fc4:
-            f_touch = st.multiselect("📞 Method", ["CALL", "WHATSAPP", "SMS", "EMAIL", "VISIT", "VIDEO_CALL", "OTHER"], key="trace_f_touch")
-        
-        # Filter row 2
-        fc5, fc6, fc7, fc8 = st.columns(4)
-        with fc5:
-            date_from = st.date_input("📅 From Date", value=None, key="trace_from")
-        with fc6:
-            date_to = st.date_input("📅 To Date", value=None, key="trace_to")
-        with fc7:
-            f_party = st.multiselect("🎯 Party", ["DEBTOR_DIRECT", "COMPANY_HR", "COMPANY_FINANCE", "RELATIVE", "NEIGHBOR", "EMERGENCY_CONTACT", "OTHER"], key="trace_f_party")
-        with fc8:
-            limit_rows = st.number_input("📄 Limit", min_value=50, max_value=2000, value=500, step=50, key="trace_limit")
+        with st.form("trace_filter_form"):
+            # Filter row 1
+            fc1, fc2, fc3, fc4 = st.columns(4)
+            with fc1:
+                f_agr = st.text_input("🔖 Case ID", key="trace_q_agr", placeholder="Search...")
+            with fc2:
+                f_tracer = st.text_input("👤 Tracer", key="trace_q_tracer", placeholder="Search...")
+            with fc3:
+                f_status = st.multiselect("📊 Status", ["TRACED", "CONTACTED", "RTP", "PTP", "PAYING", "UNREACHABLE", "REFUSED", "PROMISE_BROKEN", "OTHER"], key="trace_f_status")
+            with fc4:
+                f_touch = st.multiselect("📞 Method", ["CALL", "WHATSAPP", "SMS", "EMAIL", "VISIT", "VIDEO_CALL", "OTHER"], key="trace_f_touch")
+            
+            # Filter row 2
+            fc5, fc6, fc7, fc8 = st.columns(4)
+            with fc5:
+                date_from = st.date_input("📅 From Date", value=None, key="trace_from")
+            with fc6:
+                date_to = st.date_input("📅 To Date", value=None, key="trace_to")
+            with fc7:
+                f_party = st.multiselect("🎯 Party", ["DEBTOR_DIRECT", "COMPANY_HR", "COMPANY_FINANCE", "RELATIVE", "NEIGHBOR", "EMERGENCY_CONTACT", "OTHER"], key="trace_f_party")
+            with fc8:
+                limit_rows = st.number_input("📄 Limit", min_value=50, max_value=2000, value=500, step=50, key="trace_limit")
 
-        # Build query
-        q = """
-        SELECT 
-            Agreement_No, 
-            tracer, 
-            status, 
-            party, 
-            touch_type, 
-            SUBSTR(notes, 1, 100) || CASE WHEN LENGTH(notes) > 100 THEN '...' ELSE '' END as notes_preview,
-            touched_at, 
-            created_by 
-        FROM trace_results 
-        WHERE 1=1
-        """
-        params = []
-        
-        if f_agr:
-            q += " AND Agreement_No LIKE ?"
-            params.append(f"%{f_agr}%")
-        if f_tracer:
-            q += " AND COALESCE(tracer,'') LIKE ?"
-            params.append(f"%{f_tracer}%")
-        if f_status:
-            placeholders = ",".join(["?"] * len(f_status))
-            q += f" AND COALESCE(status,'') IN ({placeholders})"
-            params.extend(f_status)
-        if f_touch:
-            placeholders = ",".join(["?"] * len(f_touch))
-            q += f" AND COALESCE(touch_type,'') IN ({placeholders})"
-            params.extend(f_touch)
-        if f_party:
-            placeholders = ",".join(["?"] * len(f_party))
-            q += f" AND COALESCE(party,'') IN ({placeholders})"
-            params.extend(f_party)
-        if date_from:
-            q += " AND date(touched_at) >= date(?)"
-            params.append(str(date_from))
-        if date_to:
-            q += " AND date(touched_at) <= date(?)"
-            params.append(str(date_to))
-        
-        q += " ORDER BY touched_at DESC LIMIT ?"
-        params.append(int(limit_rows))
+            load_logs = st.form_submit_button("🔍 Load Logs", type="primary")
 
-        logs = fetchall(q, tuple(params))
-        
-        if logs:
-            st.caption(f"📊 Menampilkan **{len(logs)}** trace records")
-            df_logs = pd.DataFrame(logs)
-            
-            # Rename columns for better display
-            df_logs.columns = ['Case ID', 'Tracer', 'Status', 'Party', 'Method', 'Notes Preview', 'Touched At', 'Created By']
-            
-            st.dataframe(
-                df_logs, 
-                use_container_width=True, 
-                hide_index=True,
-                column_config={
-                    "Case ID": st.column_config.TextColumn("Case ID", width="medium"),
-                    "Tracer": st.column_config.TextColumn("Tracer", width="medium"),
-                    "Status": st.column_config.TextColumn("Status", width="small"),
-                    "Party": st.column_config.TextColumn("Party", width="medium"),
-                    "Method": st.column_config.TextColumn("Method", width="small"),
-                    "Notes Preview": st.column_config.TextColumn("Notes", width="large"),
-                    "Touched At": st.column_config.TextColumn("Touched At", width="medium"),
-                    "Created By": st.column_config.TextColumn("Created By", width="medium"),
-                }
-            )
-            
-            # Export option
-            if st.button("📥 Export to CSV", key="trace_export"):
-                csv = df_logs.to_csv(index=False)
-                st.download_button(
-                    label="Download CSV",
-                    data=csv,
-                    file_name=f"trace_results_{today.isoformat()}.csv",
-                    mime="text/csv"
-                )
+        if not load_logs:
+            st.info("Klik 'Load Logs' setelah set filter untuk menampilkan data.")
         else:
-            st.info("ℹ️ Tidak ada data sesuai filter. Coba ubah kriteria pencarian.")
+            # Build query
+            q = """
+            SELECT 
+                Agreement_No, 
+                tracer, 
+                status, 
+                party, 
+                touch_type, 
+                SUBSTR(notes, 1, 100) || CASE WHEN LENGTH(notes) > 100 THEN '...' ELSE '' END as notes_preview,
+                touched_at, 
+                created_by 
+            FROM trace_results 
+            WHERE 1=1
+            """
+            params = []
+            
+            if f_agr:
+                q += " AND Agreement_No LIKE ?"
+                params.append(f"%{f_agr}%")
+            if f_tracer:
+                q += " AND COALESCE(tracer,'') LIKE ?"
+                params.append(f"%{f_tracer}%")
+            if f_status:
+                placeholders = ",".join(["?"] * len(f_status))
+                q += f" AND COALESCE(status,'') IN ({placeholders})"
+                params.extend(f_status)
+            if f_touch:
+                placeholders = ",".join(["?"] * len(f_touch))
+                q += f" AND COALESCE(touch_type,'') IN ({placeholders})"
+                params.extend(f_touch)
+            if f_party:
+                placeholders = ",".join(["?"] * len(f_party))
+                q += f" AND COALESCE(party,'') IN ({placeholders})"
+                params.extend(f_party)
+            if date_from:
+                q += " AND date(touched_at) >= date(?)"
+                params.append(str(date_from))
+            if date_to:
+                q += " AND date(touched_at) <= date(?)"
+                params.append(str(date_to))
+            
+            q += " ORDER BY touched_at DESC LIMIT ?"
+            params.append(int(limit_rows))
+
+            logs = fetchall(q, tuple(params))
+            
+            if logs:
+                st.caption(f"📊 Menampilkan **{len(logs)}** trace records")
+                df_logs = pd.DataFrame(logs)
+                
+                # Rename columns for better display
+                df_logs.columns = ['Case ID', 'Tracer', 'Status', 'Party', 'Method', 'Notes Preview', 'Touched At', 'Created By']
+                
+                st.dataframe(
+                    df_logs, 
+                    use_container_width=True, 
+                    hide_index=True,
+                    column_config={
+                        "Case ID": st.column_config.TextColumn("Case ID", width="medium"),
+                        "Tracer": st.column_config.TextColumn("Tracer", width="medium"),
+                        "Status": st.column_config.TextColumn("Status", width="small"),
+                        "Party": st.column_config.TextColumn("Party", width="medium"),
+                        "Method": st.column_config.TextColumn("Method", width="small"),
+                        "Notes Preview": st.column_config.TextColumn("Notes", width="large"),
+                        "Touched At": st.column_config.TextColumn("Touched At", width="medium"),
+                        "Created By": st.column_config.TextColumn("Created By", width="medium"),
+                    }
+                )
+                
+                # Export option
+                if st.button("📥 Export to CSV", key="trace_export"):
+                    csv = df_logs.to_csv(index=False)
+                    st.download_button(
+                        label="Download CSV",
+                        data=csv,
+                        file_name=f"trace_results_{today.isoformat()}.csv",
+                        mime="text/csv"
+                    )
+            else:
+                st.info("ℹ️ Tidak ada data sesuai filter. Coba ubah kriteria pencarian.")
 
 
     # --- Enriched & Lookup Tab ---
@@ -11180,155 +11192,163 @@ def page_supervisor():
             cached_tracers = get_cached_active_tracers()
             cached_all_agents = get_cached_all_agents_and_supervisors()
             
-            # Enhanced Filters - Row 1
-            fcol1, fcol2, fcol3, fcol4 = st.columns(4)
-            with fcol1:
-                f_ag = st.text_input("🔖 Case ID", key="en_ag", placeholder="Search...")
-            with fcol2:
-                f_nik = st.text_input("🆔 NIK", key="en_nik", placeholder="Search...")
-            with fcol3:
-                # Use pre-loaded cached data (no loading on dropdown interaction)
-                f_tracer = st.selectbox("👤 Tracer", options=["(All)"] + cached_tracers, index=0, key="en_tracer")
-            with fcol4:
-                # Use pre-loaded cached data (no loading on dropdown interaction)
-                f_agent = st.selectbox("🎯 Agent", options=["(All)"] + cached_all_agents, index=0, key="en_agent")
+            with st.form("enriched_filter_form"):
+                # Enhanced Filters - Row 1
+                fcol1, fcol2, fcol3, fcol4 = st.columns(4)
+                with fcol1:
+                    f_ag = st.text_input("🔖 Case ID", key="en_ag", placeholder="Search...")
+                with fcol2:
+                    f_nik = st.text_input("🆔 NIK", key="en_nik", placeholder="Search...")
+                with fcol3:
+                    # Use pre-loaded cached data (no loading on dropdown interaction)
+                    f_tracer = st.selectbox("👤 Tracer", options=["(All)"] + cached_tracers, index=0, key="en_tracer")
+                with fcol4:
+                    # Use pre-loaded cached data (no loading on dropdown interaction)
+                    f_agent = st.selectbox("🎯 Agent", options=["(All)"] + cached_all_agents, index=0, key="en_agent")
 
-            # Enhanced Filters - Row 2
-            fcol5, fcol6, fcol7, fcol8 = st.columns(4)
-            with fcol5:
-                f_status = st.multiselect("📊 Trace Status", ["TRACED", "CONTACTED", "RTP", "PTP", "PAYING", "UNREACHABLE", "REFUSED", "PROMISE_BROKEN", "OTHER"], key="en_status")
-            with fcol6:
-                f_pay = st.selectbox("💰 Payment", ["All", "With Payment", "Without Payment", "Paid Off"], index=0, key="en_pay")
-            with fcol7:
-                ad_from = st.date_input("📅 Assigned From", value=None, key="en_ad_from")
-            with fcol8:
-                ad_to = st.date_input("📅 Assigned To", value=None, key="en_ad_to")
+                # Enhanced Filters - Row 2
+                fcol5, fcol6, fcol7, fcol8 = st.columns(4)
+                with fcol5:
+                    f_status = st.multiselect("📊 Trace Status", ["TRACED", "CONTACTED", "RTP", "PTP", "PAYING", "UNREACHABLE", "REFUSED", "PROMISE_BROKEN", "OTHER"], key="en_status")
+                with fcol6:
+                    f_pay = st.selectbox("💰 Payment", ["All", "With Payment", "Without Payment", "Paid Off"], index=0, key="en_pay")
+                with fcol7:
+                    ad_from = st.date_input("📅 Assigned From", value=None, key="en_ad_from")
+                with fcol8:
+                    ad_to = st.date_input("📅 Assigned To", value=None, key="en_ad_to")
 
-            # Build comprehensive query
-            q_en = """
-                SELECT 
-                    a.Agreement_No,
-                    a.Debtor_Name,
-                    a.NIK_KTP,
-                    a.Assigned_To AS tracer,
-                    a.Masked_Company_Name AS company,
-                    ag.Agent_Assigned_To AS agent,
-                    ag.assigned_at,
-                    ts.status AS latest_status,
-                    ts.touched_at AS last_touch,
-                    ar.agent_status,
-                    ar.agent_ptp_amount,
-                    ar.agent_ptp_date,
-                    COALESCE(p.amount, 0) AS paid_total,
-                    p.last_paid_date,
-                    CASE 
-                        WHEN COALESCE(p.amount, 0) > 0 THEN '✅ Paid'
-                        WHEN ar.agent_status = 'PTP' THEN '⏳ PTP'
-                        WHEN ts.status IN ('TRACED', 'CONTACTED') THEN '🔍 Traced'
-                        WHEN ag.Agent_Assigned_To IS NOT NULL THEN '👤 Agent Assigned'
-                        WHEN a.Assigned_To IS NOT NULL THEN '📋 Tracer Assigned'
-                        ELSE '⚪ New'
-                    END as pipeline_stage
-                FROM assign_tracer a
-                LEFT JOIN agent_assignments ag ON ag.Agreement_No = a.Agreement_No AND IFNULL(ag.active,1)=1
-                LEFT JOIN (
-                    SELECT tr1.Agreement_No, tr1.status, tr1.touched_at
-                    FROM trace_results tr1
-                    JOIN (SELECT Agreement_No, MAX(touched_at) mt FROM trace_results GROUP BY Agreement_No) t2
-                    ON t2.Agreement_No = tr1.Agreement_No AND t2.mt = tr1.touched_at
-                ) ts ON ts.Agreement_No = a.Agreement_No
-                LEFT JOIN (
-                    SELECT Agreement_No, agent_status, agent_ptp_amount, agent_ptp_date
-                    FROM agent_results
-                    WHERE id IN (SELECT MAX(id) FROM agent_results GROUP BY Agreement_No)
-                ) ar ON ar.Agreement_No = a.Agreement_No
-                LEFT JOIN (
-                    SELECT Agreement_No, SUM(paid_amount) AS amount, MAX(paid_date) AS last_paid_date
-                    FROM payments
-                    GROUP BY Agreement_No
-                ) p ON p.Agreement_No = a.Agreement_No
-                WHERE 1=1
-            """
-            
-            p_en = []
-            if f_ag:
-                q_en += " AND a.Agreement_No LIKE ?"
-                p_en.append(f"%{f_ag}%")
-            if f_nik:
-                q_en += " AND COALESCE(a.NIK_KTP,'') LIKE ?"
-                p_en.append(f"%{f_nik}%")
-            if f_tracer and f_tracer != "(All)":
-                q_en += " AND COALESCE(a.Assigned_To,'') = ?"
-                p_en.append(f_tracer)
-            if f_agent and f_agent != "(All)":
-                q_en += " AND COALESCE(ag.Agent_Assigned_To,'') = ?"
-                p_en.append(f_agent)
-            if f_status:
-                placeholders = ",".join(["?"] * len(f_status))
-                q_en += f" AND COALESCE(ts.status,'') IN ({placeholders})"
-                p_en.extend(f_status)
-            if f_pay == "With Payment":
-                q_en += " AND COALESCE(p.amount,0) > 0"
-            elif f_pay == "Without Payment":
-                q_en += " AND COALESCE(p.amount,0) = 0"
-            elif f_pay == "Paid Off":
-                q_en += " AND COALESCE(p.amount,0) >= 100000"  # Assume paid off threshold
-            if ad_from:
-                q_en += " AND DATE(ag.assigned_at) >= DATE(?)"
-                p_en.append(str(ad_from))
-            if ad_to:
-                q_en += " AND DATE(ag.assigned_at) <= DATE(?)"
-                p_en.append(str(ad_to))
-            
-            q_en += " ORDER BY ag.assigned_at DESC, a.id DESC LIMIT 500"
+                limit_rows = st.number_input("Limit rows", min_value=50, max_value=5000, value=300, step=50, key="en_limit")
+                load_enriched = st.form_submit_button("🔍 Load Enriched Data", type="primary")
 
-            rows_en = fetchall(q_en, tuple(p_en))
-            
-            if rows_en:
-                df_en = pd.DataFrame(rows_en)
-                st.caption(f"📊 Menampilkan **{len(df_en)}** enriched records")
-                
-                # Rename columns
-                df_en.columns = [
-                    'Case ID', 'Debtor', 'NIK', 'Tracer', 'Company', 'Agent', 
-                    'Assigned At', 'Trace Status', 'Last Touch', 'Agent Status', 
-                    'PTP Amount', 'PTP Date', 'Paid Total', 'Last Paid', 'Pipeline Stage'
-                ]
-                
-                st.dataframe(
-                    df_en,
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "Case ID": st.column_config.TextColumn("Case ID", width="medium"),
-                        "Debtor": st.column_config.TextColumn("Debtor", width="medium"),
-                        "NIK": st.column_config.TextColumn("NIK", width="small"),
-                        "Tracer": st.column_config.TextColumn("Tracer", width="small"),
-                        "Company": st.column_config.TextColumn("Company", width="medium"),
-                        "Agent": st.column_config.TextColumn("Agent", width="small"),
-                        "Assigned At": st.column_config.TextColumn("Assigned", width="small"),
-                        "Trace Status": st.column_config.TextColumn("T.Status", width="small"),
-                        "Last Touch": st.column_config.TextColumn("Last Touch", width="small"),
-                        "Agent Status": st.column_config.TextColumn("A.Status", width="small"),
-                        "PTP Amount": st.column_config.NumberColumn("PTP Amt", format="Rp %.0f"),
-                        "PTP Date": st.column_config.TextColumn("PTP Date", width="small"),
-                        "Paid Total": st.column_config.NumberColumn("Paid", format="Rp %.0f"),
-                        "Last Paid": st.column_config.TextColumn("Last Paid", width="small"),
-                        "Pipeline Stage": st.column_config.TextColumn("Stage", width="medium"),
-                    }
-                )
-                
-                # Export
-                if st.button("📥 Export to CSV", key="enriched_export"):
-                    csv = df_en.to_csv(index=False)
-                    st.download_button(
-                        label="Download Enriched Data",
-                        data=csv,
-                        file_name=f"enriched_monitoring_{today_wib().isoformat()}.csv",
-                        mime="text/csv"
-                    )
+            if not load_enriched:
+                st.info("Klik 'Load Enriched Data' setelah set filter untuk menampilkan hasil.")
             else:
-                st.info("ℹ️ Tidak ada data sesuai filter.")
+                # Build comprehensive query
+                q_en = """
+                    SELECT 
+                        a.Agreement_No,
+                        a.Debtor_Name,
+                        a.NIK_KTP,
+                        a.Assigned_To AS tracer,
+                        a.Masked_Company_Name AS company,
+                        ag.Agent_Assigned_To AS agent,
+                        ag.assigned_at,
+                        ts.status AS latest_status,
+                        ts.touched_at AS last_touch,
+                        ar.agent_status,
+                        ar.agent_ptp_amount,
+                        ar.agent_ptp_date,
+                        COALESCE(p.amount, 0) AS paid_total,
+                        p.last_paid_date,
+                        CASE 
+                            WHEN COALESCE(p.amount, 0) > 0 THEN '✅ Paid'
+                            WHEN ar.agent_status = 'PTP' THEN '⏳ PTP'
+                            WHEN ts.status IN ('TRACED', 'CONTACTED') THEN '🔍 Traced'
+                            WHEN ag.Agent_Assigned_To IS NOT NULL THEN '👤 Agent Assigned'
+                            WHEN a.Assigned_To IS NOT NULL THEN '📋 Tracer Assigned'
+                            ELSE '⚪ New'
+                        END as pipeline_stage
+                    FROM assign_tracer a
+                    LEFT JOIN agent_assignments ag ON ag.Agreement_No = a.Agreement_No AND IFNULL(ag.active,1)=1
+                    LEFT JOIN (
+                        SELECT tr1.Agreement_No, tr1.status, tr1.touched_at
+                        FROM trace_results tr1
+                        JOIN (SELECT Agreement_No, MAX(touched_at) mt FROM trace_results GROUP BY Agreement_No) t2
+                        ON t2.Agreement_No = tr1.Agreement_No AND t2.mt = tr1.touched_at
+                    ) ts ON ts.Agreement_No = a.Agreement_No
+                    LEFT JOIN (
+                        SELECT Agreement_No, agent_status, agent_ptp_amount, agent_ptp_date
+                        FROM agent_results
+                        WHERE id IN (SELECT MAX(id) FROM agent_results GROUP BY Agreement_No)
+                    ) ar ON ar.Agreement_No = a.Agreement_No
+                    LEFT JOIN (
+                        SELECT Agreement_No, SUM(paid_amount) AS amount, MAX(paid_date) AS last_paid_date
+                        FROM payments
+                        GROUP BY Agreement_No
+                    ) p ON p.Agreement_No = a.Agreement_No
+                    WHERE 1=1
+                """
+                
+                p_en = []
+                if f_ag:
+                    q_en += " AND a.Agreement_No LIKE ?"
+                    p_en.append(f"%{f_ag}%")
+                if f_nik:
+                    q_en += " AND COALESCE(a.NIK_KTP,'') LIKE ?"
+                    p_en.append(f"%{f_nik}%")
+                if f_tracer and f_tracer != "(All)":
+                    q_en += " AND COALESCE(a.Assigned_To,'') = ?"
+                    p_en.append(f_tracer)
+                if f_agent and f_agent != "(All)":
+                    q_en += " AND COALESCE(ag.Agent_Assigned_To,'') = ?"
+                    p_en.append(f_agent)
+                if f_status:
+                    placeholders = ",".join(["?"] * len(f_status))
+                    q_en += f" AND COALESCE(ts.status,'') IN ({placeholders})"
+                    p_en.extend(f_status)
+                if f_pay == "With Payment":
+                    q_en += " AND COALESCE(p.amount,0) > 0"
+                elif f_pay == "Without Payment":
+                    q_en += " AND COALESCE(p.amount,0) = 0"
+                elif f_pay == "Paid Off":
+                    q_en += " AND COALESCE(p.amount,0) >= 100000"  # Assume paid off threshold
+                if ad_from:
+                    q_en += " AND DATE(ag.assigned_at) >= DATE(?)"
+                    p_en.append(str(ad_from))
+                if ad_to:
+                    q_en += " AND DATE(ag.assigned_at) <= DATE(?)"
+                    p_en.append(str(ad_to))
+                
+                q_en += " ORDER BY COALESCE(p.amount,0) DESC, ts.touched_at DESC LIMIT ?"
+                p_en.append(int(limit_rows))
+
+                rows_en = fetchall(q_en, tuple(p_en))
+                
+                if rows_en:
+                    df_en = pd.DataFrame(rows_en)
+                    st.caption(f"📊 Menampilkan **{len(df_en)}** enriched records (limit {int(limit_rows):,})")
+                    
+                    # Rename columns
+                    df_en.columns = [
+                        'Case ID', 'Debtor', 'NIK', 'Tracer', 'Company', 'Agent', 
+                        'Assigned At', 'Trace Status', 'Last Touch', 'Agent Status', 
+                        'PTP Amount', 'PTP Date', 'Paid Total', 'Last Paid', 'Pipeline Stage'
+                    ]
+                    
+                    st.dataframe(
+                        df_en,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Case ID": st.column_config.TextColumn("Case ID", width="medium"),
+                            "Debtor": st.column_config.TextColumn("Debtor", width="medium"),
+                            "NIK": st.column_config.TextColumn("NIK", width="small"),
+                            "Tracer": st.column_config.TextColumn("Tracer", width="small"),
+                            "Company": st.column_config.TextColumn("Company", width="medium"),
+                            "Agent": st.column_config.TextColumn("Agent", width="small"),
+                            "Assigned At": st.column_config.TextColumn("Assigned", width="small"),
+                            "Trace Status": st.column_config.TextColumn("T.Status", width="small"),
+                            "Last Touch": st.column_config.TextColumn("Last Touch", width="small"),
+                            "Agent Status": st.column_config.TextColumn("A.Status", width="small"),
+                            "PTP Amount": st.column_config.NumberColumn("PTP Amt", format="Rp %.0f"),
+                            "PTP Date": st.column_config.TextColumn("PTP Date", width="small"),
+                            "Paid Total": st.column_config.NumberColumn("Paid", format="Rp %.0f"),
+                            "Last Paid": st.column_config.TextColumn("Last Paid", width="small"),
+                            "Pipeline Stage": st.column_config.TextColumn("Stage", width="medium"),
+                        }
+                    )
+                    
+                    # Export
+                    if st.button("📥 Export to CSV", key="enriched_export"):
+                        csv = df_en.to_csv(index=False)
+                        st.download_button(
+                            label="Download Enriched Data",
+                            data=csv,
+                            file_name=f"enriched_monitoring_{today_wib().isoformat()}.csv",
+                            mime="text/csv"
+                        )
+                else:
+                    st.info("ℹ️ Tidak ada data sesuai filter.")
 
         with right_col:
             st.markdown("#### 🔎 Global Lookup Tools")
