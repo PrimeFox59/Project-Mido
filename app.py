@@ -10330,29 +10330,37 @@ def page_supervisor():
         # Initialize session state for dynamic agent allocations
         if 'agent_allocations' not in st.session_state:
             st.session_state['agent_allocations'] = []
-        
-        # Add Agent Allocation Form
-        # IMPORTANT: Wrap in st.form so that changing dropdown / number input
-        # TIDAK memicu rerun (dan loading). Rerun hanya terjadi saat tombol
-        # "➕ Tambah" ditekan.
-        st.markdown("#### ➕ Tambah Agent & Alokasi")
-        with st.form("aa_add_agent_allocation_form", clear_on_submit=False):
-            col_agent, col_count, col_btn = st.columns([2, 1, 1])
-            with col_agent:
-                # Use pre-loaded cached data (no loading on dropdown interaction)
-                new_agent = st.selectbox("Pilih Agent", options=cached_agents, key="aa_new_agent")
-            with col_count:
-                new_count = st.number_input("Jumlah Case", min_value=1, max_value=1000, value=10, step=10, key="aa_new_count")
-            with col_btn:
-                st.markdown("<div style='margin-top: 25px;'></div>", unsafe_allow_html=True)
-                submit_add = st.form_submit_button("➕ Tambah")
+        # Track per-agent counts (auto refreshed when agent list changes)
+        if 'aa_agent_counts' not in st.session_state or st.session_state.get('refresh_agent_list', False):
+            prev_counts = st.session_state.get('aa_agent_counts', {})
+            st.session_state['aa_agent_counts'] = {a: prev_counts.get(a, 0) for a in cached_agents}
+            st.session_state['refresh_agent_list'] = False
 
-            # Handle form submit
-            if submit_add and new_agent:
-                st.session_state['agent_allocations'].append({
-                    'agent': new_agent,
-                    'count': new_count
-                })
+        st.markdown("#### 📋 Set Alokasi per Agent")
+        st.caption("Set jumlah case per agent, lalu simpan. Eksekusi baru berjalan saat tombol Execute ditekan.")
+
+        # Single form to set all allocations without triggering rerun per input
+        with st.form("aa_bulk_allocation_form", clear_on_submit=False):
+            cols = st.columns(3)
+            for idx, agent in enumerate(cached_agents):
+                col = cols[idx % 3]
+                with col:
+                    key = f"aa_count_{agent}"
+                    default_val = st.session_state['aa_agent_counts'].get(agent, 0)
+                    val = st.number_input(agent, min_value=0, max_value=1000, value=default_val, step=5, key=key)
+                    st.session_state['aa_agent_counts'][agent] = val
+
+            submitted = st.form_submit_button("💾 Simpan Alokasi")
+            if submitted:
+                st.session_state['agent_allocations'] = [
+                    {'agent': ag, 'count': cnt}
+                    for ag, cnt in st.session_state['aa_agent_counts'].items()
+                    if cnt and cnt > 0
+                ]
+                if not st.session_state['agent_allocations']:
+                    st.warning("Setidaknya 1 agent harus memiliki alokasi > 0.")
+                else:
+                    st.success(f"{len(st.session_state['agent_allocations'])} agent siap dieksekusi. Tekan Execute untuk mulai.")
         
         # Display Current Allocations
         if st.session_state['agent_allocations']:
@@ -10399,143 +10407,144 @@ def page_supervisor():
                     st.rerun()
             
             if btn_execute:
-                try:
-                    u = current_user() or {}
-                    by = (u.get('full_name') or u.get('login_id') or '-')
-                    
-                    # Get prioritized batch setting for AkuLaku tiering
-                    prioritized_batch = get_setting('akulaku_prioritized_batch', '')
-                    
-                    # Sort dataframe by priority (High first) and touch count (ascending)
-                    if not df.empty:
-                        df_sorted = df.sort_values(['Priority_Score', 'Touch_Count'], ascending=[True, True]).reset_index(drop=True)
-                    else:
-                        st.error("Tidak ada case tersedia untuk assignment.")
-                        st.stop()
-                    
-                    # Execute assignment for each agent allocation
-                    assignment_results = []
-                    total_assigned = 0
-                    total_frozen = 0
-                    total_already_tracer = 0
-                    total_rotation_blocked = 0
-                    total_tier_blocked = 0  # NEW: Track tier blocks
-                    case_idx = 0  # Track position in sorted case list
-                    
-                    for allocation in st.session_state['agent_allocations']:
-                        agent_name = allocation['agent']
-                        target_count = allocation['count']
-                        
-                        assigned_count = 0
-                        frozen_count = 0
-                        already_tracer_count = 0
-                        rotation_blocked_count = 0
-                        tier_blocked_count = 0  # NEW: Track tier blocks per agent
-                        
-                        # Try to assign target_count cases to this agent
-                        while assigned_count < target_count and case_idx < len(df_sorted):
-                            row = df_sorted.iloc[case_idx]
-                            case_idx += 1
-                            
-                            agr = str(row.get('Case_ID') or '').strip()
-                            if not agr:
-                                continue
-                            
-                            # Check frozen by Agreement_No
-                            try:
-                                if is_frozen_by_agreement(agr):
-                                    frozen_count += 1
-                                    continue
-                            except Exception:
-                                pass
-                            
-                            # Check if already assigned to tracer
-                            try:
-                                conn_check = get_db()
-                                cur = conn_check.cursor()
-                                cur.execute("SELECT COUNT(*) as cnt FROM assign_tracer WHERE Agreement_No=? AND IFNULL(Assigned_To,'')!=''", (agr,))
-                                if cur.fetchone()['cnt'] > 0:
-                                    already_tracer_count += 1
-                                    conn_check.close()
-                                    continue
-                                conn_check.close()
-                            except Exception:
-                                pass
-                            
-                            # Try to assign using rotation system with tier checking
-                            success, msg = assign_case_to_agent(agr, agent_name, by, prioritized_batch)
-                            if success:
-                                assigned_count += 1
-                            else:
-                                if "frozen" in msg.lower():
-                                    frozen_count += 1
-                                elif "tier restriction" in msg.lower():
-                                    tier_blocked_count += 1
-                                elif "handle dulu" in msg.lower() or "rotation" in msg.lower():
-                                    rotation_blocked_count += 1
-                        
-                        # Record results for this agent
-                        assignment_results.append({
-                            'Agent': agent_name,
-                            'Target': target_count,
-                            'Assigned': assigned_count,
-                            'Frozen': frozen_count,
-                            'Already_Tracer': already_tracer_count,
-                            'Rotation_Blocked': rotation_blocked_count,
-                            'Tier_Blocked': tier_blocked_count
-                        })
-                        
-                        total_assigned += assigned_count
-                        total_frozen += frozen_count
-                        total_already_tracer += already_tracer_count
-                        total_rotation_blocked += rotation_blocked_count
-                        total_tier_blocked += tier_blocked_count
-                    
-                    # Display results
-                    st.markdown("---")
-                    st.markdown("### ✅ Assignment Completed!")
-                    
-                    # Summary metrics
-                    sum_col1, sum_col2, sum_col3, sum_col4, sum_col5 = st.columns(5)
-                    with sum_col1:
-                        st.metric("✅ Total Assigned", f"{total_assigned:,}")
-                    with sum_col2:
-                        st.metric("❄️ Frozen", f"{total_frozen:,}")
-                    with sum_col3:
-                        st.metric("🔍 Already Tracer", f"{total_already_tracer:,}")
-                    with sum_col4:
-                        st.metric("🔄 Rotation Blocked", f"{total_rotation_blocked:,}")
-                    with sum_col5:
-                        st.metric("🎖️ Tier Blocked", f"{total_tier_blocked:,}")
-                    
-                    # Detailed results table
-                    results_df = pd.DataFrame(assignment_results)
-                    st.markdown("#### 📊 Hasil Assignment per Agent")
-                    st.dataframe(results_df, use_container_width=True, hide_index=True)
-                    
-                    # Audit log
+                with st.spinner("Memproses auto-assignment..."):
                     try:
-                        summary_str = " | ".join([f"{r['Agent']}: {r['Assigned']}/{r['Target']}" for r in assignment_results])
-                        prioritized_info = f"Prioritized batch: {prioritized_batch}" if prioritized_batch else "No prioritized batch"
-                        execute(
-                            "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
-                            (u.get('id') if u else None, "AUTO_AGENT_ASSIGN", 
-                             f"Auto-assigned {total_assigned} cases to {len(st.session_state['agent_allocations'])} agents. {prioritized_info}. Frozen: {total_frozen}, Tracer: {total_already_tracer}, Rotation: {total_rotation_blocked}, Tier: {total_tier_blocked}. Details: {summary_str}")
-                        )
-                    except Exception:
-                        pass
-                    
-                    # Clear allocations and rerun
-                    st.session_state['agent_allocations'] = []
-                    st.success(f"🎉 Assignment berhasil! Total {total_assigned:,} case berhasil di-assign.")
-                    
-                    if st.button("🔄 Refresh Page", type="primary"):
-                        st.rerun()
-                    
-                except Exception as e:
-                    st.error(f"❌ Error saat melakukan assignment: {e}")
-                    import traceback
-                    st.code(traceback.format_exc())
+                        u = current_user() or {}
+                        by = (u.get('full_name') or u.get('login_id') or '-')
+                        
+                        # Get prioritized batch setting for AkuLaku tiering
+                        prioritized_batch = get_setting('akulaku_prioritized_batch', '')
+                        
+                        # Sort dataframe by priority (High first) and touch count (ascending)
+                        if not df.empty:
+                            df_sorted = df.sort_values(['Priority_Score', 'Touch_Count'], ascending=[True, True]).reset_index(drop=True)
+                        else:
+                            st.error("Tidak ada case tersedia untuk assignment.")
+                            st.stop()
+                        
+                        # Execute assignment for each agent allocation
+                        assignment_results = []
+                        total_assigned = 0
+                        total_frozen = 0
+                        total_already_tracer = 0
+                        total_rotation_blocked = 0
+                        total_tier_blocked = 0  # NEW: Track tier blocks
+                        case_idx = 0  # Track position in sorted case list
+                        
+                        for allocation in st.session_state['agent_allocations']:
+                            agent_name = allocation['agent']
+                            target_count = allocation['count']
+                            
+                            assigned_count = 0
+                            frozen_count = 0
+                            already_tracer_count = 0
+                            rotation_blocked_count = 0
+                            tier_blocked_count = 0  # NEW: Track tier blocks per agent
+                            
+                            # Try to assign target_count cases to this agent
+                            while assigned_count < target_count and case_idx < len(df_sorted):
+                                row = df_sorted.iloc[case_idx]
+                                case_idx += 1
+                                
+                                agr = str(row.get('Case_ID') or '').strip()
+                                if not agr:
+                                    continue
+                                
+                                # Check frozen by Agreement_No
+                                try:
+                                    if is_frozen_by_agreement(agr):
+                                        frozen_count += 1
+                                        continue
+                                except Exception:
+                                    pass
+                                
+                                # Check if already assigned to tracer
+                                try:
+                                    conn_check = get_db()
+                                    cur = conn_check.cursor()
+                                    cur.execute("SELECT COUNT(*) as cnt FROM assign_tracer WHERE Agreement_No=? AND IFNULL(Assigned_To,'')!=''", (agr,))
+                                    if cur.fetchone()['cnt'] > 0:
+                                        already_tracer_count += 1
+                                        conn_check.close()
+                                        continue
+                                    conn_check.close()
+                                except Exception:
+                                    pass
+                                
+                                # Try to assign using rotation system with tier checking
+                                success, msg = assign_case_to_agent(agr, agent_name, by, prioritized_batch)
+                                if success:
+                                    assigned_count += 1
+                                else:
+                                    if "frozen" in msg.lower():
+                                        frozen_count += 1
+                                    elif "tier restriction" in msg.lower():
+                                        tier_blocked_count += 1
+                                    elif "handle dulu" in msg.lower() or "rotation" in msg.lower():
+                                        rotation_blocked_count += 1
+                            
+                            # Record results for this agent
+                            assignment_results.append({
+                                'Agent': agent_name,
+                                'Target': target_count,
+                                'Assigned': assigned_count,
+                                'Frozen': frozen_count,
+                                'Already_Tracer': already_tracer_count,
+                                'Rotation_Blocked': rotation_blocked_count,
+                                'Tier_Blocked': tier_blocked_count
+                            })
+                            
+                            total_assigned += assigned_count
+                            total_frozen += frozen_count
+                            total_already_tracer += already_tracer_count
+                            total_rotation_blocked += rotation_blocked_count
+                            total_tier_blocked += tier_blocked_count
+                        
+                        # Display results
+                        st.markdown("---")
+                        st.markdown("### ✅ Assignment Completed!")
+                        
+                        # Summary metrics
+                        sum_col1, sum_col2, sum_col3, sum_col4, sum_col5 = st.columns(5)
+                        with sum_col1:
+                            st.metric("✅ Total Assigned", f"{total_assigned:,}")
+                        with sum_col2:
+                            st.metric("❄️ Frozen", f"{total_frozen:,}")
+                        with sum_col3:
+                            st.metric("🔍 Already Tracer", f"{total_already_tracer:,}")
+                        with sum_col4:
+                            st.metric("🔄 Rotation Blocked", f"{total_rotation_blocked:,}")
+                        with sum_col5:
+                            st.metric("🎖️ Tier Blocked", f"{total_tier_blocked:,}")
+                        
+                        # Detailed results table
+                        results_df = pd.DataFrame(assignment_results)
+                        st.markdown("#### 📊 Hasil Assignment per Agent")
+                        st.dataframe(results_df, use_container_width=True, hide_index=True)
+                        
+                        # Audit log
+                        try:
+                            summary_str = " | ".join([f"{r['Agent']}: {r['Assigned']}/{r['Target']}" for r in assignment_results])
+                            prioritized_info = f"Prioritized batch: {prioritized_batch}" if prioritized_batch else "No prioritized batch"
+                            execute(
+                                "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                                (u.get('id') if u else None, "AUTO_AGENT_ASSIGN", 
+                                 f"Auto-assigned {total_assigned} cases to {len(st.session_state['agent_allocations'])} agents. {prioritized_info}. Frozen: {total_frozen}, Tracer: {total_already_tracer}, Rotation: {total_rotation_blocked}, Tier: {total_tier_blocked}. Details: {summary_str}")
+                            )
+                        except Exception:
+                            pass
+                        
+                        # Clear allocations and rerun
+                        st.session_state['agent_allocations'] = []
+                        st.success(f"🎉 Assignment berhasil! Total {total_assigned:,} case berhasil di-assign.")
+                        
+                        if st.button("🔄 Refresh Page", type="primary"):
+                            st.rerun()
+                        
+                    except Exception as e:
+                        st.error(f"❌ Error saat melakukan assignment: {e}")
+                        import traceback
+                        st.code(traceback.format_exc())
         else:
             st.info("💡 Tambahkan agent dan alokasi case menggunakan form di atas untuk memulai auto-assignment.")
         
