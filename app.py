@@ -717,14 +717,19 @@ def init_db():
         # Create regular indexes (non-unique)
         c.execute("CREATE INDEX IF NOT EXISTS idx_payments_agreement ON payments(Agreement_No)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_payments_date ON payments(paid_date)")
-        # Add new columns for proof images if not exists
-        c.execute("ALTER TABLE payments ADD COLUMN proof_image_drive_id TEXT")
-        c.execute("ALTER TABLE payments ADD COLUMN proof_image_filename TEXT")
-        # Add approval workflow columns
-        c.execute("ALTER TABLE payments ADD COLUMN approval_status TEXT DEFAULT 'pending'")
-        c.execute("ALTER TABLE payments ADD COLUMN approval_by TEXT")
-        c.execute("ALTER TABLE payments ADD COLUMN approval_at TEXT")
-        c.execute("ALTER TABLE payments ADD COLUMN rejection_notes TEXT")
+
+        # Add new columns only if missing (idempotent, avoids 'no column' errors at runtime)
+        existing_cols = [r['name'] for r in c.execute("PRAGMA table_info(payments)").fetchall()]
+        def _add_col(name, ddl):
+            if name not in existing_cols:
+                c.execute(ddl)
+
+        _add_col('proof_image_drive_id', "ALTER TABLE payments ADD COLUMN proof_image_drive_id TEXT")
+        _add_col('proof_image_filename', "ALTER TABLE payments ADD COLUMN proof_image_filename TEXT")
+        _add_col('approval_status', "ALTER TABLE payments ADD COLUMN approval_status TEXT DEFAULT 'pending'")
+        _add_col('approval_by', "ALTER TABLE payments ADD COLUMN approval_by TEXT")
+        _add_col('approval_at', "ALTER TABLE payments ADD COLUMN approval_at TEXT")
+        _add_col('rejection_notes', "ALTER TABLE payments ADD COLUMN rejection_notes TEXT")
     except Exception:
         pass
     # 5) Agent results (handling outcome fields)
@@ -7957,7 +7962,8 @@ def page_user_setting():
                                     
                                     # Option to reset password
                                     st.markdown("**Reset Password (Optional)**")
-                                    new_password = st.text_input("New Password", type="password", key=f"new_pwd_{selected_user_id}")
+                                    raw_new_password = st.text_input("New Password", type="password", key=f"new_pwd_{selected_user_id}")
+                                    new_password = raw_new_password.strip()
                                     
                                     submitted_edit = st.form_submit_button("💾 Save Changes")
                                     
