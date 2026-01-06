@@ -9521,17 +9521,18 @@ def page_supervisor():
     # --- Trace Assigning Tab ---
     with tabs[3]:
         st.subheader("Assign ke Tracer")
-        q1, q2, q3 = st.columns([1.2, 1.2, 1.2])
-        with q1:
-            f_case = st.text_input("Filter Case_ID", key="ta_f_case")
-        with q2:
-            f_name = st.text_input("Filter Customer", key="ta_f_name")
-        with q3:
-            f_phone = st.text_input("Filter Phone", key="ta_f_phone")
+        with st.form("trace_assign_filters"):
+            q1, q2, q3 = st.columns([1.2, 1.2, 1.2])
+            with q1:
+                f_case = st.text_input("Filter Case_ID", key="ta_f_case")
+            with q2:
+                f_name = st.text_input("Filter Customer", key="ta_f_name")
+            with q3:
+                f_phone = st.text_input("Filter Phone", key="ta_f_phone")
+            load_trace = st.form_submit_button("🔍 Terapkan & Load")
 
-    # Build SQL with filters + exclude yang sudah di-assign ke Agent
+        # Build SQL with filters + exclude yang sudah di-assign ke Agent
         where = ["Case_ID IS NOT NULL", "TRIM(Case_ID)<>''"]
-        # VALIDASI: Exclude Case_ID yang sudah di-assign ke Agent
         where.append("Case_ID NOT IN (SELECT Agreement_No FROM agent_assignments WHERE IFNULL(active,1)=1)")
         params = []
         if f_case:
@@ -9540,74 +9541,82 @@ def page_supervisor():
         if f_name:
             where.append("Customer_name LIKE ?")
             params.append(f"%{f_name.strip()}%")
-        # Removed Third_Uid filter per request
         if f_phone:
             where.append("(Phone_Number_1 LIKE ? OR Phone_Number_2 LIKE ?)")
             params.extend([f"%{f_phone.strip()}%", f"%{f_phone.strip()}%"])
         where_sql = " AND ".join(where) if where else "1=1"
-        # Determine available columns dynamically to avoid errors on older DBs
-        try:
-            sup_cols_info = fetchall("PRAGMA table_info(supervisor_data)") or []
-            sup_cols = {str(r.get('name')) for r in sup_cols_info}
-        except Exception:
-            sup_cols = set()
-        base_cols = ["id", "Case_ID", "Customer_name", "NIK_KTP", "DPD", "Phone_Number_1", "Phone_Number_2"]
-        extra_cols = [
-            "EMPLOYMENT_UPDATE",
-            "EMPLOYER",
-            "Debtor_Legal_Name",
-            "Employee_Name",
-            "Employee_ID_Number",
-            "Debtor_Relation_to_Employee",
-        ]
-        select_cols = base_cols + [c for c in extra_cols if c in sup_cols]
-        select_sql = ", ".join(select_cols)
-        rows_sup = fetchall(
-            f"""
-            SELECT {select_sql}
-            FROM supervisor_data
-            WHERE {where_sql}
-            ORDER BY id DESC
-            """,
-            tuple(params)
-        )
-        import pandas as _pd
-        df_sup = _pd.DataFrame(rows_sup) if rows_sup else _pd.DataFrame(columns=select_cols)
-        # Ensure extra columns exist in the DataFrame even if not in DB schema
-        for col in extra_cols:
-            if col not in df_sup.columns:
-                df_sup[col] = ""
-        # Add selection column
-        select_all = st.checkbox("Pilih semua yang ditampilkan", key="ta_select_all")
-        if "Selected" not in df_sup.columns:
-            df_sup.insert(0, "Selected", bool(select_all))
-        else:
+
+        # Only run heavy query after user clicks load
+        if load_trace or 'ta_cache' in st.session_state:
+            # Determine available columns dynamically to avoid errors on older DBs
             try:
-                df_sup["Selected"] = bool(select_all)
+                sup_cols_info = fetchall("PRAGMA table_info(supervisor_data)") or []
+                sup_cols = {str(r.get('name')) for r in sup_cols_info}
             except Exception:
-                pass
-        st.caption(f"Menampilkan {len(df_sup)} baris dari supervisor_data")
-        edited = st.data_editor(
-            df_sup,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Selected": st.column_config.CheckboxColumn("Selected", default=select_all),
-                "Case_ID": st.column_config.TextColumn("Case_ID", disabled=True),
-                "Customer_name": st.column_config.TextColumn("Customer", disabled=True),
-                "NIK_KTP": st.column_config.TextColumn("NIK", disabled=True),
-                "DPD": st.column_config.TextColumn("DPD", disabled=True),
-                "Phone_Number_1": st.column_config.TextColumn("Phone 1", disabled=True),
-                "Phone_Number_2": st.column_config.TextColumn("Phone 2", disabled=True),
-                "EMPLOYMENT_UPDATE": st.column_config.TextColumn("EMPLOYMENT_UPDATE", disabled=True),
-                "EMPLOYER": st.column_config.TextColumn("EMPLOYER", disabled=True),
-                "Debtor_Legal_Name": st.column_config.TextColumn("Debtor_Legal_Name", disabled=True),
-                "Employee_Name": st.column_config.TextColumn("Employee_Name", disabled=True),
-                "Employee_ID_Number": st.column_config.TextColumn("Employee_ID_Number", disabled=True),
-                "Debtor_Relation_to_Employee": st.column_config.TextColumn("Debtor_Relation_to_Employee", disabled=True),
-            },
-            num_rows="fixed",
-        )
+                sup_cols = set()
+            base_cols = ["id", "Case_ID", "Customer_name", "NIK_KTP", "DPD", "Phone_Number_1", "Phone_Number_2"]
+            extra_cols = [
+                "EMPLOYMENT_UPDATE",
+                "EMPLOYER",
+                "Debtor_Legal_Name",
+                "Employee_Name",
+                "Employee_ID_Number",
+                "Debtor_Relation_to_Employee",
+            ]
+            select_cols = base_cols + [c for c in extra_cols if c in sup_cols]
+            select_sql = ", ".join(select_cols)
+            rows_sup = fetchall(
+                f"""
+                SELECT {select_sql}
+                FROM supervisor_data
+                WHERE {where_sql}
+                ORDER BY id DESC
+                """,
+                tuple(params)
+            )
+            import pandas as _pd
+            df_sup = _pd.DataFrame(rows_sup) if rows_sup else _pd.DataFrame(columns=select_cols)
+            st.session_state['ta_cache'] = df_sup.copy()
+        else:
+            df_sup = None
+
+        if df_sup is None:
+            st.info("Klik \"Terapkan & Load\" untuk menampilkan data tracer.")
+        else:
+            df_sup = st.session_state.get('ta_cache', df_sup)
+            for col in ["EMPLOYMENT_UPDATE", "EMPLOYER", "Debtor_Legal_Name", "Employee_Name", "Employee_ID_Number", "Debtor_Relation_to_Employee"]:
+                if col not in df_sup.columns:
+                    df_sup[col] = ""
+            select_all = st.checkbox("Pilih semua yang ditampilkan", key="ta_select_all")
+            if "Selected" not in df_sup.columns:
+                df_sup.insert(0, "Selected", bool(select_all))
+            else:
+                try:
+                    df_sup["Selected"] = bool(select_all)
+                except Exception:
+                    pass
+            st.caption(f"Menampilkan {len(df_sup)} baris dari supervisor_data")
+            edited = st.data_editor(
+                df_sup,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Selected": st.column_config.CheckboxColumn("Selected", default=select_all),
+                    "Case_ID": st.column_config.TextColumn("Case_ID", disabled=True),
+                    "Customer_name": st.column_config.TextColumn("Customer", disabled=True),
+                    "NIK_KTP": st.column_config.TextColumn("NIK", disabled=True),
+                    "DPD": st.column_config.TextColumn("DPD", disabled=True),
+                    "Phone_Number_1": st.column_config.TextColumn("Phone 1", disabled=True),
+                    "Phone_Number_2": st.column_config.TextColumn("Phone 2", disabled=True),
+                    "EMPLOYMENT_UPDATE": st.column_config.TextColumn("EMPLOYMENT_UPDATE", disabled=True),
+                    "EMPLOYER": st.column_config.TextColumn("EMPLOYER", disabled=True),
+                    "Debtor_Legal_Name": st.column_config.TextColumn("Debtor_Legal_Name", disabled=True),
+                    "Employee_Name": st.column_config.TextColumn("Employee_Name", disabled=True),
+                    "Employee_ID_Number": st.column_config.TextColumn("Employee_ID_Number", disabled=True),
+                    "Debtor_Relation_to_Employee": st.column_config.TextColumn("Debtor_Relation_to_Employee", disabled=True),
+                },
+                num_rows="fixed",
+            )
 
         # Assignment controls
         c1, c2 = st.columns([1,1])
@@ -10093,14 +10102,15 @@ def page_supervisor():
                     filter_info.append(f"Employment: **{emp_list}**")
                 st.info("📌 Filter aktif: " + " | ".join(filter_info))
         
-        # Basic Filters
-        q1, q2, q3 = st.columns([1.2, 1.2, 1.2])
-        with q1:
-            fa_case = st.text_input("Filter Case_ID", key="aa_f_case")
-        with q2:
-            fa_name = st.text_input("Filter Customer", key="aa_f_name")
-        with q3:
-            fa_phone = st.text_input("Filter Phone", key="aa_f_phone")
+        with st.form("agent_assign_filters_basic"):
+            q1, q2, q3 = st.columns([1.2, 1.2, 1.2])
+            with q1:
+                fa_case = st.text_input("Filter Case_ID", key="aa_f_case")
+            with q2:
+                fa_name = st.text_input("Filter Customer", key="aa_f_name")
+            with q3:
+                fa_phone = st.text_input("Filter Phone", key="aa_f_phone")
+            load_agents = st.form_submit_button("🔍 Terapkan & Load")
 
         # No more checkbox for hiding assigned - always hide already assigned cases
 
@@ -10138,18 +10148,20 @@ def page_supervisor():
         emp_str = ','.join(sorted(selected_employment)) if selected_employment else ''
         cache_key = f"{fa_case}|{fa_name}|{fa_phone}|ALL|{selected_lending_entity}|{emp_str}"
         
-        # Check if we can use cached data (filters haven't changed)
         use_cache = (
             'aa_df_cache' in st.session_state and 
             'aa_cache_key' in st.session_state and 
             st.session_state['aa_cache_key'] == cache_key
         )
 
-        # OPTIMIZATION: Use cached dataframe if filters haven't changed
-        if use_cache:
+        data_ready = load_agents or use_cache
+
+        if not data_ready:
+            st.info("Klik \"Terapkan & Load\" untuk menampilkan data agent.")
+            df = pd.DataFrame()
+        elif use_cache and not load_agents:
             df = st.session_state['aa_df_cache'].copy()
         else:
-            # Determine available columns dynamically
             try:
                 _sup_cols = fetchall("PRAGMA table_info(supervisor_data)") or []
                 sup_cols = {str(r.get('name')) for r in _sup_cols}
@@ -10157,14 +10169,12 @@ def page_supervisor():
                 sup_cols = set()
             base_cols = ["s.id", "s.Case_ID", "s.Customer_name", "s.NIK_KTP", "s.DPD", "s.Phone_Number_1", "s.Phone_Number_2", "s.Lending_Entity", "s.Principle_Outstanding", "s.Assignment_Date"]
             extra_cols = [
-                # employment details (for context)
                 ("t.EMPLOYMENT_UPDATE", "EMPLOYMENT_UPDATE"), 
                 ("t.EMPLOYER", "EMPLOYER"), 
                 ("s.Debtor_Legal_Name", "Debtor_Legal_Name"), 
                 ("s.Employee_Name", "Employee_Name"), 
                 ("s.Employee_ID_Number", "Employee_ID_Number"), 
                 ("s.Debtor_Relation_to_Employee", "Debtor_Relation_to_Employee"),
-                # agent-editable fields (for visibility)
                 ("s.STATUS", "STATUS"), 
                 ("s.REGISTERED_PHONE", "REGISTERED_PHONE"), 
                 ("s.Additional_Contacts", "Additional_Contacts"), 
@@ -10173,10 +10183,8 @@ def page_supervisor():
                 ("s.Paid_Off_Status", "Paid_Off_Status")
             ]
             
-            # Build SELECT clause
             sel_parts = base_cols.copy()
             for col_expr, col_alias in extra_cols:
-                # Check if base column exists in supervisor_data
                 base_col = col_expr.split('.')[-1]
                 if base_col in sup_cols or col_expr.startswith('t.'):
                     sel_parts.append(f"{col_expr} as {col_alias}")
@@ -10193,13 +10201,11 @@ def page_supervisor():
             )
             import pandas as _pd
             
-            # Clean up column names for DataFrame
             if rows_sup:
                 clean_rows = []
                 for row in rows_sup:
                     clean_row = {}
                     for k, v in row.items():
-                        # Remove table prefix (s. or t.)
                         clean_key = k.split('.')[-1] if '.' in k else k
                         clean_row[clean_key] = v
                     clean_rows.append(clean_row)
@@ -10207,19 +10213,16 @@ def page_supervisor():
             else:
                 df = _pd.DataFrame()
             
-            # Ensure all expected columns exist
             expected_cols = ["id", "Case_ID", "Customer_name", "NIK_KTP", "DPD", "Phone_Number_1", "Phone_Number_2", "Lending_Entity", "EMPLOYMENT_UPDATE", "EMPLOYER"]
             for col in expected_cols:
                 if col not in df.columns:
                     df[col] = ""
             
-            # Format Principle_Outstanding column to Rupiah
             if 'Principle_Outstanding' in df.columns:
                 def format_rupiah(val):
                     try:
                         if pd.isna(val) or val == '' or val is None:
                             return "Rp 0"
-                        # Clean string: remove non-numeric except dots
                         val_str = str(val).strip()
                         val_clean = ''.join(c for c in val_str if c.isdigit() or c == '.')
                         if not val_clean:
@@ -10231,12 +10234,8 @@ def page_supervisor():
                 
                 df['Principle_Outstanding'] = df['Principle_Outstanding'].apply(format_rupiah)
             
-            # OPTIMIZED: Add touch count and priority indicator - BATCH QUERY
             if not df.empty and 'Case_ID' in df.columns:
-                # Get all case IDs for batch query
                 case_ids = [str(row.get('Case_ID', '')) for row in df.to_dict('records') if row.get('Case_ID')]
-                
-                # Batch query touch counts (1 query instead of N queries)
                 touch_count_map = {}
                 if case_ids:
                     placeholders = ','.join(['?'] * len(case_ids))
@@ -10248,17 +10247,14 @@ def page_supervisor():
                     """
                     touch_results = fetchall(touch_query, tuple(case_ids))
                     touch_count_map = {str(r.get('Agreement_No', '')): r.get('touch_count', 0) for r in touch_results}
-                
-                # Build lists efficiently with numeric priority for sorting
                 touch_counts = []
                 priorities = []
-                priority_scores = []  # Lower score = higher priority
-                for idx, row in df.iterrows():
+                priority_scores = []
+                for _, row in df.iterrows():
                     case_id = str(row.get('Case_ID', ''))
                     if case_id and case_id in touch_count_map:
                         count = touch_count_map[case_id]
                         touch_counts.append(count)
-                        # Priority: 🔴 High (0-1 touches), 🟡 Medium (2-3), 🟢 Low (4+)
                         if count <= 1:
                             priorities.append("🔴 High (Fresh)")
                             priority_scores.append(1)
@@ -10272,12 +10268,10 @@ def page_supervisor():
                         touch_counts.append(0)
                         priorities.append("🔴 High (Fresh)")
                         priority_scores.append(1)
-                
                 df.insert(1, "Priority", priorities)
                 df.insert(2, "Touch_Count", touch_counts)
-                df.insert(3, "Priority_Score", priority_scores)  # Hidden column for sorting
+                df.insert(3, "Priority_Score", priority_scores)
             
-            # Store in cache
             st.session_state['aa_df_cache'] = df.copy()
             st.session_state['aa_cache_key'] = cache_key
 
