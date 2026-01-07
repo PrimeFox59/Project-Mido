@@ -5250,12 +5250,13 @@ def page_agent():
                 f_phone = st.text_input("Phone Number", key="f_phone_input")
             
             # Reset button
-            if st.button("🔄 Reset Filter", key="btn_reset_agent"):
+            def _reset_agent_filters():
                 for k in ["f_case_input", "f_name_input", "f_phone_input"]:
                     if k in st.session_state:
                         st.session_state[k] = ""
                 st.session_state.agent_page_number = 1
-                st.rerun() 
+
+            st.button("🔄 Reset Filter", key="btn_reset_agent", on_click=_reset_agent_filters) 
                 
         # --- Prepare Query Parameters ---
         PAGE_SIZE = 50
