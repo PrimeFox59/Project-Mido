@@ -11401,7 +11401,7 @@ def page_utility():
         lib_tabs = st.tabs(["📋 View Library", "➕ Add/Edit Manual", "📤 Upload CSV/Excel", "🗑️ Delete Entry"])
         
         # --- View Library Tab ---
-        with lib_tabs[1]:
+        with lib_tabs[0]:
             st.markdown("### 📋 Current Library")
             
             # Search filter
@@ -11447,7 +11447,7 @@ def page_utility():
                 st.info("📭 Library masih kosong. Tambahkan entry melalui tab 'Add/Edit Manual' atau 'Upload CSV/Excel'.")
         
         # --- Add/Edit Manual Tab ---
-        with lib_tabs[2]:
+        with lib_tabs[1]:
             st.markdown("### ➕ Add or Edit Entry")
             
             # Check if editing existing entry
@@ -11513,7 +11513,7 @@ def page_utility():
                         st.error("❌ Both Masked and Decoded names are required!")
         
         # --- Upload CSV/Excel Tab ---
-        with lib_tabs[3]:
+        with lib_tabs[2]:
             st.markdown("### 📤 Upload CSV/Excel Library")
             st.markdown("""
             <div style='background: #FEF3C7; padding: 12px; border-radius: 8px; border-left: 4px solid #F59E0B; margin-bottom: 16px;'>
@@ -11688,7 +11688,7 @@ def page_utility():
                     st.error(f"❌ Error processing file: {e}")
         
         # --- Delete Entry Tab ---
-        with lib_tabs[4]:
+        with lib_tabs[3]:
             st.markdown("### 🗑️ Delete Entry")
             st.warning("⚠️ **Warning:** Deleting an entry is permanent and cannot be undone!")
             
