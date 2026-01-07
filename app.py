@@ -11741,11 +11741,11 @@ def page_utility():
         migration_tabs = st.tabs(["📋 Supervisor Data", "🔍 Tracer Data", "👤 Agent Results", "💰 Payment Data"])
         
         # --- Supervisor Data Migration ---
-        with migration_tabs[1]:
+        with migration_tabs[0]:
             st.subheader("perbaikan")
         
         # --- Tracer Data Migration ---
-        with migration_tabs[2]:
+        with migration_tabs[1]:
             st.subheader("Import Tracer Data (Employment Update)")
             
             st.markdown("""
@@ -11979,7 +11979,7 @@ def page_utility():
                     st.error(f"❌ Error membaca file: {e}")
         
         # --- Agent Results Migration ---
-        with migration_tabs[3]:
+        with migration_tabs[2]:
             st.subheader("Import Agent Results (Handling Outcome)")
             
             st.markdown("""
@@ -12158,7 +12158,7 @@ def page_utility():
                     st.error(f"❌ Error membaca file: {e}")
         
         # --- Payment Data Migration ---
-        with migration_tabs[4]:
+        with migration_tabs[3]:
             st.subheader("Import Payment Data")
             
             st.markdown("""
