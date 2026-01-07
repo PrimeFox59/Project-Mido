@@ -5176,74 +5176,14 @@ def page_agent():
     agent_name = (u.get('full_name') or u.get('login_id') or '-') if u else '-'
     st.title("Agent Menu")
     
-    # Jika Supervisor/Superuser: tampilkan semua assignment
-    # Jika Agent: hanya tampilkan assignment untuk dirinya sendiri
-    if user_role in ("Superuser", "Supervisor"):
-        st.caption(f"Mode: **{user_role}** — Melihat semua assignment agent")
-        # Enhanced query dengan kolom tambahan:
-        # - Assignment Date (dari agent_assignments)
-        # - Status (dari supervisor_data)
-        # - Employment Update & Employer (dari assign_tracer - hasil trace)
-        # - Updated Company Contacts (placeholder untuk hasil googling)
-        # - Work status indicator (sudah dikerjakan atau belum)
-        rows = fetchall("""
-            SELECT 
-                aa.Agreement_No AS Case_ID, 
-                aa.Agent_Assigned_To, 
-                aa.assigned_at AS Assignment_Date,
-                CAST(COALESCE(sd.Principle_Outstanding, '0') AS REAL) AS Principle_Outstanding,
-                COALESCE(sd.STATUS, '-') AS Status,
-                COALESCE(at.EMPLOYMENT_UPDATE, '-') AS Employment_Update,
-                COALESCE(at.EMPLOYER, '-') AS Employer,
-                COALESCE(at.Decoded_Company_Name, '') AS Decoded_Company_Name,
-                COALESCE(at.Employee_Name, '') AS Employee_Name,
-                COALESCE(sd.Customer_name, '') AS Customer_Name,
-                COALESCE(sd.email, '') AS Email,
-                COALESCE(sd.Phone_Number_1, '') AS Phone_Number,
-                COALESCE(sd.Additional_Contacts, '-') AS Updated_Company_Contacts,
-                (
-                    COALESCE(
-                        (SELECT SUM(paid_amount) 
-                         FROM payments p 
-                         WHERE p.Agreement_No = aa.Agreement_No),
-                        0
-                    ) +
-                    COALESCE(
-                        (SELECT SUM(agent_ptp_amount) 
-                         FROM agent_results ar 
-                         WHERE ar.Agreement_No = aa.Agreement_No 
-                         AND IFNULL(ar.approval_status, 'approved') = 'approved'),
-                        0
-                    )
-                ) AS Total_Approved_Payment,
-                CASE 
-                    WHEN EXISTS (
-                        SELECT 1 FROM trace_results tr 
-                        WHERE tr.Agreement_No = aa.Agreement_No
-                    ) OR EXISTS (
-                        SELECT 1 FROM agent_results ar2 
-                        WHERE ar2.Agreement_No = aa.Agreement_No
-                    ) THEN 1
-                    ELSE 0
-                END AS Is_Worked_On
-            FROM agent_assignments aa
-            LEFT JOIN supervisor_data sd 
-                ON sd.Case_ID = aa.Agreement_No 
-                OR sd.Virtual_Account_Number = aa.Agreement_No
-                OR sd.Third_Uid = aa.Agreement_No
-            LEFT JOIN assign_tracer at
-                ON at.Agreement_No = aa.Agreement_No
-            WHERE aa.active = 1 
-              AND IFNULL(aa.assignment_type, 'agent') = 'agent'
-            ORDER BY aa.assigned_at DESC 
-            LIMIT 500
-        """)
-    else:
-        # Agent view: Check for rejected payments/cicilan
-        # Try-except untuk backward compatibility jika kolom approval belum ada
+    # --- Session State Init ---
+    if "agent_page_number" not in st.session_state:
+        st.session_state.agent_page_number = 1
+
+    # --- Agent Notifications (Rejections & Today's PTP) ---
+    if user_role not in ("Superuser", "Supervisor"):
         rejected_payments = []
         rejected_cicilan = []
-        
         try:
             rejected_payments = fetchall("""
                 SELECT id, Agreement_No AS Case_ID, paid_amount, paid_date, 
@@ -5252,11 +5192,9 @@ def page_agent():
                        IFNULL(approval_at, '') as approval_at
                 FROM payments 
                 WHERE uploaded_by = ? AND IFNULL(approval_status, 'pending') = 'rejected'
-                ORDER BY approval_at DESC
-                LIMIT 10
+                ORDER BY approval_at DESC LIMIT 10
             """, (agent_name,))
-        except Exception:
-            pass  # Kolom approval_status belum ada
+        except Exception: pass
         
         try:
             rejected_cicilan = fetchall("""
@@ -5266,52 +5204,110 @@ def page_agent():
                        IFNULL(approval_at, '') as approval_at
                 FROM agent_results 
                 WHERE agent = ? AND IFNULL(approval_status, 'pending') = 'rejected'
-                ORDER BY approval_at DESC
-                LIMIT 10
+                ORDER BY approval_at DESC LIMIT 10
             """, (agent_name,))
-        except Exception:
-            pass  # Kolom approval_status belum ada
+        except Exception: pass
         
-        # Show rejection notifications
         if rejected_payments or rejected_cicilan:
             st.error("⚠️ **PERHATIAN: Ada laporan yang ditolak oleh Supervisor!**")
-            
             if rejected_payments:
-                with st.expander(f"❌ {len(rejected_payments)} Payment Report Ditolak - Klik untuk detail", expanded=True):
+                with st.expander(f"❌ {len(rejected_payments)} Payment Report Ditolak", expanded=True):
                     for rp in rejected_payments:
-                        st.markdown(f"""
-                        **Case ID:** {rp['Case_ID']}  
-                        **Jumlah:** Rp {rp['paid_amount']:,.0f}  
-                        **Tanggal:** {rp['paid_date']}  
-                        **Ditolak oleh:** {rp['approval_by']} pada {rp['approval_at']}  
-                        **Alasan:** {rp['rejection_notes']}
-                        """)
-                        st.markdown("---")
-            
+                        st.markdown(f"**Case:** {rp['Case_ID']} | **Rp {rp['paid_amount']:,.0f}** | **Alasan:** {rp['rejection_notes']}")
             if rejected_cicilan:
-                with st.expander(f"❌ {len(rejected_cicilan)} Cicilan Ditolak - Klik untuk detail", expanded=True):
+                with st.expander(f"❌ {len(rejected_cicilan)} Cicilan Ditolak", expanded=True):
                     for rc in rejected_cicilan:
-                        st.markdown(f"""
-                        **Case ID:** {rc['Case_ID']}  
-                        **Jumlah Cicilan:** Rp {rc['agent_ptp_amount']:,.0f}  
-                        **Tanggal:** {rc['agent_ptp_date']}  
-                        **Ditolak oleh:** {rc['approval_by']} pada {rc['approval_at']}  
-                        **Alasan:** {rc['rejection_notes']}
-                        """)
-                        st.markdown("---")
-            
-            st.info("💡 Silakan perbaiki dan submit ulang laporan sesuai catatan Supervisor")
-            st.markdown("---")
-        
-        # Simple PTP notif today
+                        st.markdown(f"**Case:** {rc['Case_ID']} | **Rp {rc['agent_ptp_amount']:,.0f}** | **Alasan:** {rc['rejection_notes']}")
+
+        # PTP Today Notification
         today_str = today_wib().isoformat()
         ptp_today = fetchone("SELECT COUNT(*) c FROM agent_results WHERE agent=? AND DATE(agent_ptp_date)=?", (agent_name, today_str))
         count_ptp = ptp_today.get('c') if ptp_today else 0
-        if count_ptp and count_ptp > 0:
-            st.success(f"Hai {agent_name}, hari ini kamu ada {count_ptp} PTP. Klik di bawah untuk lihat daftar.")
+        if count_ptp > 0:
+            st.success(f"Hai {agent_name}, hari ini kamu ada {count_ptp} PTP. Cek tab 'My PTP' atau filter daftar di bawah.")
+
+    # --- Tabs Layout ---
+    tabs_list = ["Cases"]
+    if user_role in ("Superuser", "Supervisor"):
+        tabs_list.extend(["Payment & Cicilan Approval", "My PTP", "Monthly Payment Recap", "All-time Payment Recap", "Email Templates"])
+    else:
+        tabs_list.extend(["My PTP", "Monthly Payment Recap", "All-time Payment Recap", "Email Templates"])
+    
+    tabs = st.tabs(tabs_list)
+
+    # --- Tab 1: Cases (Server-side Pagination & Search) ---
+    with tabs[0]:
+        st.subheader("🔍 Filter & Assignment List")
         
-        # Agent's assigned loans - Enhanced dengan kolom tambahan
-        rows = fetchall("""
+        # --- Filter UI ---
+        with st.expander("Klik untuk buka/tutup filter", expanded=True):
+            fc1, fc2, fc3 = st.columns(3)
+            with fc1:
+                f_case = st.text_input("Case ID", key="f_case_input")
+            with fc2:
+                f_name = st.text_input("Customer/Company Name", key="f_name_input")
+            with fc3:
+                f_phone = st.text_input("Phone Number", key="f_phone_input")
+            
+            # Reset button
+            if st.button("🔄 Reset Filter", key="btn_reset_agent"):
+                for k in ["f_case_input", "f_name_input", "f_phone_input"]:
+                    if k in st.session_state:
+                        st.session_state[k] = ""
+                st.session_state.agent_page_number = 1
+                st.rerun() 
+                
+        # --- Prepare Query Parameters ---
+        PAGE_SIZE = 50
+        page = st.session_state.agent_page_number
+        if page < 1: page = 1
+        offset = (page - 1) * PAGE_SIZE
+        
+        conditions = ["aa.active = 1", "IFNULL(aa.assignment_type, 'agent') = 'agent'"]
+        params = []
+        
+        # User constraint
+        if user_role not in ("Superuser", "Supervisor"):
+            conditions.append("aa.Agent_Assigned_To = ?")
+            params.append(agent_name)
+        
+        # Filter constraints
+        if f_case:
+            conditions.append("aa.Agreement_No LIKE ?")
+            params.append(f"%{f_case.strip()}%")
+        if f_name:
+            conditions.append("(sd.Customer_name LIKE ? OR at.Employee_Name LIKE ? OR at.EMPLOYER LIKE ? OR at.Decoded_Company_Name LIKE ?)")
+            pat = f"%{f_name.strip()}%"
+            params.extend([pat, pat, pat, pat])
+        if f_phone:
+            conditions.append("(sd.Phone_Number_1 LIKE ? OR sd.Phone_Number_2 LIKE ?)")
+            pat = f"%{f_phone.strip()}%"
+            params.extend([pat, pat])
+
+        where_clause = " AND ".join(conditions)
+        
+        # --- Count Query ---
+        count_sql = f"""
+            SELECT COUNT(*) c 
+            FROM agent_assignments aa
+            LEFT JOIN supervisor_data sd ON sd.Case_ID = aa.Agreement_No OR sd.Virtual_Account_Number=aa.Agreement_No OR sd.Third_Uid=aa.Agreement_No
+            LEFT JOIN assign_tracer at ON at.Agreement_No = aa.Agreement_No
+            WHERE {where_clause}
+        """
+        c_res = fetchone(count_sql, tuple(params))
+        total_rows = c_res.get('c', 0) if c_res else 0
+        total_pages = max(1, -(-total_rows // PAGE_SIZE)) # Ceil division
+        
+        # Adjust page bounds
+        if page > total_pages:
+            page = total_pages
+            st.session_state.agent_page_number = page
+            offset = (page - 1) * PAGE_SIZE
+
+        # --- Data Query (Optimized) ---
+        # Note: Subqueries for payments/results are heavy. We only run them for the 50 fetched rows.
+        # SQLite efficiently handles LIMIT.
+        data_sql = f"""
             SELECT 
                 aa.Agreement_No AS Case_ID, 
                 aa.Agent_Assigned_To, 
@@ -5320,21 +5316,11 @@ def page_agent():
                 COALESCE(at.EMPLOYMENT_UPDATE, '-') AS Employment_Update,
                 COALESCE(at.EMPLOYER, '-') AS Employer,
                 COALESCE(at.Decoded_Company_Name, '') AS Decoded_Company_Name,
-                COALESCE(at.Employee_Name, '') AS Employee_Name,
                 COALESCE(sd.Customer_name, '') AS Customer_Name,
-                COALESCE(sd.email, '') AS Email,
-                COALESCE(sd.Phone_Number_1, '') AS Phone_Number,
                 COALESCE(sd.Additional_Contacts, '-') AS Updated_Company_Contacts,
-                CASE 
-                    WHEN EXISTS (
-                        SELECT 1 FROM trace_results tr 
-                        WHERE tr.Agreement_No = aa.Agreement_No
-                    ) OR EXISTS (
-                        SELECT 1 FROM agent_results ar2 
-                        WHERE ar2.Agreement_No = aa.Agreement_No
-                    ) THEN 1
-                    ELSE 0
-                END AS Is_Worked_On
+                CAST(COALESCE(sd.Principle_Outstanding, '0') AS REAL) AS Principle_Outstanding,
+                (SELECT COUNT(*) FROM trace_results tr WHERE tr.Agreement_No = aa.Agreement_No) as Trace_Count,
+                (SELECT COUNT(*) FROM agent_results ar2 WHERE ar2.Agreement_No = aa.Agreement_No) as Result_Count
             FROM agent_assignments aa
             LEFT JOIN supervisor_data sd 
                 ON sd.Case_ID = aa.Agreement_No 
@@ -5342,189 +5328,98 @@ def page_agent():
                 OR sd.Third_Uid = aa.Agreement_No
             LEFT JOIN assign_tracer at
                 ON at.Agreement_No = aa.Agreement_No
-            WHERE aa.Agent_Assigned_To=? 
-              AND aa.active = 1
-              AND IFNULL(aa.assignment_type, 'agent') = 'agent'
+            WHERE {where_clause}
             ORDER BY aa.assigned_at DESC 
-            LIMIT 500
-        """, (agent_name,))
-    
-    if not rows:
-        st.info("Belum ada assignment.")
-        return
-
-    # Tabs layout to tidy up Agent Menu
-    # Supervisor memiliki tab Payment & Cicilan Approval
-    if user_role in ("Superuser", "Supervisor"):
-        tabs = st.tabs([
-            "Cases",
-            "Payment & Cicilan Approval",
-            "My PTP",
-            "Monthly Payment Recap",
-            "All-time Payment Recap",
-            "Email Templates",
-        ])
-    else:
-        tabs = st.tabs([
-            "Cases",
-            "My PTP",
-            "Monthly Payment Recap",
-            "All-time Payment Recap",
-            "Email Templates",
-        ])
-
-    # --- Cases tab ---
-    with tabs[0]:
-        st.subheader("🔍 Filter Cases")
+            LIMIT ? OFFSET ?
+        """
         
-        # Filters dalam expandable section
-        with st.expander("Klik untuk buka/tutup filter", expanded=False):
-            filter_col1, filter_col2, filter_col3 = st.columns(3)
-            
-            with filter_col1:
-                filter_case_id = st.text_input("Case ID", key="filter_case_id", placeholder="Cari Case ID...")
-                filter_customer_name = st.text_input("Customer Name", key="filter_customer_name", placeholder="Cari nama customer...")
-            
-            with filter_col2:
-                filter_employee_name = st.text_input("Employee Name", key="filter_employee_name", placeholder="Cari nama employee...")
-                filter_company = st.text_input("Company Name", key="filter_company", placeholder="Cari nama perusahaan...")
-            
-            with filter_col3:
-                filter_email = st.text_input("Email", key="filter_email", placeholder="Cari email...")
-                filter_phone = st.text_input("Phone Number", key="filter_phone", placeholder="Cari nomor telepon...")
-            
-            # Reset Filter button
-            if st.button("🔄 Reset Filter", use_container_width=True, type="secondary"):
-                for key in ['filter_case_id', 'filter_customer_name', 'filter_employee_name', 
-                           'filter_company', 'filter_email', 'filter_phone']:
-                    if key in st.session_state:
-                        del st.session_state[key]
-                st.rerun()
+        # Add LIMIT params
+        q_params = params + [PAGE_SIZE, offset]
+        rows = fetchall(data_sql, tuple(q_params))
         
-        # Apply filters
-        filtered = rows
-        
-        if filter_case_id and filter_case_id.strip():
-            filtered = [r for r in filtered if filter_case_id.strip().lower() in str(r.get('Case_ID', '')).lower()]
-        
-        if filter_customer_name and filter_customer_name.strip():
-            filtered = [r for r in filtered if filter_customer_name.strip().lower() in str(r.get('Customer_Name', '')).lower()]
-        
-        if filter_employee_name and filter_employee_name.strip():
-            filtered = [r for r in filtered if filter_employee_name.strip().lower() in str(r.get('Employee_Name', '')).lower()]
-        
-        if filter_company and filter_company.strip():
-            filtered = [r for r in filtered if filter_company.strip().lower() in (str(r.get('Employer', '')) + str(r.get('Decoded_Company_Name', ''))).lower()]
-        
-        if filter_email and filter_email.strip():
-            filtered = [r for r in filtered if filter_email.strip().lower() in str(r.get('Email', '')).lower()]
-        
-        if filter_phone and filter_phone.strip():
-            filtered = [r for r in filtered if filter_phone.strip() in str(r.get('Phone_Number', ''))]
-        
-        # Show filter results count
-        st.caption(f"📊 Menampilkan **{len(filtered)}** dari **{len(rows)}** cases")
-
-        # Layout 2 kolom: Assignments table (kiri) & Case Details (kanan)
-        col_assignments, col_case_details = st.columns([1.5, 1])
+        # Layout: Table (Left) + Details (Right)
+        col_assignments, col_case_details = st.columns([1.6, 1])
         
         with col_assignments:
-            st.subheader("Assignments")
+            # Stats & Pagination Header
+            st.caption(f"Showing {len(rows)} of {total_rows} cases (Page {page}/{total_pages})")
             
-            # Build enhanced table dengan kolom baru
-            data = []
-            for r in filtered:
-                row_data = {
+            pg_col1, pg_col2, pg_col3, pg_col4 = st.columns([1, 1, 2, 4])
+            with pg_col1:
+                if st.button("◀", key="prev_page", disabled=(page <= 1)):
+                    st.session_state.agent_page_number -= 1
+                    st.rerun()
+            with pg_col2:
+                if st.button("▶", key="next_page", disabled=(page >= total_pages)):
+                    st.session_state.agent_page_number += 1
+                    st.rerun()
+            
+            # Prepare Dataframe
+            df_data = []
+            for r in rows:
+                is_worked = (r.get("Trace_Count",0) > 0) or (r.get("Result_Count",0) > 0)
+                d = {
                     "Case_ID": r.get("Case_ID"),
-                    "Assignment_Date": r.get("Assignment_Date", "-"),
+                    "Customer": r.get("Customer_Name"),
+                    "Employer": r.get("Decoded_Company_Name") or r.get("Employer") or "-",
                     "Status": r.get("Status", "-"),
-                    "Employment_Update": r.get("Employment_Update", "-"),
-                    "Employer": r.get("Employer", "-"),
-                    "Updated_Company_Contacts": r.get("Updated_Company_Contacts", "-"),
-                    "Work_Status": "✅ Dikerjakan" if r.get("Is_Worked_On") == 1 else "⏳ Belum",
+                    "Worked?": "✅" if is_worked else "⏳",
                 }
-                
-                # Tambahkan kolom khusus Supervisor
                 if user_role in ("Superuser", "Supervisor"):
-                    row_data["Agent"] = r.get("Agent_Assigned_To")
-                    row_data["Principle_Outstanding"] = r.get("Principle_Outstanding")
-                    row_data["Total_Approved_Payment"] = r.get("Total_Approved_Payment")
+                    d["Agent"] = r.get("Agent_Assigned_To")
+                    d["Outstanding"] = r.get("Principle_Outstanding")
                 
-                data.append(row_data)
+                df_data.append(d)
+                
+            df = pd.DataFrame(df_data)
             
-            df = pd.DataFrame(data)
-            prev_selected = set(st.session_state.get("agent_selected_list", []) or [])
-            
-            # Select-all / clear options
-            col_sa, col_cl = st.columns([1, 1])
-            with col_sa:
-                select_all = st.checkbox("Pilih semua", key="ag_select_all")
-            with col_cl:
-                clear_all = st.checkbox("Kosongkan pilihan", key="ag_clear_all")
+            # Determine selection based on session state "agent_selected"
+            # We want to maintain selection if possible, but data_editor resets often.
+            # We'll rely on the user clicking the checkbox.
+            prev_sel = st.session_state.get("agent_selected")
             
             if not df.empty:
-                if select_all:
-                    df.insert(0, "Selected", True)
-                elif clear_all:
-                    df.insert(0, "Selected", False)
-                else:
-                    df.insert(0, "Selected", df["Case_ID"].apply(lambda x: x in prev_selected))
+                df.insert(0, "Select", df["Case_ID"] == prev_sel)
             else:
-                df["Selected"] = []
+                df["Select"] = []
+                st.info("Tidak ada data ditemukan.")
 
-            # Enhanced column config dengan kolom baru
-            col_config = {
-                "Selected": st.column_config.CheckboxColumn("Selected", help="Centang untuk memilih Case_ID"),
-                "Case_ID": st.column_config.TextColumn("Case ID", width="medium"),
-                "Assignment_Date": st.column_config.TextColumn("Assignment Date", width="medium"),
+            # Column Config
+            c_config = {
+                "Select": st.column_config.CheckboxColumn("👇", width="small"),
+                "Case_ID": st.column_config.TextColumn("Case ID", width="small"),
+                "Customer": st.column_config.TextColumn("Customer", width="medium"),
+                "Employer": st.column_config.TextColumn("Company", width="medium"),
                 "Status": st.column_config.TextColumn("Status", width="small"),
-                "Employment_Update": st.column_config.TextColumn("Employment Update", width="medium"),
-                "Employer": st.column_config.TextColumn("Employer", width="medium"),
-                "Updated_Company_Contacts": st.column_config.TextColumn("Updated Company Contacts", width="large"),
-                "Work_Status": st.column_config.TextColumn("Work Status", width="small", help="Sudah dikerjakan atau belum"),
+                "Worked?": st.column_config.TextColumn("Work", width="small"),
             }
-            
-            disabled_cols = ["Case_ID", "Assignment_Date", "Status", "Employment_Update", "Employer", "Updated_Company_Contacts", "Work_Status"]
-            
             if user_role in ("Superuser", "Supervisor"):
-                col_config["Agent"] = st.column_config.TextColumn("Agent", width="medium")
-                col_config["Principle_Outstanding"] = st.column_config.NumberColumn(
-                    "Principle Outstanding",
-                    help="Sisa pokok pinjaman yang belum dibayar",
-                    format="Rp %.0f",
-                    width="medium"
-                )
-                col_config["Total_Approved_Payment"] = st.column_config.NumberColumn(
-                    "Total Approved Payment",
-                    help="Total pembayaran cicilan yang sudah di-approve",
-                    format="Rp %.0f",
-                    width="medium"
-                )
-                disabled_cols.extend(["Agent", "Principle_Outstanding", "Total_Approved_Payment"])
-
+                c_config["Outstanding"] = st.column_config.NumberColumn("OS", format="Rp %.0f")
+            
+            # Render Table
             edited = st.data_editor(
                 df,
                 hide_index=True,
                 use_container_width=True,
-                column_config=col_config,
-                disabled=disabled_cols,
+                column_config=c_config,
+                disabled=[c for c in df.columns if c != "Select"],
                 height=600,
+                key=f"agent_table_p{page}"
             )
-
-            # Determine selections from edited table
-            selected_list = []
+            
+            # Update Selection
+            sel = None
             if edited is not None and not edited.empty:
-                try:
-                    selected_list = [
-                        str(row["Case_ID"]) for _, row in edited.iterrows() if bool(row.get("Selected"))
-                    ]
-                except Exception:
-                    selected_list = []
-            st.session_state["agent_selected_list"] = selected_list
-            sel = selected_list[0] if selected_list else None
-            st.session_state["agent_selected"] = sel
-        
-        # Kolom kanan: Case Details
+                selected_rows = edited[edited["Select"] == True]
+                if not selected_rows.empty:
+                    sel = str(selected_rows.iloc[0]["Case_ID"])
+            
+            # If changed, update session
+            if sel != st.session_state.get("agent_selected"):
+                st.session_state["agent_selected"] = sel
+                st.rerun() # Rerun to update the Right Column immediately
+                
+        # Right Column: Case Details (Logic preserved in next block)
         with col_case_details:
             if sel:
                 st.subheader(f"Case Details: {sel}")
