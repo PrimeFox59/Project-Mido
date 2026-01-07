@@ -5360,29 +5360,45 @@ def page_agent():
             for r in rows:
                 is_worked = (r.get("Trace_Count",0) > 0) or (r.get("Result_Count",0) > 0)
                 d = {
-                    "Case_ID": r.get("Case_ID"),
-                    "Customer": r.get("Customer_Name"),
+                    "Case_ID": str(r.get("Case_ID", "")), # Ensure string
+                    "Customer": r.get("Customer_Name", ""),
                     "Employer": r.get("Decoded_Company_Name") or r.get("Employer") or "-",
                     "Status": r.get("Status", "-"),
                     "Worked?": "✅" if is_worked else "⏳",
                 }
                 if user_role in ("Superuser", "Supervisor"):
-                    d["Agent"] = r.get("Agent_Assigned_To")
-                    d["Outstanding"] = r.get("Principle_Outstanding")
+                    d["Agent"] = r.get("Agent_Assigned_To", "-")
+                    try:
+                        d["Outstanding"] = float(r.get("Principle_Outstanding", 0))
+                    except:
+                        d["Outstanding"] = 0.0
                 
                 df_data.append(d)
                 
-            df = pd.DataFrame(df_data)
-            
             # Determine selection based on session state "agent_selected"
-            # We want to maintain selection if possible, but data_editor resets often.
-            # We'll rely on the user clicking the checkbox.
             prev_sel = st.session_state.get("agent_selected")
             
-            if not df.empty:
+            if df_data:
+                df = pd.DataFrame(df_data)
                 df.insert(0, "Select", df["Case_ID"] == prev_sel)
             else:
-                df["Select"] = []
+                # Handle empty state correctly with typed columns
+                cols = ["Case_ID", "Customer", "Employer", "Status", "Worked?"]
+                if user_role in ("Superuser", "Supervisor"):
+                    cols.extend(["Agent", "Outstanding"])
+                
+                df = pd.DataFrame(columns=cols)
+                # Enforce string type for TextColumn columns to match config
+                for c in ["Case_ID", "Customer", "Employer", "Status", "Worked?", "Agent"]:
+                    if c in df.columns:
+                        df[c] = df[c].astype(str)
+                # Enforce numeric for Outstanding
+                if "Outstanding" in df.columns:
+                    df["Outstanding"] = df["Outstanding"].astype(float)
+                
+                # Insert Select as boolean
+                df.insert(0, "Select", pd.Series([], dtype=bool))
+                
                 st.info("Tidak ada data ditemukan.")
 
             # Column Config
