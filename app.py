@@ -562,12 +562,12 @@ def init_db():
     try:
         cols = [r['name'] for r in c.execute("PRAGMA table_info(supervisor_data)").fetchall()]
         for col in [
-            'NIK_KTP', 'EMPLOYMENT_UPDATE', 'EMPLOYER',
+            'NIK_KTP', 'EMPLOYMENT_UPDATE', 'EMPLOYER', 'Decoded_Company_Name',
             'Debtor_Legal_Name', 'Employee_Name', 'Employee_ID_Number', 'Debtor_Relation_to_Employee',
             # Agent-updated fields (optional on upload)
             'STATUS', 'REGISTERED_PHONE', 'Additional_Contacts', 'Remarks_Suggested_NIK_Prospect', 'Payment', 'Paid_Off_Status', 'Paid_Off',
             # Approval fields
-            'approval_status', 'approved_by', 'approved_at'
+            'approval_status', 'approved_by', 'approved_at', 'TRC_Code'
         ]:
             if col not in cols:
                 c.execute(f"ALTER TABLE supervisor_data ADD COLUMN {col} TEXT")
@@ -12809,6 +12809,137 @@ def page_tracer():
                         except Exception as e:
                             st.toast(f"❌ Gagal mengirim memo: {e}", icon="❌")
                         st.error(f"❌ Gagal mengirim memo: {e}")
+
+    # --- Import to Supervisor Data Feature ---
+    st.markdown("---")
+    st.subheader("📥 Import Data ke Supervisor Menu")
+    st.caption("Tarik data yang sudah di-assign tracer (beserta update-nya) ke dalam data menu supervisor.")
+    
+    if not selected_list:
+        st.info("Centang satu atau beberapa baris pada tabel di atas untuk import ke Supervisor Data.")
+    else:
+        st.info(f"✅ Dipilih: **{len(selected_list)}** assignment(s)")
+        
+        col_imp1, col_imp2 = st.columns([1, 3])
+        with col_imp1:
+            import_btn = st.button("📥 Import ke Supervisor Data", type="primary", use_container_width=True)
+        with col_imp2:
+            st.caption("Data yang dipilih akan ditambahkan/diupdate di Supervisor Data dengan informasi terbaru dari Tracer.")
+        
+        if import_btn:
+            success_count = 0
+            error_count = 0
+            updated_count = 0
+            
+            for assign_id in selected_list:
+                try:
+                    # Ambil data dari assign_tracer
+                    tracer_data = fetchone(
+                        """SELECT * FROM assign_tracer WHERE id = ?""",
+                        (assign_id,)
+                    )
+                    
+                    if not tracer_data:
+                        error_count += 1
+                        continue
+                    
+                    case_id = tracer_data.get('Agreement_No')
+                    if not case_id:
+                        error_count += 1
+                        continue
+                    
+                    # Cek apakah case_id sudah ada di supervisor_data
+                    existing = fetchone(
+                        """SELECT id FROM supervisor_data WHERE Case_ID = ? OR Virtual_Account_Number = ? LIMIT 1""",
+                        (case_id, case_id)
+                    )
+                    
+                    if existing:
+                        # Update existing record dengan data terbaru dari tracer
+                        execute(
+                            """UPDATE supervisor_data 
+                               SET Customer_name = COALESCE(?, Customer_name),
+                                   NIK_KTP = COALESCE(?, NIK_KTP),
+                                   EMPLOYMENT_UPDATE = COALESCE(?, EMPLOYMENT_UPDATE),
+                                   EMPLOYER = COALESCE(?, EMPLOYER),
+                                   Debtor_Legal_Name = COALESCE(?, Debtor_Legal_Name),
+                                   Employee_Name = COALESCE(?, Employee_Name),
+                                   Employee_ID_Number = COALESCE(?, Employee_ID_Number),
+                                   Debtor_Relation_to_Employee = COALESCE(?, Debtor_Relation_to_Employee),
+                                   Decoded_Company_Name = COALESCE(?, Decoded_Company_Name)
+                               WHERE Case_ID = ? OR Virtual_Account_Number = ?""",
+                            (
+                                tracer_data.get('Debtor_Name'),
+                                tracer_data.get('NIK_KTP'),
+                                tracer_data.get('EMPLOYMENT_UPDATE'),
+                                tracer_data.get('EMPLOYER'),
+                                tracer_data.get('Debtor_Legal_Name'),
+                                tracer_data.get('Employee_Name'),
+                                tracer_data.get('Employee_ID_Number'),
+                                tracer_data.get('Debtor_Relation_to_Employee'),
+                                tracer_data.get('Decoded_Company_Name'),
+                                case_id,
+                                case_id
+                            )
+                        )
+                        updated_count += 1
+                    else:
+                        # Insert new record
+                        execute(
+                            """INSERT INTO supervisor_data 
+                               (Case_ID, Virtual_Account_Number, Customer_name, NIK_KTP, 
+                                EMPLOYMENT_UPDATE, EMPLOYER, Decoded_Company_Name, Debtor_Legal_Name, 
+                                Employee_Name, Employee_ID_Number, Debtor_Relation_to_Employee, TRC_Code)
+                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                            (
+                                case_id,
+                                case_id,  # Use Case_ID as Virtual_Account_Number jika belum ada
+                                tracer_data.get('Debtor_Name'),
+                                tracer_data.get('NIK_KTP'),
+                                tracer_data.get('EMPLOYMENT_UPDATE'),
+                                tracer_data.get('EMPLOYER'),
+                                tracer_data.get('Decoded_Company_Name'),
+                                tracer_data.get('Debtor_Legal_Name'),
+                                tracer_data.get('Employee_Name'),
+                                tracer_data.get('Employee_ID_Number'),
+                                tracer_data.get('Debtor_Relation_to_Employee'),
+                                tracer_data.get('TRC_Code')
+                            )
+                        )
+                        success_count += 1
+                    
+                    # Audit log
+                    try:
+                        execute(
+                            "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                            (
+                                u.get('id') if u else None,
+                                "TRACER_IMPORT_TO_SUPERVISOR",
+                                f"Tracer '{tracer_name}' imported assignment ID {assign_id} (Case: {case_id}) to supervisor_data"
+                            )
+                        )
+                    except Exception:
+                        pass
+                    
+                except Exception as e:
+                    error_count += 1
+                    st.toast(f"❌ Error importing assignment {assign_id}: {e}", icon="❌")
+            
+            # Summary message
+            if success_count > 0 or updated_count > 0:
+                summary_msg = f"✅ Import selesai! "
+                if success_count > 0:
+                    summary_msg += f"**{success_count}** data baru ditambahkan. "
+                if updated_count > 0:
+                    summary_msg += f"**{updated_count}** data diupdate. "
+                if error_count > 0:
+                    summary_msg += f"⚠️ **{error_count}** gagal."
+                st.success(summary_msg)
+                st.balloons()
+                time.sleep(1)
+                st.rerun()
+            else:
+                st.error(f"❌ Import gagal. {error_count} error(s) terjadi.")
 
 def page_guide():
     """User Guide page with detailed application description and quick how-to."""
