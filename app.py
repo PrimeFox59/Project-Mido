@@ -9017,14 +9017,17 @@ def page_supervisor():
                     u = current_user() or {}
                     by = (u.get('full_name') or u.get('login_id') or '-')
                     
-                    # Get data to assign
+                    # Get data to assign from supervisor_data (exclude already assigned)
                     rows_to_assign = fetchall(
                         f"""SELECT Case_ID, Customer_name, NIK_KTP 
                            FROM supervisor_data 
                            WHERE Case_ID IS NOT NULL 
                            AND TRIM(Case_ID) != ''
-                           AND Case_ID NOT IN (SELECT Agreement_No FROM agent_assignments WHERE IFNULL(active,1)=1)
-                           AND Case_ID NOT IN (SELECT Agreement_No FROM assign_tracer WHERE IFNULL(returned_to_supervisor,'') != 'Y')
+                           AND Case_ID NOT IN (
+                               SELECT Agreement_No FROM assign_tracer 
+                               WHERE IFNULL(Assigned_To, '') != '' 
+                               AND IFNULL(returned_to_supervisor,'') != 'Y'
+                           )
                            ORDER BY id DESC
                            LIMIT ?""",
                         (num_to_assign,)
@@ -9069,34 +9072,40 @@ def page_supervisor():
                             tracer_idx = idx % len(selected_tracers)
                             assignee = selected_tracers[tracer_idx]
                             
-                            # Assign using existing function
-                            success, msg = assign_case_to_tracer(case_id, assignee, by)
+                            # Generate TRC code
+                            trc_code = f"TRC-{now_wib().strftime('%y%m%d')}-{assignee.split(' ')[0][:3].upper()}"
                             
-                            if success:
-                                # Also insert to assign_tracer table
-                                trc_code = f"TRC-{now_wib().strftime('%y%m%d')}-{assignee.split(' ')[0][:3].upper()}"
-                                try:
-                                    execute(
-                                        """INSERT INTO assign_tracer (TRC_Code, Agreement_No, Debtor_Name, NIK_KTP, Assigned_To)
-                                           VALUES (?,?,?,?,?)
-                                           ON CONFLICT(Agreement_No) DO UPDATE SET
-                                             Assigned_To=excluded.Assigned_To,
-                                             Debtor_Name=COALESCE(excluded.Debtor_Name, assign_tracer.Debtor_Name),
-                                             NIK_KTP=COALESCE(excluded.NIK_KTP, assign_tracer.NIK_KTP),
-                                             TRC_Code=COALESCE(NULLIF(assign_tracer.TRC_Code, ''), excluded.TRC_Code)""",
-                                        (trc_code, case_id, customer_name, nik, assignee)
-                                    )
+                            # Insert to assign_tracer table (this is the source of truth for page_tracer)
+                            try:
+                                execute(
+                                    """INSERT INTO assign_tracer (TRC_Code, Agreement_No, Debtor_Name, NIK_KTP, Assigned_To, returned_to_supervisor)
+                                       VALUES (?,?,?,?,?, '')
+                                       ON CONFLICT(Agreement_No) DO UPDATE SET
+                                         Assigned_To=excluded.Assigned_To,
+                                         Debtor_Name=COALESCE(excluded.Debtor_Name, assign_tracer.Debtor_Name),
+                                         NIK_KTP=COALESCE(excluded.NIK_KTP, assign_tracer.NIK_KTP),
+                                         TRC_Code=COALESCE(NULLIF(assign_tracer.TRC_Code, ''), excluded.TRC_Code),
+                                         returned_to_supervisor=''""",
+                                    (trc_code, case_id, customer_name, nik, assignee)
+                                )
+                                
+                                # Also use the assign_case_to_tracer for agent_assignments tracking
+                                success, msg = assign_case_to_tracer(case_id, assignee, by)
+                                
+                                if success:
                                     tracer_counts[assignee] += 1
                                     success_count += 1
-                                except Exception:
-                                    error_count += 1
-                            else:
-                                if "frozen" in msg.lower():
-                                    frozen_count += 1
-                                elif "di-assign" in msg.lower():
-                                    already_assigned_count += 1
                                 else:
-                                    error_count += 1
+                                    # If assign_case_to_tracer failed, rollback assign_tracer
+                                    execute("DELETE FROM assign_tracer WHERE Agreement_No=? AND Assigned_To=?", (case_id, assignee))
+                                    if "frozen" in msg.lower():
+                                        frozen_count += 1
+                                    elif "di-assign" in msg.lower():
+                                        already_assigned_count += 1
+                                    else:
+                                        error_count += 1
+                            except Exception as e:
+                                error_count += 1
                         
                         # Complete
                         progress_bar.progress(100)
