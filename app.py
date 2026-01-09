@@ -9048,50 +9048,55 @@ def page_supervisor():
         # Get total available data
         total_available = len(df_sup) if df_sup is not None and not df_sup.empty else 0
         
-        col_assign1, col_assign2, col_assign3 = st.columns([1, 2, 1])
-        
-        with col_assign1:
-            num_to_assign = st.number_input(
-                "Jumlah data yang ingin di-assign",
-                min_value=1,
-                max_value=total_available,
-                value=min(100, total_available),
-                step=10,
-                key="num_to_assign",
-                help=f"Total data tersedia: {total_available}"
-            )
-        
-        with col_assign2:
-            tracer_users_tbl = fetchall("SELECT COALESCE(full_name, name) AS full_name FROM users WHERE approved=1 AND role='Tracer' ORDER BY COALESCE(full_name,name)")
-            tracer_list_tbl = [r.get('full_name') for r in tracer_users_tbl if r.get('full_name')]
-            selected_tracers = st.multiselect(
-                "Pilih Tracer yang akan menerima data",
-                options=tracer_list_tbl,
-                default=[],
-                key="selected_tracers",
-                help="Pilih satu atau lebih tracer. Data akan dibagi rata."
-            )
-        
-        with col_assign3:
+        if total_available == 0:
+            st.warning("⚠️ Tidak ada data yang tersedia untuk di-assign. Silakan upload data terlebih dahulu.")
+            num_to_assign = 0
+            selected_tracers = []
+        else:
+            col_assign1, col_assign2, col_assign3 = st.columns([1, 2, 1])
+            
+            with col_assign1:
+                num_to_assign = st.number_input(
+                    "Jumlah data yang ingin di-assign",
+                    min_value=1,
+                    max_value=max(1, total_available),  # Ensure max_value is at least 1
+                    value=min(100, total_available) if total_available > 0 else 1,
+                    step=10,
+                    key="num_to_assign",
+                    help=f"Total data tersedia: {total_available}"
+                )
+            
+            with col_assign2:
+                tracer_users_tbl = fetchall("SELECT COALESCE(full_name, name) AS full_name FROM users WHERE approved=1 AND role='Tracer' ORDER BY COALESCE(full_name,name)")
+                tracer_list_tbl = [r.get('full_name') for r in tracer_users_tbl if r.get('full_name')]
+                selected_tracers = st.multiselect(
+                    "Pilih Tracer yang akan menerima data",
+                    options=tracer_list_tbl,
+                    default=[],
+                    key="selected_tracers",
+                    help="Pilih satu atau lebih tracer. Data akan dibagi rata."
+                )
+            
+            with col_assign3:
+                if selected_tracers:
+                    per_tracer = num_to_assign // len(selected_tracers)
+                    remainder = num_to_assign % len(selected_tracers)
+                    st.metric("Per Tracer", f"~{per_tracer}", help=f"{remainder} data akan dibagi ke tracer pertama")
+                else:
+                    st.metric("Per Tracer", "-")
+            
+            # Show distribution preview
             if selected_tracers:
+                st.caption("**Distribusi:**")
+                distribution = []
                 per_tracer = num_to_assign // len(selected_tracers)
                 remainder = num_to_assign % len(selected_tracers)
-                st.metric("Per Tracer", f"~{per_tracer}", help=f"{remainder} data akan dibagi ke tracer pertama")
-            else:
-                st.metric("Per Tracer", "-")
-        
-        # Show distribution preview
-        if selected_tracers:
-            st.caption("**Distribusi:**")
-            distribution = []
-            per_tracer = num_to_assign // len(selected_tracers)
-            remainder = num_to_assign % len(selected_tracers)
-            
-            for idx, tracer in enumerate(selected_tracers):
-                count = per_tracer + (1 if idx < remainder else 0)
-                distribution.append(f"• {tracer}: **{count}** data")
-            
-            st.info("\n".join(distribution))
+                
+                for idx, tracer in enumerate(selected_tracers):
+                    count = per_tracer + (1 if idx < remainder else 0)
+                    distribution.append(f"• {tracer}: **{count}** data")
+                
+                st.info("\n".join(distribution))
         
         btn_assign = st.button(
             f"🎯 Assign {num_to_assign} Data ke {len(selected_tracers)} Tracer",
