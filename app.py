@@ -12512,7 +12512,8 @@ def page_tracer():
         else:
             df_view.insert(0, 'Selected', df_view['ID'].apply(lambda x: x in prev_selected))
     else:
-        df_view['Selected'] = []
+        # For empty dataframe, ensure Selected column exists with proper type
+        df_view.insert(0, 'Selected', pd.Series([], dtype=bool))
 
     # Column config dengan tambahan Assigned_To dan Decoded_Company
     col_config = {
