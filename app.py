@@ -9126,6 +9126,9 @@ def page_supervisor():
                         for tracer, count in tracer_counts.items():
                             summary_msg += f"- {tracer}: **{count}** data\n"
                         
+                        # Debug info
+                        st.info(f"🔍 Debug: Total di assign_tracer dengan Assigned_To terisi = {fetchone('SELECT COUNT(*) as cnt FROM assign_tracer WHERE IFNULL(Assigned_To, \"\") != \"\"').get('cnt', 0):,}")
+                        
                         st.success(summary_msg)
                         
                         # Audit log
@@ -12270,7 +12273,7 @@ def page_tracer():
     if user_role in ("Superuser", "Supervisor"):
         # Get total count for display
         total_count = (fetchone(
-            "SELECT COUNT(*) as cnt FROM assign_tracer WHERE IFNULL(returned_to_supervisor, '') != 'Y'"
+            "SELECT COUNT(*) as cnt FROM assign_tracer WHERE IFNULL(Assigned_To, '') != '' AND IFNULL(returned_to_supervisor, '') != 'Y'"
         ) or {}).get('cnt', 0)
         st.caption(f"Mode: **{user_role}** — Melihat semua assignment tracer (yang belum dikembalikan) - Total: **{total_count:,}** data")
         rows = fetchall(
@@ -12282,7 +12285,8 @@ def page_tracer():
                    sd.Remarks_Suggested_NIK_Prospect
             FROM assign_tracer at
             LEFT JOIN supervisor_data sd ON at.Agreement_No = sd.Case_ID
-            WHERE IFNULL(at.returned_to_supervisor, '') != 'Y'
+            WHERE IFNULL(at.Assigned_To, '') != '' 
+            AND IFNULL(at.returned_to_supervisor, '') != 'Y'
             ORDER BY at.id DESC
             """
         )
