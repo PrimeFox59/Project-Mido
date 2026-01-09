@@ -797,6 +797,10 @@ def init_db():
         cols = [r['name'] for r in c.execute("PRAGMA table_info(assign_tracer)").fetchall()]
         if 'Decoded_Company_Name' not in cols:
             c.execute("ALTER TABLE assign_tracer ADD COLUMN Decoded_Company_Name TEXT")
+        if 'returned_to_supervisor' not in cols:
+            c.execute("ALTER TABLE assign_tracer ADD COLUMN returned_to_supervisor TEXT")
+        if 'returned_at' not in cols:
+            c.execute("ALTER TABLE assign_tracer ADD COLUMN returned_at TEXT")
     except Exception:
         pass
     
@@ -12418,7 +12422,7 @@ def page_tracer():
     # Jika Supervisor/Superuser: tampilkan semua assignment
     # Jika Tracer: hanya tampilkan assignment untuk dirinya sendiri
     if user_role in ("Superuser", "Supervisor"):
-        st.caption(f"Mode: **{user_role}** — Melihat semua assignment tracer")
+        st.caption(f"Mode: **{user_role}** — Melihat semua assignment tracer (yang belum dikembalikan)")
         rows = fetchall(
             """
             SELECT at.id, at.TRC_Code, at.Agreement_No, at.Debtor_Name, at.NIK_KTP, 
@@ -12428,11 +12432,12 @@ def page_tracer():
                    sd.Remarks_Suggested_NIK_Prospect
             FROM assign_tracer at
             LEFT JOIN supervisor_data sd ON at.Agreement_No = sd.Case_ID
+            WHERE IFNULL(at.returned_to_supervisor, '') != 'Y'
             ORDER BY at.id DESC LIMIT 500
             """
         )
     else:
-        st.caption(f"Assignment untuk: {tracer_name}")
+        st.caption(f"Assignment untuk: {tracer_name} (yang belum dikembalikan)")
         rows = fetchall(
             """
             SELECT at.id, at.TRC_Code, at.Agreement_No, at.Debtor_Name, at.NIK_KTP, 
@@ -12442,7 +12447,7 @@ def page_tracer():
                    sd.Remarks_Suggested_NIK_Prospect
             FROM assign_tracer at
             LEFT JOIN supervisor_data sd ON at.Agreement_No = sd.Case_ID
-            WHERE IFNULL(at.Assigned_To,'') = ? 
+            WHERE IFNULL(at.Assigned_To,'') = ? AND IFNULL(at.returned_to_supervisor, '') != 'Y'
             ORDER BY at.id DESC LIMIT 500
             """,
             (tracer_name,)
@@ -12810,21 +12815,21 @@ def page_tracer():
                             st.toast(f"❌ Gagal mengirim memo: {e}", icon="❌")
                         st.error(f"❌ Gagal mengirim memo: {e}")
 
-    # --- Import to Supervisor Data Feature ---
+    # --- Move to Supervisor Data Feature ---
     st.markdown("---")
-    st.subheader("📥 Import Data ke Supervisor Menu")
-    st.caption("Tarik data yang sudah di-assign tracer (beserta update-nya) ke dalam data menu supervisor.")
+    st.subheader("↩️ Kembalikan Data ke Supervisor Menu")
+    st.caption("Kembalikan data yang sudah selesai diupdate ke data menu supervisor. Data yang dikembalikan tidak akan muncul lagi di Tracer Menu.")
     
     if not selected_list:
-        st.info("Centang satu atau beberapa baris pada tabel di atas untuk import ke Supervisor Data.")
+        st.info("Centang satu atau beberapa baris pada tabel di atas untuk kembalikan ke Supervisor Data.")
     else:
         st.info(f"✅ Dipilih: **{len(selected_list)}** assignment(s)")
         
         col_imp1, col_imp2 = st.columns([1, 3])
         with col_imp1:
-            import_btn = st.button("📥 Import ke Supervisor Data", type="primary", use_container_width=True)
+            import_btn = st.button("↩️ Kembalikan ke Supervisor Data", type="primary", use_container_width=True)
         with col_imp2:
-            st.caption("Data yang dipilih akan ditambahkan/diupdate di Supervisor Data dengan informasi terbaru dari Tracer.")
+            st.caption("Data yang dipilih akan dikembalikan ke Supervisor Data dan tidak akan muncul lagi di Tracer Menu.")
         
         if import_btn:
             success_count = 0
@@ -12840,7 +12845,7 @@ def page_tracer():
                 # Update progress
                 progress_percent = int((idx / total_items) * 100)
                 progress_bar.progress(progress_percent / 100)
-                status_text.markdown(f"🔄 **Importing {idx} of {total_items}** ({progress_percent}%)")
+                status_text.markdown(f"🔄 **Memproses {idx} dari {total_items}** ({progress_percent}%)")
                 
                 try:
                     # Ambil data dari assign_tracer
@@ -12918,14 +12923,20 @@ def page_tracer():
                         )
                         success_count += 1
                     
+                    # Mark assignment as returned to supervisor
+                    execute(
+                        "UPDATE assign_tracer SET returned_to_supervisor = 'Y', returned_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        (assign_id,)
+                    )
+                    
                     # Audit log
                     try:
                         execute(
                             "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
                             (
                                 u.get('id') if u else None,
-                                "TRACER_IMPORT_TO_SUPERVISOR",
-                                f"Tracer '{tracer_name}' imported assignment ID {assign_id} (Case: {case_id}) to supervisor_data"
+                                "TRACER_RETURN_TO_SUPERVISOR",
+                                f"Tracer '{tracer_name}' returned assignment ID {assign_id} (Case: {case_id}) to supervisor_data"
                             )
                         )
                     except Exception:
@@ -12933,15 +12944,15 @@ def page_tracer():
                     
                 except Exception as e:
                     error_count += 1
-                    st.toast(f"❌ Error importing assignment {assign_id}: {e}", icon="❌")
+                    st.toast(f"❌ Error memproses assignment {assign_id}: {e}", icon="❌")
             
             # Complete progress
             progress_bar.progress(100)
-            status_text.markdown(f"✅ **Import complete!** Processed {total_items} items")
+            status_text.markdown(f"✅ **Proses selesai!** {total_items} data diproses")
             
             # Summary message
             if success_count > 0 or updated_count > 0:
-                summary_msg = f"✅ Import selesai! "
+                summary_msg = f"✅ Data berhasil dikembalikan ke Supervisor! "
                 if success_count > 0:
                     summary_msg += f"**{success_count}** data baru ditambahkan. "
                 if updated_count > 0:
@@ -12953,7 +12964,7 @@ def page_tracer():
                 time.sleep(1)
                 st.rerun()
             else:
-                st.error(f"❌ Import gagal. {error_count} error(s) terjadi.")
+                st.error(f"❌ Proses gagal. {error_count} error(s) terjadi.")
 
 def page_guide():
     """User Guide page with detailed application description and quick how-to."""
