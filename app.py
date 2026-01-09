@@ -12557,6 +12557,279 @@ def page_tracer():
     st.session_state['tracer_selected_list'] = selected_list
     sel_id = selected_list[0] if selected_list else None
 
+    # --- Move to Supervisor Data Feature (Before Update Section) ---
+    st.markdown("---")
+    st.subheader("↩️ Kembalikan Data ke Supervisor Menu")
+    st.caption("Kembalikan data yang sudah selesai diupdate ke data menu supervisor. Data yang dikembalikan tidak akan muncul lagi di Tracer Menu.")
+    
+    # Two options: Return All or Return Selected
+    col_opt1, col_opt2 = st.columns(2)
+    
+    # Option 1: Return ALL
+    with col_opt1:
+        st.markdown("#### 🔄 Kembalikan SEMUA Data")
+        total_available = len(filtered_rows)
+        
+        if total_available == 0:
+            st.info("Tidak ada data untuk dikembalikan.")
+        else:
+            st.info(f"Total: **{total_available}** assignment")
+            return_all_btn = st.button(
+                "🔄 Kembalikan SEMUA", 
+                type="secondary", 
+                use_container_width=True, 
+                key="return_all_btn",
+                disabled=(total_available == 0),
+                help="Kembalikan semua data yang tampil di tabel (tidak perlu centang)"
+            )
+            
+            if return_all_btn:
+                if 'confirm_return_all' not in st.session_state:
+                    st.session_state['confirm_return_all'] = False
+                
+                if not st.session_state['confirm_return_all']:
+                    st.warning(f"⚠️ Anda akan mengembalikan **{total_available}** data ke Supervisor. Data tidak akan muncul lagi di Tracer Menu.")
+                    col_conf1, col_conf2 = st.columns(2)
+                    with col_conf1:
+                        if st.button("✅ Ya, Lanjutkan", type="primary", key="confirm_yes", use_container_width=True):
+                            st.session_state['confirm_return_all'] = True
+                            st.rerun()
+                    with col_conf2:
+                        if st.button("❌ Batal", key="confirm_no", use_container_width=True):
+                            st.session_state['confirm_return_all'] = False
+                            st.info("Dibatalkan.")
+                else:
+                    # Process all assignments
+                    success_count = 0
+                    error_count = 0
+                    updated_count = 0
+                    
+                    all_ids = [r['id'] for r in filtered_rows]
+                    total_items = len(all_ids)
+                    
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    
+                    for idx, assign_id in enumerate(all_ids, start=1):
+                        progress_percent = int((idx / total_items) * 100)
+                        progress_bar.progress(progress_percent / 100)
+                        status_text.markdown(f"🔄 **Memproses {idx} dari {total_items}** ({progress_percent}%)")
+                        
+                        try:
+                            tracer_data = fetchone("SELECT * FROM assign_tracer WHERE id = ?", (assign_id,))
+                            if not tracer_data:
+                                error_count += 1
+                                continue
+                            
+                            case_id = tracer_data.get('Agreement_No')
+                            if not case_id:
+                                error_count += 1
+                                continue
+                            
+                            existing = fetchone(
+                                "SELECT id FROM supervisor_data WHERE Case_ID = ? OR Virtual_Account_Number = ? LIMIT 1",
+                                (case_id, case_id)
+                            )
+                            
+                            if existing:
+                                execute(
+                                    """UPDATE supervisor_data 
+                                       SET Customer_name = COALESCE(?, Customer_name),
+                                           NIK_KTP = COALESCE(?, NIK_KTP),
+                                           EMPLOYMENT_UPDATE = COALESCE(?, EMPLOYMENT_UPDATE),
+                                           EMPLOYER = COALESCE(?, EMPLOYER),
+                                           Debtor_Legal_Name = COALESCE(?, Debtor_Legal_Name),
+                                           Employee_Name = COALESCE(?, Employee_Name),
+                                           Employee_ID_Number = COALESCE(?, Employee_ID_Number),
+                                           Debtor_Relation_to_Employee = COALESCE(?, Debtor_Relation_to_Employee),
+                                           Decoded_Company_Name = COALESCE(?, Decoded_Company_Name)
+                                       WHERE Case_ID = ? OR Virtual_Account_Number = ?""",
+                                    (
+                                        tracer_data.get('Debtor_Name'), tracer_data.get('NIK_KTP'),
+                                        tracer_data.get('EMPLOYMENT_UPDATE'), tracer_data.get('EMPLOYER'),
+                                        tracer_data.get('Debtor_Legal_Name'), tracer_data.get('Employee_Name'),
+                                        tracer_data.get('Employee_ID_Number'), tracer_data.get('Debtor_Relation_to_Employee'),
+                                        tracer_data.get('Decoded_Company_Name'), case_id, case_id
+                                    )
+                                )
+                                updated_count += 1
+                            else:
+                                execute(
+                                    """INSERT INTO supervisor_data 
+                                       (Case_ID, Virtual_Account_Number, Customer_name, NIK_KTP, 
+                                        EMPLOYMENT_UPDATE, EMPLOYER, Decoded_Company_Name, Debtor_Legal_Name, 
+                                        Employee_Name, Employee_ID_Number, Debtor_Relation_to_Employee, TRC_Code)
+                                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                    (
+                                        case_id, case_id, tracer_data.get('Debtor_Name'), tracer_data.get('NIK_KTP'),
+                                        tracer_data.get('EMPLOYMENT_UPDATE'), tracer_data.get('EMPLOYER'),
+                                        tracer_data.get('Decoded_Company_Name'), tracer_data.get('Debtor_Legal_Name'),
+                                        tracer_data.get('Employee_Name'), tracer_data.get('Employee_ID_Number'),
+                                        tracer_data.get('Debtor_Relation_to_Employee'), tracer_data.get('TRC_Code')
+                                    )
+                                )
+                                success_count += 1
+                            
+                            execute(
+                                "UPDATE assign_tracer SET returned_to_supervisor = 'Y', returned_at = CURRENT_TIMESTAMP WHERE id = ?",
+                                (assign_id,)
+                            )
+                            
+                            try:
+                                execute(
+                                    "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                                    (
+                                        u.get('id') if u else None,
+                                        "TRACER_RETURN_ALL_TO_SUPERVISOR",
+                                        f"Tracer '{tracer_name}' returned ALL assignments (ID {assign_id}, Case: {case_id}) to supervisor_data"
+                                    )
+                                )
+                            except Exception:
+                                pass
+                            
+                        except Exception as e:
+                            error_count += 1
+                            st.toast(f"❌ Error: {e}", icon="❌")
+                    
+                    progress_bar.progress(100)
+                    status_text.markdown(f"✅ **Proses selesai!** {total_items} data diproses")
+                    
+                    if success_count > 0 or updated_count > 0:
+                        summary_msg = f"✅ SEMUA data berhasil dikembalikan! "
+                        if success_count > 0:
+                            summary_msg += f"**{success_count}** baru ditambahkan. "
+                        if updated_count > 0:
+                            summary_msg += f"**{updated_count}** diupdate. "
+                        if error_count > 0:
+                            summary_msg += f"⚠️ **{error_count}** gagal."
+                        st.success(summary_msg)
+                        st.balloons()
+                        st.session_state['confirm_return_all'] = False
+                        time.sleep(2)
+                        st.rerun()
+                    else:
+                        st.error(f"❌ Proses gagal. {error_count} error(s) terjadi.")
+                        st.session_state['confirm_return_all'] = False
+    
+    # Option 2: Return Selected
+    with col_opt2:
+        st.markdown("#### 📋 Kembalikan Data Terpilih")
+        
+        if not selected_list:
+            st.info("Centang data di tabel untuk kembalikan.")
+            st.button("↩️ Kembalikan Terpilih", type="primary", use_container_width=True, disabled=True, key="return_selected_disabled")
+        else:
+            st.info(f"✅ Dipilih: **{len(selected_list)}**")
+            import_btn = st.button("↩️ Kembalikan Terpilih", type="primary", use_container_width=True, key="return_selected_btn")
+            
+            if import_btn:
+                success_count = 0
+                error_count = 0
+                updated_count = 0
+                
+                total_items = len(selected_list)
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                
+                for idx, assign_id in enumerate(selected_list, start=1):
+                    progress_percent = int((idx / total_items) * 100)
+                    progress_bar.progress(progress_percent / 100)
+                    status_text.markdown(f"🔄 **Memproses {idx} dari {total_items}** ({progress_percent}%)")
+                    
+                    try:
+                        tracer_data = fetchone("SELECT * FROM assign_tracer WHERE id = ?", (assign_id,))
+                        if not tracer_data:
+                            error_count += 1
+                            continue
+                        
+                        case_id = tracer_data.get('Agreement_No')
+                        if not case_id:
+                            error_count += 1
+                            continue
+                        
+                        existing = fetchone(
+                            "SELECT id FROM supervisor_data WHERE Case_ID = ? OR Virtual_Account_Number = ? LIMIT 1",
+                            (case_id, case_id)
+                        )
+                        
+                        if existing:
+                            execute(
+                                """UPDATE supervisor_data 
+                                   SET Customer_name = COALESCE(?, Customer_name),
+                                       NIK_KTP = COALESCE(?, NIK_KTP),
+                                       EMPLOYMENT_UPDATE = COALESCE(?, EMPLOYMENT_UPDATE),
+                                       EMPLOYER = COALESCE(?, EMPLOYER),
+                                       Debtor_Legal_Name = COALESCE(?, Debtor_Legal_Name),
+                                       Employee_Name = COALESCE(?, Employee_Name),
+                                       Employee_ID_Number = COALESCE(?, Employee_ID_Number),
+                                       Debtor_Relation_to_Employee = COALESCE(?, Debtor_Relation_to_Employee),
+                                       Decoded_Company_Name = COALESCE(?, Decoded_Company_Name)
+                                   WHERE Case_ID = ? OR Virtual_Account_Number = ?""",
+                                (
+                                    tracer_data.get('Debtor_Name'), tracer_data.get('NIK_KTP'),
+                                    tracer_data.get('EMPLOYMENT_UPDATE'), tracer_data.get('EMPLOYER'),
+                                    tracer_data.get('Debtor_Legal_Name'), tracer_data.get('Employee_Name'),
+                                    tracer_data.get('Employee_ID_Number'), tracer_data.get('Debtor_Relation_to_Employee'),
+                                    tracer_data.get('Decoded_Company_Name'), case_id, case_id
+                                )
+                            )
+                            updated_count += 1
+                        else:
+                            execute(
+                                """INSERT INTO supervisor_data 
+                                   (Case_ID, Virtual_Account_Number, Customer_name, NIK_KTP, 
+                                    EMPLOYMENT_UPDATE, EMPLOYER, Decoded_Company_Name, Debtor_Legal_Name, 
+                                    Employee_Name, Employee_ID_Number, Debtor_Relation_to_Employee, TRC_Code)
+                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                (
+                                    case_id, case_id, tracer_data.get('Debtor_Name'), tracer_data.get('NIK_KTP'),
+                                    tracer_data.get('EMPLOYMENT_UPDATE'), tracer_data.get('EMPLOYER'),
+                                    tracer_data.get('Decoded_Company_Name'), tracer_data.get('Debtor_Legal_Name'),
+                                    tracer_data.get('Employee_Name'), tracer_data.get('Employee_ID_Number'),
+                                    tracer_data.get('Debtor_Relation_to_Employee'), tracer_data.get('TRC_Code')
+                                )
+                            )
+                            success_count += 1
+                        
+                        execute(
+                            "UPDATE assign_tracer SET returned_to_supervisor = 'Y', returned_at = CURRENT_TIMESTAMP WHERE id = ?",
+                            (assign_id,)
+                        )
+                        
+                        try:
+                            execute(
+                                "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                                (
+                                    u.get('id') if u else None,
+                                    "TRACER_RETURN_TO_SUPERVISOR",
+                                    f"Tracer '{tracer_name}' returned assignment ID {assign_id} (Case: {case_id}) to supervisor_data"
+                                )
+                            )
+                        except Exception:
+                            pass
+                        
+                    except Exception as e:
+                        error_count += 1
+                        st.toast(f"❌ Error: {e}", icon="❌")
+                
+                progress_bar.progress(100)
+                status_text.markdown(f"✅ **Proses selesai!** {total_items} data diproses")
+                
+                if success_count > 0 or updated_count > 0:
+                    summary_msg = f"✅ Data berhasil dikembalikan! "
+                    if success_count > 0:
+                        summary_msg += f"**{success_count}** baru. "
+                    if updated_count > 0:
+                        summary_msg += f"**{updated_count}** diupdate. "
+                    if error_count > 0:
+                        summary_msg += f"⚠️ **{error_count}** gagal."
+                    st.success(summary_msg)
+                    st.balloons()
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.error(f"❌ Proses gagal. {error_count} error(s) terjadi.")
+    
     st.markdown("---")
     st.subheader("Update Detail Employment")
     st.caption("Pilih satu baris kemudian isi data yang diperlukan.")
@@ -12815,300 +13088,6 @@ def page_tracer():
                         except Exception as e:
                             st.toast(f"❌ Gagal mengirim memo: {e}", icon="❌")
                         st.error(f"❌ Gagal mengirim memo: {e}")
-
-    # --- Move to Supervisor Data Feature ---
-    st.markdown("---")
-    st.subheader("↩️ Kembalikan Data ke Supervisor Menu")
-    st.caption("Kembalikan data yang sudah selesai diupdate ke data menu supervisor. Data yang dikembalikan tidak akan muncul lagi di Tracer Menu.")
-    
-    # Return All Feature
-    st.markdown("### 🔄 Kembalikan Semua Data")
-    total_available = len(filtered_rows)
-    st.info(f"Total assignment yang tersedia: **{total_available}** data")
-    
-    col_all1, col_all2 = st.columns([1, 3])
-    with col_all1:
-        return_all_btn = st.button("🔄 Kembalikan SEMUA ke Supervisor", type="secondary", use_container_width=True, key="return_all_btn")
-    with col_all2:
-        st.caption("⚠️ **PERHATIAN**: Ini akan mengembalikan SEMUA assignment yang ditampilkan di tabel ke Supervisor Data (tidak perlu centang).")
-    
-    if return_all_btn:
-        # Confirmation dialog using session state
-        if 'confirm_return_all' not in st.session_state:
-            st.session_state['confirm_return_all'] = False
-        
-        if not st.session_state['confirm_return_all']:
-            st.warning(f"⚠️ Anda akan mengembalikan **{total_available}** data ke Supervisor. Data tidak akan muncul lagi di Tracer Menu.")
-            col_conf1, col_conf2, col_conf3 = st.columns([1, 1, 2])
-            with col_conf1:
-                if st.button("✅ Ya, Kembalikan Semua", type="primary", key="confirm_yes"):
-                    st.session_state['confirm_return_all'] = True
-                    st.rerun()
-            with col_conf2:
-                if st.button("❌ Batal", key="confirm_no"):
-                    st.session_state['confirm_return_all'] = False
-                    st.info("Dibatalkan.")
-        else:
-            # Process all assignments
-            success_count = 0
-            error_count = 0
-            updated_count = 0
-            
-            all_ids = [r['id'] for r in filtered_rows]
-            total_items = len(all_ids)
-            
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-            for idx, assign_id in enumerate(all_ids, start=1):
-                progress_percent = int((idx / total_items) * 100)
-                progress_bar.progress(progress_percent / 100)
-                status_text.markdown(f"🔄 **Memproses {idx} dari {total_items}** ({progress_percent}%)")
-                
-                try:
-                    tracer_data = fetchone("SELECT * FROM assign_tracer WHERE id = ?", (assign_id,))
-                    if not tracer_data:
-                        error_count += 1
-                        continue
-                    
-                    case_id = tracer_data.get('Agreement_No')
-                    if not case_id:
-                        error_count += 1
-                        continue
-                    
-                    existing = fetchone(
-                        "SELECT id FROM supervisor_data WHERE Case_ID = ? OR Virtual_Account_Number = ? LIMIT 1",
-                        (case_id, case_id)
-                    )
-                    
-                    if existing:
-                        execute(
-                            """UPDATE supervisor_data 
-                               SET Customer_name = COALESCE(?, Customer_name),
-                                   NIK_KTP = COALESCE(?, NIK_KTP),
-                                   EMPLOYMENT_UPDATE = COALESCE(?, EMPLOYMENT_UPDATE),
-                                   EMPLOYER = COALESCE(?, EMPLOYER),
-                                   Debtor_Legal_Name = COALESCE(?, Debtor_Legal_Name),
-                                   Employee_Name = COALESCE(?, Employee_Name),
-                                   Employee_ID_Number = COALESCE(?, Employee_ID_Number),
-                                   Debtor_Relation_to_Employee = COALESCE(?, Debtor_Relation_to_Employee),
-                                   Decoded_Company_Name = COALESCE(?, Decoded_Company_Name)
-                               WHERE Case_ID = ? OR Virtual_Account_Number = ?""",
-                            (
-                                tracer_data.get('Debtor_Name'), tracer_data.get('NIK_KTP'),
-                                tracer_data.get('EMPLOYMENT_UPDATE'), tracer_data.get('EMPLOYER'),
-                                tracer_data.get('Debtor_Legal_Name'), tracer_data.get('Employee_Name'),
-                                tracer_data.get('Employee_ID_Number'), tracer_data.get('Debtor_Relation_to_Employee'),
-                                tracer_data.get('Decoded_Company_Name'), case_id, case_id
-                            )
-                        )
-                        updated_count += 1
-                    else:
-                        execute(
-                            """INSERT INTO supervisor_data 
-                               (Case_ID, Virtual_Account_Number, Customer_name, NIK_KTP, 
-                                EMPLOYMENT_UPDATE, EMPLOYER, Decoded_Company_Name, Debtor_Legal_Name, 
-                                Employee_Name, Employee_ID_Number, Debtor_Relation_to_Employee, TRC_Code)
-                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                            (
-                                case_id, case_id, tracer_data.get('Debtor_Name'), tracer_data.get('NIK_KTP'),
-                                tracer_data.get('EMPLOYMENT_UPDATE'), tracer_data.get('EMPLOYER'),
-                                tracer_data.get('Decoded_Company_Name'), tracer_data.get('Debtor_Legal_Name'),
-                                tracer_data.get('Employee_Name'), tracer_data.get('Employee_ID_Number'),
-                                tracer_data.get('Debtor_Relation_to_Employee'), tracer_data.get('TRC_Code')
-                            )
-                        )
-                        success_count += 1
-                    
-                    execute(
-                        "UPDATE assign_tracer SET returned_to_supervisor = 'Y', returned_at = CURRENT_TIMESTAMP WHERE id = ?",
-                        (assign_id,)
-                    )
-                    
-                    try:
-                        execute(
-                            "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
-                            (
-                                u.get('id') if u else None,
-                                "TRACER_RETURN_ALL_TO_SUPERVISOR",
-                                f"Tracer '{tracer_name}' returned ALL assignments (ID {assign_id}, Case: {case_id}) to supervisor_data"
-                            )
-                        )
-                    except Exception:
-                        pass
-                    
-                except Exception as e:
-                    error_count += 1
-                    st.toast(f"❌ Error: {e}", icon="❌")
-            
-            progress_bar.progress(100)
-            status_text.markdown(f"✅ **Proses selesai!** {total_items} data diproses")
-            
-            if success_count > 0 or updated_count > 0:
-                summary_msg = f"✅ SEMUA data berhasil dikembalikan! "
-                if success_count > 0:
-                    summary_msg += f"**{success_count}** baru ditambahkan. "
-                if updated_count > 0:
-                    summary_msg += f"**{updated_count}** diupdate. "
-                if error_count > 0:
-                    summary_msg += f"⚠️ **{error_count}** gagal."
-                st.success(summary_msg)
-                st.balloons()
-                st.session_state['confirm_return_all'] = False
-                time.sleep(2)
-                st.rerun()
-            else:
-                st.error(f"❌ Proses gagal. {error_count} error(s) terjadi.")
-                st.session_state['confirm_return_all'] = False
-    
-    st.markdown("---")
-    st.markdown("### 📋 Kembalikan Data Terpilih")
-    
-    if not selected_list:
-        st.info("Centang satu atau beberapa baris pada tabel di atas untuk kembalikan ke Supervisor Data.")
-    else:
-        st.info(f"✅ Dipilih: **{len(selected_list)}** assignment(s)")
-        
-        col_imp1, col_imp2 = st.columns([1, 3])
-        with col_imp1:
-            import_btn = st.button("↩️ Kembalikan ke Supervisor Data", type="primary", use_container_width=True)
-        with col_imp2:
-            st.caption("Data yang dipilih akan dikembalikan ke Supervisor Data dan tidak akan muncul lagi di Tracer Menu.")
-        
-        if import_btn:
-            success_count = 0
-            error_count = 0
-            updated_count = 0
-            
-            # Create progress elements
-            total_items = len(selected_list)
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-            for idx, assign_id in enumerate(selected_list, start=1):
-                # Update progress
-                progress_percent = int((idx / total_items) * 100)
-                progress_bar.progress(progress_percent / 100)
-                status_text.markdown(f"🔄 **Memproses {idx} dari {total_items}** ({progress_percent}%)")
-                
-                try:
-                    # Ambil data dari assign_tracer
-                    tracer_data = fetchone(
-                        """SELECT * FROM assign_tracer WHERE id = ?""",
-                        (assign_id,)
-                    )
-                    
-                    if not tracer_data:
-                        error_count += 1
-                        continue
-                    
-                    case_id = tracer_data.get('Agreement_No')
-                    if not case_id:
-                        error_count += 1
-                        continue
-                    
-                    # Cek apakah case_id sudah ada di supervisor_data
-                    existing = fetchone(
-                        """SELECT id FROM supervisor_data WHERE Case_ID = ? OR Virtual_Account_Number = ? LIMIT 1""",
-                        (case_id, case_id)
-                    )
-                    
-                    if existing:
-                        # Update existing record dengan data terbaru dari tracer
-                        execute(
-                            """UPDATE supervisor_data 
-                               SET Customer_name = COALESCE(?, Customer_name),
-                                   NIK_KTP = COALESCE(?, NIK_KTP),
-                                   EMPLOYMENT_UPDATE = COALESCE(?, EMPLOYMENT_UPDATE),
-                                   EMPLOYER = COALESCE(?, EMPLOYER),
-                                   Debtor_Legal_Name = COALESCE(?, Debtor_Legal_Name),
-                                   Employee_Name = COALESCE(?, Employee_Name),
-                                   Employee_ID_Number = COALESCE(?, Employee_ID_Number),
-                                   Debtor_Relation_to_Employee = COALESCE(?, Debtor_Relation_to_Employee),
-                                   Decoded_Company_Name = COALESCE(?, Decoded_Company_Name)
-                               WHERE Case_ID = ? OR Virtual_Account_Number = ?""",
-                            (
-                                tracer_data.get('Debtor_Name'),
-                                tracer_data.get('NIK_KTP'),
-                                tracer_data.get('EMPLOYMENT_UPDATE'),
-                                tracer_data.get('EMPLOYER'),
-                                tracer_data.get('Debtor_Legal_Name'),
-                                tracer_data.get('Employee_Name'),
-                                tracer_data.get('Employee_ID_Number'),
-                                tracer_data.get('Debtor_Relation_to_Employee'),
-                                tracer_data.get('Decoded_Company_Name'),
-                                case_id,
-                                case_id
-                            )
-                        )
-                        updated_count += 1
-                    else:
-                        # Insert new record
-                        execute(
-                            """INSERT INTO supervisor_data 
-                               (Case_ID, Virtual_Account_Number, Customer_name, NIK_KTP, 
-                                EMPLOYMENT_UPDATE, EMPLOYER, Decoded_Company_Name, Debtor_Legal_Name, 
-                                Employee_Name, Employee_ID_Number, Debtor_Relation_to_Employee, TRC_Code)
-                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                            (
-                                case_id,
-                                case_id,  # Use Case_ID as Virtual_Account_Number jika belum ada
-                                tracer_data.get('Debtor_Name'),
-                                tracer_data.get('NIK_KTP'),
-                                tracer_data.get('EMPLOYMENT_UPDATE'),
-                                tracer_data.get('EMPLOYER'),
-                                tracer_data.get('Decoded_Company_Name'),
-                                tracer_data.get('Debtor_Legal_Name'),
-                                tracer_data.get('Employee_Name'),
-                                tracer_data.get('Employee_ID_Number'),
-                                tracer_data.get('Debtor_Relation_to_Employee'),
-                                tracer_data.get('TRC_Code')
-                            )
-                        )
-                        success_count += 1
-                    
-                    # Mark assignment as returned to supervisor
-                    execute(
-                        "UPDATE assign_tracer SET returned_to_supervisor = 'Y', returned_at = CURRENT_TIMESTAMP WHERE id = ?",
-                        (assign_id,)
-                    )
-                    
-                    # Audit log
-                    try:
-                        execute(
-                            "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
-                            (
-                                u.get('id') if u else None,
-                                "TRACER_RETURN_TO_SUPERVISOR",
-                                f"Tracer '{tracer_name}' returned assignment ID {assign_id} (Case: {case_id}) to supervisor_data"
-                            )
-                        )
-                    except Exception:
-                        pass
-                    
-                except Exception as e:
-                    error_count += 1
-                    st.toast(f"❌ Error memproses assignment {assign_id}: {e}", icon="❌")
-            
-            # Complete progress
-            progress_bar.progress(100)
-            status_text.markdown(f"✅ **Proses selesai!** {total_items} data diproses")
-            
-            # Summary message
-            if success_count > 0 or updated_count > 0:
-                summary_msg = f"✅ Data berhasil dikembalikan ke Supervisor! "
-                if success_count > 0:
-                    summary_msg += f"**{success_count}** data baru ditambahkan. "
-                if updated_count > 0:
-                    summary_msg += f"**{updated_count}** data diupdate. "
-                if error_count > 0:
-                    summary_msg += f"⚠️ **{error_count}** gagal."
-                st.success(summary_msg)
-                st.balloons()
-                time.sleep(1)
-                st.rerun()
-            else:
-                st.error(f"❌ Proses gagal. {error_count} error(s) terjadi.")
 
 def page_guide():
     """User Guide page with detailed application description and quick how-to."""
