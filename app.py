@@ -12422,7 +12422,11 @@ def page_tracer():
     # Jika Supervisor/Superuser: tampilkan semua assignment
     # Jika Tracer: hanya tampilkan assignment untuk dirinya sendiri
     if user_role in ("Superuser", "Supervisor"):
-        st.caption(f"Mode: **{user_role}** — Melihat semua assignment tracer (yang belum dikembalikan)")
+        # Get total count for display
+        total_count = (fetchone(
+            "SELECT COUNT(*) as cnt FROM assign_tracer WHERE IFNULL(returned_to_supervisor, '') != 'Y'"
+        ) or {}).get('cnt', 0)
+        st.caption(f"Mode: **{user_role}** — Melihat semua assignment tracer (yang belum dikembalikan) - Total: **{total_count:,}** data")
         rows = fetchall(
             """
             SELECT at.id, at.TRC_Code, at.Agreement_No, at.Debtor_Name, at.NIK_KTP, 
@@ -12433,11 +12437,16 @@ def page_tracer():
             FROM assign_tracer at
             LEFT JOIN supervisor_data sd ON at.Agreement_No = sd.Case_ID
             WHERE IFNULL(at.returned_to_supervisor, '') != 'Y'
-            ORDER BY at.id DESC LIMIT 500
+            ORDER BY at.id DESC
             """
         )
     else:
-        st.caption(f"Assignment untuk: {tracer_name} (yang belum dikembalikan)")
+        # Get total count for display
+        total_count = (fetchone(
+            "SELECT COUNT(*) as cnt FROM assign_tracer WHERE IFNULL(Assigned_To,'') = ? AND IFNULL(returned_to_supervisor, '') != 'Y'",
+            (tracer_name,)
+        ) or {}).get('cnt', 0)
+        st.caption(f"Assignment untuk: {tracer_name} (yang belum dikembalikan) - Total: **{total_count:,}** data")
         rows = fetchall(
             """
             SELECT at.id, at.TRC_Code, at.Agreement_No, at.Debtor_Name, at.NIK_KTP, 
@@ -12448,7 +12457,7 @@ def page_tracer():
             FROM assign_tracer at
             LEFT JOIN supervisor_data sd ON at.Agreement_No = sd.Case_ID
             WHERE IFNULL(at.Assigned_To,'') = ? AND IFNULL(at.returned_to_supervisor, '') != 'Y'
-            ORDER BY at.id DESC LIMIT 500
+            ORDER BY at.id DESC
             """,
             (tracer_name,)
         )
