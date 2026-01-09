@@ -12831,7 +12831,17 @@ def page_tracer():
             error_count = 0
             updated_count = 0
             
-            for assign_id in selected_list:
+            # Create progress elements
+            total_items = len(selected_list)
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            for idx, assign_id in enumerate(selected_list, start=1):
+                # Update progress
+                progress_percent = int((idx / total_items) * 100)
+                progress_bar.progress(progress_percent / 100)
+                status_text.markdown(f"🔄 **Importing {idx} of {total_items}** ({progress_percent}%)")
+                
                 try:
                     # Ambil data dari assign_tracer
                     tracer_data = fetchone(
@@ -12924,6 +12934,10 @@ def page_tracer():
                 except Exception as e:
                     error_count += 1
                     st.toast(f"❌ Error importing assignment {assign_id}: {e}", icon="❌")
+            
+            # Complete progress
+            progress_bar.progress(100)
+            status_text.markdown(f"✅ **Import complete!** Processed {total_items} items")
             
             # Summary message
             if success_count > 0 or updated_count > 0:
