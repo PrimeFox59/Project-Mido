@@ -12571,25 +12571,27 @@ def page_tracer():
     st.subheader("↩️ Kembalikan Data ke Supervisor Menu")
     st.caption("Kembalikan data yang sudah selesai diupdate ke data menu supervisor. Data yang dikembalikan tidak akan muncul lagi di Tracer Menu.")
     
-    # Two options: Return All or Return Selected
+    # Two options: Return All Unassigned or Return Selected
     col_opt1, col_opt2 = st.columns(2)
     
-    # Option 1: Return ALL
+    # Option 1: Return ALL UNASSIGNED (Assigned_To is empty)
     with col_opt1:
-        st.markdown("#### 🔄 Kembalikan SEMUA Data")
-        total_available = len(filtered_rows)
+        st.markdown("#### 🔄 Kembalikan Data Belum Assign")
+        # Count and filter only unassigned data
+        unassigned_data = [r for r in filtered_rows if not r.get('Assigned_To') or str(r.get('Assigned_To', '')).strip() == '']
+        total_unassigned = len(unassigned_data)
         
-        if total_available == 0:
-            st.info("Tidak ada data untuk dikembalikan.")
+        if total_unassigned == 0:
+            st.info("✅ Semua data sudah di-assign.")
         else:
-            st.info(f"Total: **{total_available}** assignment")
+            st.info(f"Total data **belum assign**: **{total_unassigned}** dari {len(filtered_rows)}")
             return_all_btn = st.button(
-                "🔄 Kembalikan SEMUA", 
+                "🔄 Kembalikan Data Belum Assign", 
                 type="secondary", 
                 use_container_width=True, 
                 key="return_all_btn",
-                disabled=(total_available == 0),
-                help="Kembalikan semua data yang tampil di tabel (tidak perlu centang)"
+                disabled=(total_unassigned == 0),
+                help="Kembalikan semua data yang Assigned_To nya kosong (belum di-assign ke tracer)"
             )
             
             if return_all_btn:
@@ -12597,7 +12599,7 @@ def page_tracer():
                     st.session_state['confirm_return_all'] = False
                 
                 if not st.session_state['confirm_return_all']:
-                    st.warning(f"⚠️ Anda akan mengembalikan **{total_available}** data ke Supervisor. Data tidak akan muncul lagi di Tracer Menu.")
+                    st.warning(f"⚠️ Anda akan mengembalikan **{total_unassigned}** data yang belum di-assign ke Supervisor. Data tidak akan muncul lagi di Tracer Menu.")
                     col_conf1, col_conf2 = st.columns(2)
                     with col_conf1:
                         if st.button("✅ Ya, Lanjutkan", type="primary", key="confirm_yes", use_container_width=True):
@@ -12608,18 +12610,18 @@ def page_tracer():
                             st.session_state['confirm_return_all'] = False
                             st.info("Dibatalkan.")
                 else:
-                    # Process all assignments
+                    # Process only UNASSIGNED assignments
                     success_count = 0
                     error_count = 0
                     updated_count = 0
                     
-                    all_ids = [r['id'] for r in filtered_rows]
-                    total_items = len(all_ids)
+                    unassigned_ids = [r['id'] for r in unassigned_data]
+                    total_items = len(unassigned_ids)
                     
                     progress_bar = st.progress(0)
                     status_text = st.empty()
                     
-                    for idx, assign_id in enumerate(all_ids, start=1):
+                    for idx, assign_id in enumerate(unassigned_ids, start=1):
                         progress_percent = int((idx / total_items) * 100)
                         progress_bar.progress(progress_percent / 100)
                         status_text.markdown(f"🔄 **Memproses {idx} dari {total_items}** ({progress_percent}%)")
@@ -12689,8 +12691,8 @@ def page_tracer():
                                     "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
                                     (
                                         u.get('id') if u else None,
-                                        "TRACER_RETURN_ALL_TO_SUPERVISOR",
-                                        f"Tracer '{tracer_name}' returned ALL assignments (ID {assign_id}, Case: {case_id}) to supervisor_data"
+                                        "TRACER_RETURN_UNASSIGNED_TO_SUPERVISOR",
+                                        f"User '{tracer_name}' returned UNASSIGNED assignment (ID {assign_id}, Case: {case_id}) to supervisor_data"
                                     )
                                 )
                             except Exception:
@@ -12704,7 +12706,7 @@ def page_tracer():
                     status_text.markdown(f"✅ **Proses selesai!** {total_items} data diproses")
                     
                     if success_count > 0 or updated_count > 0:
-                        summary_msg = f"✅ SEMUA data berhasil dikembalikan! "
+                        summary_msg = f"✅ Data belum assign berhasil dikembalikan! "
                         if success_count > 0:
                             summary_msg += f"**{success_count}** baru ditambahkan. "
                         if updated_count > 0:
