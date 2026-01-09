@@ -9041,16 +9041,65 @@ def page_supervisor():
                 num_rows="fixed",
             )
 
-        # Assignment controls
-        c1, c2 = st.columns([1,1])
-        with c1:
+        # Assignment controls - NEW SIMPLIFIED SYSTEM
+        st.markdown("---")
+        st.subheader("📋 Assign Data ke Tracer")
+        
+        # Get total available data
+        total_available = len(df_sup) if df_sup is not None and not df_sup.empty else 0
+        
+        col_assign1, col_assign2, col_assign3 = st.columns([1, 2, 1])
+        
+        with col_assign1:
+            num_to_assign = st.number_input(
+                "Jumlah data yang ingin di-assign",
+                min_value=1,
+                max_value=total_available,
+                value=min(100, total_available),
+                step=10,
+                key="num_to_assign",
+                help=f"Total data tersedia: {total_available}"
+            )
+        
+        with col_assign2:
             tracer_users_tbl = fetchall("SELECT COALESCE(full_name, name) AS full_name FROM users WHERE approved=1 AND role='Tracer' ORDER BY COALESCE(full_name,name)")
             tracer_list_tbl = [r.get('full_name') for r in tracer_users_tbl if r.get('full_name')]
-            target_tracer_tbl = st.selectbox("Pilih Tracer (single)", options=tracer_list_tbl, index=0 if tracer_list_tbl else None, key="ta_tbl_tracer")
-            btn_assign_single = st.button("Assign terpilih ke Tracer", type="primary", key="btn_assign_tbl_single")
-        with c2:
-            tracers_multi = st.multiselect("Pilih beberapa Tracer (acak/round-robin)", options=tracer_list_tbl, default=[], key="ta_tbl_multitracers")
-            btn_assign_multi = st.button("Random distribute ke tracer terpilih", key="btn_assign_tbl_multi")
+            selected_tracers = st.multiselect(
+                "Pilih Tracer yang akan menerima data",
+                options=tracer_list_tbl,
+                default=[],
+                key="selected_tracers",
+                help="Pilih satu atau lebih tracer. Data akan dibagi rata."
+            )
+        
+        with col_assign3:
+            if selected_tracers:
+                per_tracer = num_to_assign // len(selected_tracers)
+                remainder = num_to_assign % len(selected_tracers)
+                st.metric("Per Tracer", f"~{per_tracer}", help=f"{remainder} data akan dibagi ke tracer pertama")
+            else:
+                st.metric("Per Tracer", "-")
+        
+        # Show distribution preview
+        if selected_tracers:
+            st.caption("**Distribusi:**")
+            distribution = []
+            per_tracer = num_to_assign // len(selected_tracers)
+            remainder = num_to_assign % len(selected_tracers)
+            
+            for idx, tracer in enumerate(selected_tracers):
+                count = per_tracer + (1 if idx < remainder else 0)
+                distribution.append(f"• {tracer}: **{count}** data")
+            
+            st.info("\n".join(distribution))
+        
+        btn_assign = st.button(
+            f"🎯 Assign {num_to_assign} Data ke {len(selected_tracers)} Tracer",
+            type="primary",
+            disabled=(not selected_tracers or total_available == 0),
+            use_container_width=True,
+            key="btn_assign_distribute"
+        )
 
         # Helper for TRC code
         def _gen_trc_code_for(name: str) -> str:
@@ -9060,105 +9109,51 @@ def page_supervisor():
                 prefix = 'TRC'
             return f"TRC-{now_wib().strftime('%y%m%d')}-{prefix}"
 
-        # Process single assign - USE NEW SYSTEM
-        if btn_assign_single:
-            # Avoid ambiguous truth-value of DataFrame; use explicit None check
-            sel = [r for _, r in ((edited if edited is not None else _pd.DataFrame())).iterrows() if bool(r.get("Selected"))]
-            if not sel:
-                st.warning("Pilih minimal satu baris pada tabel di atas.")
-            elif not target_tracer_tbl:
-                st.warning("Pilih tracer terlebih dahulu.")
+        # Process assignment
+        if btn_assign:
+            if df_sup is None or df_sup.empty:
+                st.error("Tidak ada data untuk di-assign.")
+            elif not selected_tracers:
+                st.error("Pilih minimal 1 tracer.")
             else:
                 try:
                     u = current_user() or {}
                     by = (u.get('full_name') or u.get('login_id') or '-')
-                    inserted = 0; frozen = 0; already_assigned = 0
                     
-                    for _, r in (edited[edited["Selected"] == True]).iterrows():
+                    # Get data to assign (limit to num_to_assign)
+                    data_to_assign = df_sup.head(num_to_assign).to_dict(orient="records")
+                    
+                    # Distribute data
+                    counts = {t: 0 for t in selected_tracers}
+                    frozen = 0
+                    already_assigned = 0
+                    success_count = 0
+                    
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    
+                    tracer_idx = 0
+                    for idx, r in enumerate(data_to_assign):
+                        progress_percent = int(((idx + 1) / len(data_to_assign)) * 100)
+                        progress_bar.progress(progress_percent / 100)
+                        status_text.markdown(f"🔄 **Memproses {idx + 1} dari {len(data_to_assign)}** ({progress_percent}%)")
+                        
                         agr = str(r.get("Case_ID") or "").strip()
                         if not agr:
                             continue
+                        
                         nik_val = str(r.get("NIK_KTP") or "").strip() or None
                         debtor_nm = r.get("Customer_name")
                         
-                        # Use new assignment system
-                        success, msg = assign_case_to_tracer(agr, target_tracer_tbl, by)
+                        # Assign to tracer (round-robin style)
+                        assignee = selected_tracers[tracer_idx % len(selected_tracers)]
+                        tracer_idx += 1
                         
-                        if success:
-                            # Still need to populate assign_tracer table for compatibility
-                            trc_code = _gen_trc_code_for(target_tracer_tbl)
-                            try:
-                                execute(
-                                    """
-                                    INSERT INTO assign_tracer (TRC_Code, Agreement_No, Debtor_Name, NIK_KTP, Assigned_To)
-                                    VALUES (?,?,?,?,?)
-                                    ON CONFLICT(Agreement_No) DO UPDATE SET
-                                      Assigned_To=excluded.Assigned_To,
-                                      Debtor_Name=COALESCE(excluded.Debtor_Name, assign_tracer.Debtor_Name),
-                                      NIK_KTP=COALESCE(excluded.NIK_KTP, assign_tracer.NIK_KTP),
-                                      TRC_Code=COALESCE(NULLIF(assign_tracer.TRC_Code, ''), excluded.TRC_Code)
-                                    """,
-                                    (trc_code, agr, debtor_nm, nik_val, target_tracer_tbl)
-                                )
-                            except Exception:
-                                pass
-                            inserted += 1
-                        else:
-                            if "frozen" in msg.lower():
-                                frozen += 1
-                            elif "di-assign" in msg.lower():
-                                already_assigned += 1
-                    done = (len(sel) - frozen - already_assigned)
-                    msg = f"Assign selesai. Diproses: {done}."
-                    if frozen > 0:
-                        msg += f" Dilewati karena Freeze: {frozen}."
-                    # Show summary
-                    u = current_user() or {}
-                    try:
-                        execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", 
-                               (u.get('id'), "TRACE_ASSIGN_FROM_SUP_TABLE", 
-                                f"{inserted} rows to {target_tracer_tbl}; frozen {frozen}; already_assigned {already_assigned}"))
-                    except Exception:
-                        pass
-                    
-                    st.success(f"✅ Berhasil assign: {inserted} case. ❄️ Frozen: {frozen}. 🔒 Already assigned: {already_assigned}.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Gagal assign: {e}")
-
-        # Process multi assign (random/round-robin) - USE NEW SYSTEM
-        if btn_assign_multi:
-            sel_df = edited[edited["Selected"] == True] if isinstance(edited, _pd.DataFrame) else _pd.DataFrame()
-            if sel_df.empty:
-                st.warning("Pilih minimal satu baris pada tabel di atas.")
-            elif not tracers_multi:
-                st.warning("Pilih minimal satu tracer untuk distribusi.")
-            else:
-                try:
-                    import random
-                    u = current_user() or {}
-                    by = (u.get('full_name') or u.get('login_id') or '-')
-                    rows_to_assign = sel_df.to_dict(orient="records")
-                    # Shuffle for random distribution
-                    random.shuffle(rows_to_assign)
-                    
-                    counts = {t: 0 for t in tracers_multi}
-                    frozen = 0; done = 0; already_assigned = 0
-                    
-                    for i, r in enumerate(rows_to_assign):
-                        agr = str(r.get("Case_ID") or "").strip()
-                        if not agr:
-                            continue
-                        nik_val = str(r.get("NIK_KTP") or "").strip() or None
-                        debtor_nm = r.get("Customer_name")
-                        
-                        assignee = tracers_multi[i % len(tracers_multi)]
-                        
-                        # Use new assignment system
+                        # Use assignment system
                         success, msg = assign_case_to_tracer(agr, assignee, by)
                         
                         if success:
-                            # Populate assign_tracer table for compatibility
+                            # Populate assign_tracer table
                             trc_code = _gen_trc_code_for(assignee)
                             try:
                                 execute(
@@ -9175,34 +9170,54 @@ def page_supervisor():
                                 )
                             except Exception:
                                 pass
+                            
                             counts[assignee] += 1
-                            done += 1
+                            success_count += 1
                         else:
                             if "frozen" in msg.lower():
                                 frozen += 1
                             elif "di-assign" in msg.lower():
                                 already_assigned += 1
                     
-                    # Summary
-                    summary = ", ".join([f"{k}:{v}" for k,v in counts.items()])
-                    msg = f"✅ Distribusi selesai. Berhasil: {done}."
-                    if frozen > 0:
-                        msg += f" ❄️ Frozen: {frozen}."
-                    if already_assigned > 0:
-                        msg += f" 🔒 Already assigned: {already_assigned}."
-                    msg += f" 📊 Rincian: {summary}"
-                    st.success(msg)
+                    progress_bar.progress(100)
+                    status_text.markdown("✅ **Proses selesai!**")
                     
-                    # Audit
+                    # Audit log
                     try:
-                        execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)", 
-                               (u.get('id'), "TRACE_ASSIGN_RANDOM_FROM_SUP_TABLE", 
-                                f"done {done}; frozen {frozen}; already_assigned {already_assigned}; {summary}"))
+                        distribution_detail = ", ".join([f"{t}: {c}" for t, c in counts.items()])
+                        execute(
+                            "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                            (
+                                u.get('id'),
+                                "TRACE_ASSIGN_DISTRIBUTE",
+                                f"Assigned {success_count} cases to {len(selected_tracers)} tracers. Distribution: {distribution_detail}. Frozen: {frozen}, Already assigned: {already_assigned}"
+                            )
+                        )
                     except Exception:
                         pass
+                    
+                    # Show summary
+                    st.success(f"✅ Berhasil assign: **{success_count}** case")
+                    
+                    # Show distribution
+                    dist_cols = st.columns(len(selected_tracers))
+                    for idx, (tracer, count) in enumerate(counts.items()):
+                        with dist_cols[idx]:
+                            st.metric(tracer, count)
+                    
+                    if frozen > 0:
+                        st.warning(f"❄️ Frozen: {frozen}")
+                    if already_assigned > 0:
+                        st.info(f"🔒 Already assigned: {already_assigned}")
+                    
+                    st.balloons()
+                    time.sleep(2)
                     st.rerun()
+                    
                 except Exception as e:
-                    st.error(f"Gagal distribusi acak: {e}")
+                    st.error(f"Gagal assign: {e}")
+
+    # --- Tab: Agent Assigning ---
 
         st.markdown("---")
         # Pull minimal fields to evaluate freeze status
