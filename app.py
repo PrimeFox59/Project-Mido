@@ -9118,6 +9118,9 @@ def page_supervisor():
                     st.error(f"Gagal assign: {e}")
 
         st.markdown("---")
+        st.markdown("### 🔄 Multi-Assign ke Beberapa Tracer")
+        st.caption("Distribusikan data belum assign ke beberapa tracer secara round-robin.")
+        
         # Pull minimal fields to evaluate freeze status
         unassigned_rows = fetchall("SELECT id, Agreement_No, NIK_KTP FROM assign_tracer WHERE IFNULL(Assigned_To,'')='' ORDER BY id DESC")
         # Filter out frozen rows (by Agreement_No or by NIK)
@@ -9131,33 +9134,56 @@ def page_supervisor():
                 continue
             filtered_rows.append(r)
         unassigned_count = len(filtered_rows)
+        
         if frozen_skipped:
-            st.warning(f"{frozen_skipped} baris dilewati karena status Freeze (berdasarkan NIK/Case_ID).")
+            st.info(f"ℹ️ {frozen_skipped} baris dilewati karena status Freeze (berdasarkan NIK/Case_ID).")
 
         if unassigned_count > 0:
+            st.info(f"📊 Data belum di-assign: **{unassigned_count}** baris")
+            
             # Build tracer options in this scope (approved users)
             _user_rows_ma = fetchall("SELECT COALESCE(full_name, name) AS full_name FROM users WHERE approved=1 AND role='Tracer' ORDER BY COALESCE(full_name,name) ASC")
             tracer_names = [r['full_name'] for r in _user_rows_ma if r.get('full_name')]
 
             with st.form("multi_assign_form"):
+                st.markdown("#### 👥 Pilih Tracer")
                 selected_tracers = st.multiselect(
-                    "Pilih tracer (minimal 1)", options=tracer_names, default=[], key="multi_assign_tracers"
+                    "Pilih tracer (minimal 1)", 
+                    options=tracer_names, 
+                    default=[], 
+                    key="multi_assign_tracers",
+                    help="Pilih satu atau lebih tracer untuk distribusi otomatis"
                 )
-                # Advanced options hidden by default
-                with st.expander("Opsi lanjutan", expanded=False):
-                    col_ma1, col_ma2 = st.columns(2)
-                    with col_ma1:
-                        limit_n = st.number_input("Jumlah baris yang akan di-assign (0 = semua)", min_value=0, value=0, step=1, key="multi_assign_limit")
-                    with col_ma2:
-                        do_shuffle = st.checkbox("Acak urutan baris", value=True, key="multi_assign_shuffle")
-
+                
                 # Small summary to clarify distribution
                 if selected_tracers:
                     import math as _math
                     per_tracer_est = _math.ceil(unassigned_count / max(len(selected_tracers), 1))
-                    st.caption(f"Perkiraan distribusi: ~{per_tracer_est} baris per tracer")
+                    st.success(f"✅ Perkiraan distribusi: **~{per_tracer_est}** baris per tracer")
+                
+                st.markdown("---")
+                
+                # Advanced options hidden by default
+                with st.expander("⚙️ Opsi Lanjutan", expanded=False):
+                    col_ma1, col_ma2 = st.columns(2)
+                    with col_ma1:
+                        limit_n = st.number_input(
+                            "Jumlah baris yang akan di-assign", 
+                            min_value=0, 
+                            value=0, 
+                            step=10, 
+                            key="multi_assign_limit",
+                            help="0 = semua data yang belum di-assign"
+                        )
+                    with col_ma2:
+                        do_shuffle = st.checkbox(
+                            "Acak urutan baris", 
+                            value=True, 
+                            key="multi_assign_shuffle",
+                            help="Acak untuk distribusi lebih merata"
+                        )
 
-                submitted = st.form_submit_button("Assign Sekarang", type="primary")
+                submitted = st.form_submit_button("🚀 Assign Sekarang", type="primary", use_container_width=True)
 
             if submitted:
                 if not selected_tracers or len(selected_tracers) < 1:
