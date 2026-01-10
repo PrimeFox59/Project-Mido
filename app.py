@@ -12971,6 +12971,126 @@ def page_tracer():
                 except Exception as e:
                     st.toast(f"❌ Gagal update: {e}", icon="❌")
 
+        # Kirim data ke Supervisor dengan validasi field wajib
+        st.markdown("---")
+        st.markdown("##### 📤 Kirim data ke Supervisor")
+        st.caption("Hanya bisa dikirim jika kolom EMPLOYMENT UPDATE sampai Debtor Relation to Employee sudah terisi.")
+
+        send_btn = st.button(
+            "📤 Kirim Data ke Supervisor",
+            type="primary",
+            use_container_width=True,
+            key="tr_send_to_supervisor"
+        )
+
+        if send_btn:
+            tracer_row = fetchone("SELECT * FROM assign_tracer WHERE id = ?", (sel_id,))
+            if not tracer_row:
+                st.error("Data assignment tidak ditemukan.")
+            else:
+                # Cek apakah sudah pernah dikembalikan
+                if str(tracer_row.get('returned_to_supervisor', '')).upper() == 'Y':
+                    st.info("Data ini sudah dikirim ke Supervisor sebelumnya.")
+                else:
+                    required_fields = {
+                        "EMPLOYMENT UPDATE": tracer_row.get('EMPLOYMENT_UPDATE'),
+                        "EMPLOYER (Masked)": tracer_row.get('EMPLOYER'),
+                        "Debtor Legal Name": tracer_row.get('Debtor_Legal_Name'),
+                        "Employee Name": tracer_row.get('Employee_Name'),
+                        "Employee ID Number": tracer_row.get('Employee_ID_Number'),
+                        "Debtor Relation to Employee": tracer_row.get('Debtor_Relation_to_Employee')
+                    }
+
+                    def _is_blank(val: str) -> bool:
+                        if val is None:
+                            return True
+                        txt = str(val).strip()
+                        return txt == "" or txt.lower() in {"none", "-", "na", "n/a"}
+
+                    missing = [label for label, val in required_fields.items() if _is_blank(val)]
+
+                    if missing:
+                        st.warning("Lengkapi dulu kolom berikut sebelum kirim: " + ", ".join(missing))
+                    else:
+                        case_id = tracer_row.get('Agreement_No')
+                        if not case_id:
+                            st.error("Case ID tidak tersedia pada data ini.")
+                        else:
+                            decoded_company = tracer_row.get('Decoded_Company_Name')
+                            if not decoded_company and tracer_row.get('EMPLOYER'):
+                                decoded_company = decode_company_name(tracer_row.get('EMPLOYER'))
+                                try:
+                                    execute(
+                                        "UPDATE assign_tracer SET Decoded_Company_Name=? WHERE id=?",
+                                        (decoded_company, sel_id)
+                                    )
+                                except Exception:
+                                    pass
+
+                            existing = fetchone(
+                                "SELECT id FROM supervisor_data WHERE Case_ID = ? OR Virtual_Account_Number = ? LIMIT 1",
+                                (case_id, case_id)
+                            )
+
+                            if existing:
+                                execute(
+                                    """UPDATE supervisor_data 
+                                       SET Customer_name = COALESCE(?, Customer_name),
+                                           NIK_KTP = COALESCE(?, NIK_KTP),
+                                           EMPLOYMENT_UPDATE = COALESCE(?, EMPLOYMENT_UPDATE),
+                                           EMPLOYER = COALESCE(?, EMPLOYER),
+                                           Debtor_Legal_Name = COALESCE(?, Debtor_Legal_Name),
+                                           Employee_Name = COALESCE(?, Employee_Name),
+                                           Employee_ID_Number = COALESCE(?, Employee_ID_Number),
+                                           Debtor_Relation_to_Employee = COALESCE(?, Debtor_Relation_to_Employee),
+                                           Decoded_Company_Name = COALESCE(?, Decoded_Company_Name)
+                                       WHERE Case_ID = ? OR Virtual_Account_Number = ?""",
+                                    (
+                                        tracer_row.get('Debtor_Name'), tracer_row.get('NIK_KTP'),
+                                        tracer_row.get('EMPLOYMENT_UPDATE'), tracer_row.get('EMPLOYER'),
+                                        tracer_row.get('Debtor_Legal_Name'), tracer_row.get('Employee_Name'),
+                                        tracer_row.get('Employee_ID_Number'), tracer_row.get('Debtor_Relation_to_Employee'),
+                                        decoded_company, case_id, case_id
+                                    )
+                                )
+                            else:
+                                execute(
+                                    """INSERT INTO supervisor_data 
+                                       (Case_ID, Virtual_Account_Number, Customer_name, NIK_KTP, 
+                                        EMPLOYMENT_UPDATE, EMPLOYER, Decoded_Company_Name, Debtor_Legal_Name, 
+                                        Employee_Name, Employee_ID_Number, Debtor_Relation_to_Employee, TRC_Code)
+                                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                    (
+                                        case_id, case_id, tracer_row.get('Debtor_Name'), tracer_row.get('NIK_KTP'),
+                                        tracer_row.get('EMPLOYMENT_UPDATE'), tracer_row.get('EMPLOYER'),
+                                        decoded_company, tracer_row.get('Debtor_Legal_Name'),
+                                        tracer_row.get('Employee_Name'), tracer_row.get('Employee_ID_Number'),
+                                        tracer_row.get('Debtor_Relation_to_Employee'), tracer_row.get('TRC_Code')
+                                    )
+                                )
+
+                            execute(
+                                "UPDATE assign_tracer SET returned_to_supervisor = 'Y', returned_at = CURRENT_TIMESTAMP WHERE id = ?",
+                                (sel_id,)
+                            )
+
+                            try:
+                                execute(
+                                    "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                                    (
+                                        u.get('id') if u else None,
+                                        "TRACER_SEND_TO_SUPERVISOR_REQUIRED",
+                                        f"Tracer '{tracer_name}' mengirim data ID {sel_id} ke supervisor setelah field wajib terisi"
+                                    )
+                                )
+                            except Exception:
+                                pass
+
+                            st.success("✅ Data berhasil dikirim ke Supervisor dengan field wajib lengkap.")
+                            st.balloons()
+                            time.sleep(1)
+                            st.rerun()
+
     # --- Internal Memo tab ---
     with sub_tabs[1]:
         ag_no = sel_row.get('Agreement_No')
