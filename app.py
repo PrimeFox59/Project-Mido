@@ -59,8 +59,184 @@ st.markdown("""
         position: absolute !important;
     }
     
-    if __name__ == '__main__':
-            main()
+    /* Targeted blocking layer only for collapse button area (top 60px) */
+    section[data-testid="stSidebar"]::before {
+        content: '';
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 350px;
+        height: 60px;
+        background: transparent;
+        z-index: 999999 !important;
+        pointer-events: auto !important;
+        cursor: not-allowed !important;
+    }
+    
+    /* Hide header toolbar completely */
+    header[data-testid="stHeader"],
+    .stApp > header {
+        visibility: hidden !important;
+        display: none !important;
+        height: 0 !important;
+        min-height: 0 !important;
+        max-height: 0 !important;
+        overflow: hidden !important;
+    }
+    
+    /* Subtle gradient background for main app */
+    .stApp {
+        background: linear-gradient(135deg, 
+            #f5f7fa 0%, 
+            #e8eef5 50%, 
+            #f0f4f8 100%) !important;
+    }
+    
+    /* Main content area with subtle glass effect */
+    .main .block-container {
+        background: rgba(255, 255, 255, 0.3) !important;
+        backdrop-filter: blur(10px) !important;
+        border-radius: 20px !important;
+        padding: 1rem 2rem 2rem 2rem !important;
+        padding-top: 1rem !important;
+        margin-top: 1rem !important;
+    }
+    
+    /* Compact content area but ensure header space exists */
+    section.main > div {
+        padding-top: 0.5rem !important;
+    }
+    
+    .main {
+        padding-top: 0.5rem !important;
+    }
+    
+    /* ============================================
+       GLOBAL GLASSMORPHISM BUTTON STYLES
+    ============================================ */
+    
+    /* Primary Buttons - Glass Effect */
+    .stButton > button[kind="primary"] {
+        background: linear-gradient(135deg, 
+            rgba(99, 102, 241, 0.9) 0%, 
+            rgba(139, 92, 246, 0.9) 100%) !important;
+        backdrop-filter: blur(10px) saturate(150%) !important;
+        -webkit-backdrop-filter: blur(10px) saturate(150%) !important;
+        border: 1px solid rgba(255, 255, 255, 0.3) !important;
+        border-radius: 12px !important;
+        color: #FFFFFF !important;
+        font-weight: 600 !important;
+        padding: 10px 20px !important;
+        box-shadow: 0 4px 16px rgba(99, 102, 241, 0.25), 
+                    inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    }
+    
+    .stButton > button[kind="primary"]:hover {
+        background: linear-gradient(135deg, 
+            rgba(99, 102, 241, 1) 0%, 
+            rgba(139, 92, 246, 1) 100%) !important;
+        box-shadow: 0 6px 20px rgba(99, 102, 241, 0.35) !important;
+        transform: translateY(-2px) !important;
+    }
+    
+    /* Secondary Buttons - Subtle Glass */
+    .stButton > button[kind="secondary"] {
+        background: linear-gradient(135deg, 
+            rgba(255, 255, 255, 0.2) 0%, 
+            rgba(255, 255, 255, 0.1) 100%) !important;
+        backdrop-filter: blur(10px) !important;
+        border: 1px solid rgba(0, 0, 0, 0.1) !important;
+        border-radius: 12px !important;
+        color: #374151 !important;
+        font-weight: 600 !important;
+        padding: 10px 20px !important;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+        transition: all 0.3s ease !important;
+    }
+    
+    .stButton > button[kind="secondary"]:hover {
+        background: linear-gradient(135deg, 
+            rgba(255, 255, 255, 0.3) 0%, 
+            rgba(255, 255, 255, 0.15) 100%) !important;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12) !important;
+        transform: translateY(-2px) !important;
+    }
+    
+    /* Default Buttons - Enhanced Glass */
+    .stButton > button:not([kind]) {
+        background: linear-gradient(135deg, 
+            rgba(255, 255, 255, 0.25) 0%, 
+            rgba(255, 255, 255, 0.12) 100%) !important;
+        backdrop-filter: blur(10px) saturate(150%) !important;
+        border: 1px solid rgba(255, 255, 255, 0.3) !important;
+        border-radius: 12px !important;
+        color: #1F2937 !important;
+        font-weight: 600 !important;
+        padding: 10px 20px !important;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08), 
+                    inset 0 1px 0 rgba(255, 255, 255, 0.4) !important;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    }
+    
+    .stButton > button:not([kind]):hover {
+        background: linear-gradient(135deg, 
+            rgba(255, 255, 255, 0.35) 0%, 
+            rgba(255, 255, 255, 0.18) 100%) !important;
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12) !important;
+        transform: translateY(-2px) !important;
+    }
+    
+    /* Input Fields - Glass Effect */
+    .stTextInput input, .stTextArea textarea, .stSelectbox select,
+    .stNumberInput input, .stDateInput input, .stTimeInput input {
+        background: rgba(255, 255, 255, 0.6) !important;
+        backdrop-filter: blur(8px) !important;
+        border: 1px solid rgba(0, 0, 0, 0.1) !important;
+        border-radius: 10px !important;
+        padding: 10px 14px !important;
+        transition: all 0.3s ease !important;
+        color: #000000 !important;
+        font-weight: 600 !important;
+    }
+    
+    .stTextInput input:focus, .stTextArea textarea:focus, .stSelectbox select:focus {
+        background: rgba(255, 255, 255, 0.8) !important;
+        border-color: rgba(99, 102, 241, 0.5) !important;
+        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1) !important;
+    }
+    
+    /* Disabled Input Fields - Black Text for Readability */
+    .stTextInput input:disabled, .stTextArea textarea:disabled, 
+    .stSelectbox select:disabled, .stNumberInput input:disabled,
+    .stDateInput input:disabled, .stTimeInput input:disabled {
+        background: rgba(245, 245, 245, 0.8) !important;
+        color: #000000 !important;
+        font-weight: 600 !important;
+        border: 2px solid #000000 !important;
+        opacity: 1 !important;
+        -webkit-text-fill-color: #000000 !important;
+        cursor: not-allowed !important;
+    }
+    
+    /* Tabs - Modern Glass Design */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        background: rgba(255, 255, 255, 0.3) !important;
+        backdrop-filter: blur(10px) !important;
+        padding: 8px !important;
+        border-radius: 14px !important;
+        border: 1px solid rgba(255, 255, 255, 0.3) !important;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        background: transparent !important;
+        border-radius: 10px !important;
+        padding: 10px 20px !important;
+        font-weight: 600 !important;
+        color: #4B5563 !important;
+        transition: all 0.3s ease !important;
+    }
     
     .stTabs [aria-selected="true"] {
         background: linear-gradient(135deg, 
@@ -111,6 +287,359 @@ st.markdown("""
     
     /* Download Button - Special Style */
     .stDownloadButton > button {
+        background: linear-gradient(135deg, 
+            rgba(16, 185, 129, 0.9) 0%, 
+            rgba(5, 150, 105, 0.9) 100%) !important;
+        backdrop-filter: blur(10px) !important;
+        border: 1px solid rgba(255, 255, 255, 0.3) !important;
+        color: #FFFFFF !important;
+    }
+    
+    .stDownloadButton > button:hover {
+        box-shadow: 0 6px 20px rgba(16, 185, 129, 0.35) !important;
+        transform: translateY(-2px) !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+def get_db():
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA busy_timeout=10000;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+    except Exception:
+        pass
+    return conn
+
+def init_db():
+    conn = get_db()
+    c = conn.cursor()
+    # Ensure users table exists (authentication)
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            full_name TEXT,
+            login_id TEXT,
+            email TEXT,
+            password_hash TEXT,
+            role TEXT,
+            approved INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            division TEXT,
+            nik TEXT,
+            dob TEXT,
+            phone_number TEXT,
+            alamat TEXT,
+            work_email TEXT,
+            join_date TEXT,
+            nomor_rekening_bca TEXT,
+            nama_rekening_bca TEXT,
+            sertifikasi_drive_id TEXT,
+            sertifikasi_filename TEXT
+        );
+        """
+    )
+    try:
+        c.execute("CREATE INDEX IF NOT EXISTS idx_users_login ON users(login_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_users_approved ON users(approved)")
+    except Exception:
+        pass
+    
+    # Add new columns to existing users table if not exists
+    try:
+        cols = [r['name'] for r in c.execute("PRAGMA table_info(users)").fetchall()]
+        new_cols = {
+            'division': 'TEXT',
+            'nik': 'TEXT',
+            'dob': 'TEXT',
+            'phone_number': 'TEXT',
+            'alamat': 'TEXT',
+            'work_email': 'TEXT',
+            'join_date': 'TEXT',
+            'nomor_rekening_bca': 'TEXT',
+            'nama_rekening_bca': 'TEXT',
+            'sertifikasi_drive_id': 'TEXT',
+            'sertifikasi_filename': 'TEXT'
+        }
+        for col, dtype in new_cols.items():
+            if col not in cols:
+                c.execute(f"ALTER TABLE users ADD COLUMN {col} {dtype}")
+    except Exception:
+        pass
+    # Seed default users if database is fresh
+    try:
+        cnt = (c.execute("SELECT COUNT(*) FROM users").fetchone()[0])
+    except Exception:
+        cnt = 0
+    if not cnt:
+        try:
+            # Minimal seed: Superuser admin + Tracer + Agent + Supervisor
+            def _hp(pw: str) -> str:
+                return hashlib.sha256(pw.encode()).hexdigest()
+            rows = [
+                ("admin", "Administrator", "admin", "", _hp("admin123"), "Superuser", 1),
+                ("supervisor", "Supervisor", "supervisor", "", _hp("supervisor123"), "Supervisor", 1),
+                ("tracer", "Tracer", "tracer", "", _hp("tracer123"), "Tracer", 1),
+                ("agent", "Agent", "agent", "", _hp("agent123"), "Agent", 1),
+            ]
+            c.executemany(
+                "INSERT INTO users (name, full_name, login_id, email, password_hash, role, approved) VALUES (?,?,?,?,?,?,?)",
+                rows
+            )
+            conn.commit()
+        except Exception:
+            pass
+    # assign_tracer (for Trace Assigning tab)
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS assign_tracer (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        TRC_Code TEXT,
+        Agreement_No TEXT,
+        Debtor_Name TEXT,
+        NIK_KTP TEXT,
+        EMPLOYMENT_UPDATE TEXT,
+        EMPLOYER TEXT,
+        Debtor_Legal_Name TEXT,
+        Employee_Name TEXT,
+        Employee_ID_Number TEXT,
+        Debtor_Relation_to_Employee TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+    # Ensure new column for assigning tracer by name exists
+    try:
+        cols = [r['name'] for r in c.execute("PRAGMA table_info(assign_tracer)").fetchall()]
+        if 'Assigned_To' not in cols:
+                c.execute("ALTER TABLE assign_tracer ADD COLUMN Assigned_To TEXT")
+    except Exception:
+        # Safe to ignore if already exists or PRAGMA failed
+        pass
+    # Try to enforce unique Agreement_No for tracer assignment (one tracer per loan)
+    try:
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_assign_tracer_unique_agreement ON assign_tracer(Agreement_No)")
+    except Exception:
+        # Will fail if duplicates already exist; app-level guards will still apply
+        pass
+
+    try:
+        c.execute("CREATE INDEX IF NOT EXISTS idx_assign_tracer_assigned_to ON assign_tracer(Assigned_To)")
+    except Exception:
+        pass
+        # Soft-migrate deprecated 'department' column: keep if exists, but stop using it
+        # Soft-migrate old role names to new role set
+        try:
+            c.execute("UPDATE users SET role='Superuser' WHERE role='admin'")
+            c.execute("UPDATE users SET role='Agent' WHERE role='user'")
+        except Exception:
+            pass
+        # Backfill values from legacy columns
+        c.execute("""
+            UPDATE users
+            SET full_name = CASE
+                WHEN (full_name IS NULL OR TRIM(full_name)='') THEN COALESCE(name, full_name)
+                ELSE full_name
+            END
+        """)
+        c.execute("""
+            UPDATE users
+            SET login_id = CASE
+                WHEN (login_id IS NULL OR TRIM(login_id)='') THEN
+                    CASE WHEN (email IS NOT NULL AND TRIM(email)<> '') THEN email ELSE name END
+                ELSE login_id
+            END
+        """)
+        conn.commit()
+    except Exception:
+        pass
+    # departments table no longer used; keep existing table if present (no creation needed)
+    # app_settings (key-value config)
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT
+    )""")
+    # backup_log (log backup DB ke Drive)
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS backup_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        file_name TEXT,
+        drive_file_id TEXT,
+        status TEXT,
+        message TEXT,
+        backup_time TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
+    # audit_logs (log user login events)
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS audit_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        action TEXT,
+        details TEXT,
+        timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(user_id) REFERENCES users(id)
+    );
+    """)
+    # record_notes (catatan manual untuk cek DB restore)
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS record_notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        note TEXT,
+        created_by TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+    # supervisor_data (for Supervisor menu)
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS supervisor_data (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        DT TEXT,
+        Lending_Entity TEXT,
+        Date TEXT,
+        Case_ID TEXT,
+        Task_ID TEXT,
+        Customer_name TEXT,
+        email TEXT,
+        Gender TEXT,
+        Customer_Occupation TEXT,
+        DPD TEXT,
+        Principle_Outstanding TEXT,
+        Principal_Overdue_CURR TEXT,
+        Interest_Overdue_CURR TEXT,
+        Last_Late_Fee TEXT,
+        Return_Date TEXT,
+        Detail TEXT,
+        Loan_Type TEXT,
+        Third_Uid TEXT,
+        Product TEXT,
+        Home_Address TEXT,
+        Province TEXT,
+        City TEXT,
+        Street TEXT,
+        RoomNumber TEXT,
+        Postcode TEXT,
+        Assignment_Date TEXT,
+        Withdrawal_Date TEXT,
+        Phone_Number_1 TEXT,
+        Phone_Number_2 TEXT,
+        Contact_Type_1 TEXT,
+        Contact_Name_1 TEXT,
+        Contact_Phone_1 TEXT,
+        Contact_Type_2 TEXT,
+        Contact_Name_2 TEXT,
+        Contact_Phone_2 TEXT,
+        Contact_Type_3 TEXT,
+        Contact_Name_3 TEXT,
+        Contact_Phone_3 TEXT,
+        Contact_Type_4 TEXT,
+        Contact_Name_4 TEXT,
+        Contact_Phone_4 TEXT,
+        Contact_Type_5 TEXT,
+        Contact_Name_5 TEXT,
+        Contact_Phone_5 TEXT,
+        Contact_Type_6 TEXT,
+        Contact_Name_6 TEXT,
+        Contact_Phone_6 TEXT,
+        Contact_Type_7 TEXT,
+        Contact_Name_7 TEXT,
+        Contact_Phone_7 TEXT,
+        Contact_Type_8 TEXT,
+        Contact_Name_8 TEXT,
+        Contact_Phone_8 TEXT,
+        Total_debt_in_third_party TEXT,
+        Repayment_on_third_Party TEXT,
+        Remaining_Loan_on_third_Party TEXT,
+        Virtual_Account_Number TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+    # Ensure recent required columns exist in supervisor_data (idempotent ALTERs)
+    try:
+        cols = [r['name'] for r in c.execute("PRAGMA table_info(supervisor_data)").fetchall()]
+        for col in [
+            'NIK_KTP', 'EMPLOYMENT_UPDATE', 'EMPLOYER', 'Decoded_Company_Name',
+            'Debtor_Legal_Name', 'Employee_Name', 'Employee_ID_Number', 'Debtor_Relation_to_Employee',
+            # Agent-updated fields (optional on upload)
+            'STATUS', 'REGISTERED_PHONE', 'Additional_Contacts', 'Remarks_Suggested_NIK_Prospect', 'Payment', 'Paid_Off_Status', 'Paid_Off',
+            # Approval fields
+            'approval_status', 'approved_by', 'approved_at', 'TRC_Code'
+        ]:
+            if col not in cols:
+                c.execute(f"ALTER TABLE supervisor_data ADD COLUMN {col} TEXT")
+    except Exception:
+        pass
+    # --- New foundational tables ---
+    # 1) Agent assignments (one agent per Agreement_No) - ENHANCED WITH ROTATION TRACKING
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS agent_assignments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            Agreement_No TEXT,
+            Agent_Assigned_To TEXT,
+            assigned_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            assigned_by TEXT,
+            active INTEGER DEFAULT 1,
+            assignment_type TEXT DEFAULT 'agent',
+            auto_return_date TEXT,
+            completed_at TEXT,
+            completion_reason TEXT
+        );
+        """
+    )
+    
+    # Add new columns to existing agent_assignments table for rotation system
+    try:
+        c.execute("ALTER TABLE agent_assignments ADD COLUMN assignment_type TEXT DEFAULT 'agent'")
+        c.execute("ALTER TABLE agent_assignments ADD COLUMN auto_return_date TEXT")
+        c.execute("ALTER TABLE agent_assignments ADD COLUMN completed_at TEXT")
+        c.execute("ALTER TABLE agent_assignments ADD COLUMN completion_reason TEXT")
+    except Exception:
+        pass
+    
+    # Remove old unique index (allow multiple assignments per Agreement_No for history)
+    try:
+        c.execute("DROP INDEX IF EXISTS idx_agent_assignments_unique")
+    except Exception:
+        pass
+    
+    # Create indexes for performance
+    try:
+        c.execute("CREATE INDEX IF NOT EXISTS idx_agent_assignments_agreement ON agent_assignments(Agreement_No)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_agent_assignments_active ON agent_assignments(active)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_agent_assignments_type ON agent_assignments(assignment_type)")
+    except Exception:
+        pass
+    
+    # 1b) Assignment history tracking table (who touched what, when)
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS assignment_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            Agreement_No TEXT NOT NULL,
+            assigned_to TEXT NOT NULL,
+            assignment_type TEXT DEFAULT 'agent',
+            assigned_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            completed_at TEXT,
+            assigned_by TEXT,
+            completion_notes TEXT
+        );
+        """
+    )
+    
+    try:
+        c.execute("CREATE INDEX IF NOT EXISTS idx_assignment_history_agreement ON assignment_history(Agreement_No)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_assignment_history_assigned_to ON assignment_history(assigned_to)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_assignment_history_type ON assignment_history(assignment_type)")
+    except Exception:
+        pass
+    # 2) Trace results (touch logs/status)
+    c.execute(
+        """
         CREATE TABLE IF NOT EXISTS trace_results (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             Agreement_No TEXT,
@@ -12617,6 +13146,8 @@ def page_tracer():
                         except Exception as e:
                             st.toast(f"❌ Gagal mengirim memo: {e}", icon="❌")
                         st.error(f"❌ Gagal mengirim memo: {e}")
+
+
 
 if __name__ == '__main__':
     main()
