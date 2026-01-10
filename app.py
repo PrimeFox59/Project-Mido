@@ -11721,6 +11721,84 @@ def page_utility():
                 )
             except Exception as e:
                 st.error(f"❌ Gagal mengekspor database: {e}")
+
+        st.markdown("---")
+        st.subheader("⬆️ Upload & Replace Database dari Excel")
+        st.caption("Unggah file Excel hasil export sebelumnya. Semua tabel yang ada di file akan *mengganti* isi tabel tersebut di sistem.")
+
+        uploaded_db = st.file_uploader(
+            "Upload Excel Database (hasil export)", type=["xlsx", "xls"], key="upload_db_excel"
+        )
+
+        if uploaded_db:
+            st.warning("⚠️ Semua data di tabel yang di-unggah akan dihapus lalu diganti sesuai file ini. Pastikan file sudah benar.")
+            if st.button("⚠️ Replace Database dengan File Ini", type="primary", key="btn_replace_db"):
+                try:
+                    # Read all sheets first
+                    uploaded_db.seek(0)
+                    all_sheets = pd.read_excel(uploaded_db, sheet_name=None)
+
+                    table_sheet_map = [
+                        ("supervisor_data", "Supervisor_Data"),
+                        ("assign_tracer", "Assign_Tracer"),
+                        ("trace_results", "Trace_Results"),
+                        ("agent_results", "Agent_Results"),
+                        ("agent_assignments", "Agent_Assignments"),
+                        ("payments", "Payments"),
+                        ("users", "Users"),
+                        ("memos", "Memos"),
+                        ("migration_history", "Migration_History"),
+                        ("audit_logs", "Audit_Logs"),
+                    ]
+
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    total_tbl = len(table_sheet_map)
+                    replaced = 0
+                    skipped = []
+                    errors = []
+
+                    for idx, (tbl, sheet_name) in enumerate(table_sheet_map, start=1):
+                        status_text.text(f"Memproses {sheet_name} ({idx}/{total_tbl}) ...")
+
+                        df_sheet = all_sheets.get(sheet_name)
+                        if df_sheet is None:
+                            skipped.append(sheet_name)
+                            progress_bar.progress(int((idx / total_tbl) * 100))
+                            continue
+
+                        try:
+                            # Align columns with existing table schema
+                            schema_cols = [r['name'] for r in fetchall(f"PRAGMA table_info({tbl})")]
+                            for col in schema_cols:
+                                if col not in df_sheet.columns:
+                                    df_sheet[col] = None
+                            df_aligned = df_sheet[schema_cols]
+
+                            # Replace data
+                            execute(f"DELETE FROM {tbl}")
+                            df_aligned.to_sql(tbl, conn, if_exists='append', index=False)
+                            replaced += 1
+                        except Exception as te:
+                            errors.append(f"{sheet_name}: {te}")
+
+                        progress_bar.progress(int((idx / total_tbl) * 100))
+
+                    status_text.success("Proses unggah selesai.")
+
+                    st.success(f"✅ Tabel diganti: {replaced}. Terlewat (tidak ada sheet): {len(skipped)}. Error: {len(errors)}.")
+
+                    if skipped:
+                        st.info("Sheet tidak ditemukan: " + ", ".join(skipped))
+                    if errors:
+                        with st.expander("Rincian Error", expanded=False):
+                            st.text("\n".join(errors))
+
+                    conn.commit()
+                    st.balloons()
+                    st.toast("Database berhasil diperbarui dari Excel.")
+                except Exception as e:
+                    st.error(f"❌ Gagal mengganti database: {e}")
         
         migration_tabs = st.tabs(["📋 Supervisor Data", "🔍 Tracer Data", "👤 Agent Results", "💰 Payment Data"])
         
