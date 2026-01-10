@@ -11671,6 +11671,56 @@ def page_utility():
         3. Upload file Excel
         4. Preview data dan konfirmasi import
         """)
+
+        st.markdown("---")
+        st.subheader("⬇️ Download Database ke Excel")
+        st.caption("Ekspor tabel utama ke satu file Excel dengan progres per tabel.")
+
+        export_btn = st.button("📥 Generate & Download Excel DB", type="primary", key="export_db_excel")
+        if export_btn:
+            try:
+                tables_to_export = [
+                    ("supervisor_data", "Supervisor_Data"),
+                    ("assign_tracer", "Assign_Tracer"),
+                    ("trace_results", "Trace_Results"),
+                    ("agent_results", "Agent_Results"),
+                    ("agent_assignments", "Agent_Assignments"),
+                    ("payments", "Payments"),
+                    ("users", "Users"),
+                    ("memos", "Memos"),
+                    ("migration_history", "Migration_History"),
+                    ("audit_logs", "Audit_Logs"),
+                ]
+
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                output = io.BytesIO()
+
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    total_tbl = len(tables_to_export)
+                    for idx, (tbl, sheet_name) in enumerate(tables_to_export, start=1):
+                        status_text.text(f"Mengekspor {sheet_name} ({idx}/{total_tbl}) ...")
+                        try:
+                            df = pd.read_sql_query(f"SELECT * FROM {tbl}", conn)
+                        except Exception:
+                            df = pd.DataFrame()
+                        df.to_excel(writer, index=False, sheet_name=sheet_name)
+                        progress_pct = int((idx / total_tbl) * 100)
+                        progress_bar.progress(progress_pct)
+
+                output.seek(0)
+                progress_bar.progress(100)
+                status_text.success("Selesai! Siap diunduh.")
+
+                st.download_button(
+                    label="⬇️ Download Excel Database",
+                    data=output,
+                    file_name=f"minama_database_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="download_db_excel"
+                )
+            except Exception as e:
+                st.error(f"❌ Gagal mengekspor database: {e}")
         
         migration_tabs = st.tabs(["📋 Supervisor Data", "🔍 Tracer Data", "👤 Agent Results", "💰 Payment Data"])
         
