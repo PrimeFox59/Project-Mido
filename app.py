@@ -11727,71 +11727,78 @@ def page_utility():
         """)
 
         st.markdown("---")
-        st.subheader("⬇️ Download Database ke Excel")
-        st.caption("Ekspor tabel utama ke satu file Excel dengan progres per tabel.")
+        st.subheader("⬇️ Download / Kirim Database ke Google Sheet")
+        st.caption("Ekspor seluruh tabel ke satu file Excel. Bisa langsung dikirim ke Google Drive sebagai Google Sheet tanpa upload manual.")
 
-        export_btn = st.button("📥 Generate & Download Excel DB", type="primary", key="export_db_excel")
+        tables_to_export = [
+            ("supervisor_data", "Supervisor_Data"),
+            ("assign_tracer", "Assign_Tracer"),
+            ("trace_results", "Trace_Results"),
+            ("agent_results", "Agent_Results"),
+            ("agent_assignments", "Agent_Assignments"),
+            ("payments", "Payments"),
+            ("users", "Users"),
+            ("memos", "Memos"),
+            ("migration_history", "Migration_History"),
+            ("audit_logs", "Audit_Logs"),
+        ]
+
+        def _export_excel_bytes():
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                total_tbl = len(tables_to_export)
+                for idx, (tbl, sheet_name) in enumerate(tables_to_export, start=1):
+                    status_text.text(f"Mengekspor {sheet_name} ({idx}/{total_tbl}) ...")
+                    try:
+                        df = pd.read_sql_query(f"SELECT * FROM {tbl}", conn)
+                    except Exception:
+                        df = pd.DataFrame()
+                    df.to_excel(writer, index=False, sheet_name=sheet_name)
+                    progress_pct = int((idx / total_tbl) * 100)
+                    progress_bar.progress(progress_pct)
+            output.seek(0)
+            progress_bar.progress(100)
+            status_text.success("Selesai! Siap diunduh/diunggah.")
+            return output
+
+        col_dl, col_ul = st.columns(2)
+        with col_dl:
+            export_btn = st.button("📥 Generate & Download Excel DB", type="primary", key="export_db_excel")
+        with col_ul:
+            upload_btn = st.button("🚀 Send Excel to Google Drive (Google Sheet)", type="secondary", key="export_upload_gsheet")
+
         if export_btn:
             try:
-                tables_to_export = [
-                    ("supervisor_data", "Supervisor_Data"),
-                    ("assign_tracer", "Assign_Tracer"),
-                    ("trace_results", "Trace_Results"),
-                    ("agent_results", "Agent_Results"),
-                    ("agent_assignments", "Agent_Assignments"),
-                    ("payments", "Payments"),
-                    ("users", "Users"),
-                    ("memos", "Memos"),
-                    ("migration_history", "Migration_History"),
-                    ("audit_logs", "Audit_Logs"),
-                ]
-
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                output = io.BytesIO()
-
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    total_tbl = len(tables_to_export)
-                    for idx, (tbl, sheet_name) in enumerate(tables_to_export, start=1):
-                        status_text.text(f"Mengekspor {sheet_name} ({idx}/{total_tbl}) ...")
-                        try:
-                            df = pd.read_sql_query(f"SELECT * FROM {tbl}", conn)
-                        except Exception:
-                            df = pd.DataFrame()
-                        df.to_excel(writer, index=False, sheet_name=sheet_name)
-                        progress_pct = int((idx / total_tbl) * 100)
-                        progress_bar.progress(progress_pct)
-
-                output.seek(0)
-                progress_bar.progress(100)
-                status_text.success("Selesai! Siap diunduh.")
-
-                folder_id_target = st.secrets.get("drive_folder_id", FOLDER_ID_DEFAULT) if "drive_folder_id" in st.secrets else FOLDER_ID_DEFAULT
-                if st.button("📤 Upload ke Google Drive (Google Sheet)", type="primary", key="upload_db_gsheet"):
-                    try:
-                        service, _ = build_drive_service()
-                        excel_bytes = output.getvalue()
-                        fname_sheet = f"minama_database_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-                        st.info("Mengunggah dan mengonversi ke Google Sheet di Drive...")
-                        fid, link = upload_excel_as_sheet(service, folder_id_target, fname_sheet, excel_bytes)
-                        if fid:
-                            st.success(f"✅ Berhasil diunggah ke Drive sebagai Google Sheet. ID: {fid}")
-                            if link:
-                                st.markdown(f"[Buka Google Sheet]({link})")
-                        else:
-                            st.error("Gagal mengunggah ke Google Drive.")
-                    except Exception as e:
-                        st.error(f"❌ Gagal mengunggah: {e}")
-
+                output = _export_excel_bytes()
                 st.download_button(
                     label="⬇️ Download Excel Database",
-                    data=output,
+                    data=output.getvalue(),
                     file_name=f"minama_database_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key="download_db_excel"
                 )
             except Exception as e:
                 st.error(f"❌ Gagal mengekspor database: {e}")
+
+        if upload_btn:
+            try:
+                output = _export_excel_bytes()
+                folder_id_target = st.secrets.get("drive_folder_id", FOLDER_ID_DEFAULT) if "drive_folder_id" in st.secrets else FOLDER_ID_DEFAULT
+                service, _ = build_drive_service()
+                excel_bytes = output.getvalue()
+                fname_sheet = f"minama_database_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                st.info("Mengunggah dan mengonversi ke Google Sheet di Drive...")
+                fid, link = upload_excel_as_sheet(service, folder_id_target, fname_sheet, excel_bytes)
+                if fid:
+                    st.success(f"✅ Berhasil diunggah ke Drive sebagai Google Sheet. ID: {fid}")
+                    if link:
+                        st.markdown(f"[Buka Google Sheet]({link})")
+                else:
+                    st.error("Gagal mengunggah ke Google Drive.")
+            except Exception as e:
+                st.error(f"❌ Gagal mengunggah: {e}")
 
         st.markdown("---")
         st.subheader("⬆️ Upload & Replace Database dari Excel")
