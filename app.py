@@ -3164,6 +3164,28 @@ def download_file_bytes(service, file_id):
     fh.seek(0)
     return fh.read()
 
+def download_drive_excel_or_sheet(service, file_id: str, mime_type: str = ""):
+    """Download Excel file or export Google Sheet as Excel. Return bytes or None on failure."""
+    try:
+        if mime_type == "application/vnd.google-apps.spreadsheet":
+            request = service.files().export_media(
+                fileId=file_id,
+                mimeType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        else:
+            request = service.files().get_media(fileId=file_id)
+
+        fh = io.BytesIO()
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+        fh.seek(0)
+        return fh.read()
+    except Exception as e:
+        st.error(f"❌ Gagal mengunduh file dari Drive: {e}")
+        return None
+
 def get_folder_metadata(service, folder_id):
     """Return (metadata, error_message)."""
     try:
@@ -11763,6 +11785,67 @@ def page_utility():
             status_text.success("Selesai! Siap diunduh/diunggah.")
             return output
 
+        def _replace_db_from_excel_bytes(excel_bytes: bytes):
+            all_sheets = pd.read_excel(io.BytesIO(excel_bytes), sheet_name=None)
+
+            table_sheet_map = [
+                ("supervisor_data", "Supervisor_Data"),
+                ("assign_tracer", "Assign_Tracer"),
+                ("trace_results", "Trace_Results"),
+                ("agent_results", "Agent_Results"),
+                ("agent_assignments", "Agent_Assignments"),
+                ("payments", "Payments"),
+                ("users", "Users"),
+                ("memos", "Memos"),
+                ("migration_history", "Migration_History"),
+                ("audit_logs", "Audit_Logs"),
+            ]
+
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            total_tbl = len(table_sheet_map)
+            replaced = 0
+            skipped = []
+            errors = []
+
+            for idx, (tbl, sheet_name) in enumerate(table_sheet_map, start=1):
+                status_text.text(f"Memproses {sheet_name} ({idx}/{total_tbl}) ...")
+
+                df_sheet = all_sheets.get(sheet_name)
+                if df_sheet is None:
+                    skipped.append(sheet_name)
+                    progress_bar.progress(int((idx / total_tbl) * 100))
+                    continue
+
+                try:
+                    schema_cols = [r['name'] for r in fetchall(f"PRAGMA table_info({tbl})")]
+                    for col in schema_cols:
+                        if col not in df_sheet.columns:
+                            df_sheet[col] = None
+                    df_aligned = df_sheet[schema_cols]
+
+                    execute(f"DELETE FROM {tbl}")
+                    df_aligned.to_sql(tbl, conn, if_exists='append', index=False)
+                    replaced += 1
+                except Exception as te:
+                    errors.append(f"{sheet_name}: {te}")
+
+                progress_bar.progress(int((idx / total_tbl) * 100))
+
+            status_text.success("Proses unggah selesai.")
+
+            st.success(f"✅ Tabel diganti: {replaced}. Terlewat (tidak ada sheet): {len(skipped)}. Error: {len(errors)}.")
+
+            if skipped:
+                st.info("Sheet tidak ditemukan: " + ", ".join(skipped))
+            if errors:
+                with st.expander("Rincian Error", expanded=False):
+                    st.text("\n".join(errors))
+
+            conn.commit()
+            st.balloons()
+            st.toast("Database berhasil diperbarui dari Excel.")
+
         col_dl, col_ul = st.columns(2)
         with col_dl:
             export_btn = st.button("📥 Generate & Download Excel DB", type="primary", key="export_db_excel")
@@ -11812,71 +11895,67 @@ def page_utility():
             st.warning("⚠️ Semua data di tabel yang di-unggah akan dihapus lalu diganti sesuai file ini. Pastikan file sudah benar.")
             if st.button("⚠️ Replace Database dengan File Ini", type="primary", key="btn_replace_db"):
                 try:
-                    # Read all sheets first
                     uploaded_db.seek(0)
-                    all_sheets = pd.read_excel(uploaded_db, sheet_name=None)
-
-                    table_sheet_map = [
-                        ("supervisor_data", "Supervisor_Data"),
-                        ("assign_tracer", "Assign_Tracer"),
-                        ("trace_results", "Trace_Results"),
-                        ("agent_results", "Agent_Results"),
-                        ("agent_assignments", "Agent_Assignments"),
-                        ("payments", "Payments"),
-                        ("users", "Users"),
-                        ("memos", "Memos"),
-                        ("migration_history", "Migration_History"),
-                        ("audit_logs", "Audit_Logs"),
-                    ]
-
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
-                    total_tbl = len(table_sheet_map)
-                    replaced = 0
-                    skipped = []
-                    errors = []
-
-                    for idx, (tbl, sheet_name) in enumerate(table_sheet_map, start=1):
-                        status_text.text(f"Memproses {sheet_name} ({idx}/{total_tbl}) ...")
-
-                        df_sheet = all_sheets.get(sheet_name)
-                        if df_sheet is None:
-                            skipped.append(sheet_name)
-                            progress_bar.progress(int((idx / total_tbl) * 100))
-                            continue
-
-                        try:
-                            # Align columns with existing table schema
-                            schema_cols = [r['name'] for r in fetchall(f"PRAGMA table_info({tbl})")]
-                            for col in schema_cols:
-                                if col not in df_sheet.columns:
-                                    df_sheet[col] = None
-                            df_aligned = df_sheet[schema_cols]
-
-                            # Replace data
-                            execute(f"DELETE FROM {tbl}")
-                            df_aligned.to_sql(tbl, conn, if_exists='append', index=False)
-                            replaced += 1
-                        except Exception as te:
-                            errors.append(f"{sheet_name}: {te}")
-
-                        progress_bar.progress(int((idx / total_tbl) * 100))
-
-                    status_text.success("Proses unggah selesai.")
-
-                    st.success(f"✅ Tabel diganti: {replaced}. Terlewat (tidak ada sheet): {len(skipped)}. Error: {len(errors)}.")
-
-                    if skipped:
-                        st.info("Sheet tidak ditemukan: " + ", ".join(skipped))
-                    if errors:
-                        with st.expander("Rincian Error", expanded=False):
-                            st.text("\n".join(errors))
-
-                    conn.commit()
-                    st.balloons()
-                    st.toast("Database berhasil diperbarui dari Excel.")
+                    _replace_db_from_excel_bytes(uploaded_db.read())
                 except Exception as e:
                     st.error(f"❌ Gagal mengganti database: {e}")
+
+        st.markdown("---")
+        st.subheader("🔄 Pull/Replace Database dari Google Drive (Excel / Google Sheet)")
+        st.caption("Pilih file di folder Drive yang sama. Mendukung Google Sheet (akan diekspor ke Excel terlebih dahulu) dan file .xlsx/.xls.")
+
+        col_drive_sel, col_drive_btn = st.columns([3,1])
+        with col_drive_sel:
+            if st.button("🔄 Refresh daftar file Drive", key="btn_refresh_drive_files"):
+                st.session_state.pop("drive_file_list_cache", None)
+
+            drive_files_cache = st.session_state.get("drive_file_list_cache")
+            folder_id_target = st.secrets.get("drive_folder_id", FOLDER_ID_DEFAULT) if "drive_folder_id" in st.secrets else FOLDER_ID_DEFAULT
+            if drive_files_cache is None:
+                try:
+                    service, _ = build_drive_service()
+                    drive_files_cache = list_files_in_folder(service, folder_id_target)
+                    st.session_state["drive_file_list_cache"] = drive_files_cache
+                except Exception as e:
+                    drive_files_cache = []
+                    st.error(f"Tidak bisa mengambil daftar file Drive: {e}")
+
+            def _is_excel_like(f):
+                mime = f.get("mimeType", "") or ""
+                name = (f.get("name") or "").lower()
+                return (
+                    mime == "application/vnd.google-apps.spreadsheet"
+                    or name.endswith(".xlsx")
+                    or name.endswith(".xls")
+                )
+
+            drive_options = [f for f in (drive_files_cache or []) if _is_excel_like(f)]
+            file_labels = [f"{f.get('name')} (ID: {f.get('id')})" for f in drive_options]
+            selected_drive_file = st.selectbox(
+                "Pilih file Google Sheet / Excel di Drive",
+                options=[None] + drive_options,
+                format_func=lambda f: "-- Pilih file --" if f is None else f"{f.get('name')} (ID: {f.get('id')})",
+                key="sel_drive_excel",
+            )
+
+        with col_drive_btn:
+            do_import_drive = st.button("⬇️ Pull & Replace DB", type="primary", key="btn_pull_drive")
+
+        if do_import_drive and selected_drive_file:
+            try:
+                service, _ = build_drive_service()
+                mime = selected_drive_file.get("mimeType")
+                file_id = selected_drive_file.get("id")
+                file_name = selected_drive_file.get("name")
+                st.info(f"Mengunduh {file_name} dari Drive...")
+                excel_bytes = download_drive_excel_or_sheet(service, file_id, mime)
+                if not excel_bytes:
+                    st.error("Gagal mengunduh file dari Drive.")
+                else:
+                    st.warning("⚠️ Semua data di tabel akan diganti sesuai file ini. Pastikan file sudah benar.")
+                    _replace_db_from_excel_bytes(excel_bytes)
+            except Exception as e:
+                st.error(f"❌ Gagal menarik data dari Drive: {e}")
 
     conn.close()
 
