@@ -3108,6 +3108,34 @@ def upload_bytes(service, folder_id, name, data_bytes, mimetype="application/oct
             st.error(f"Gagal upload: {err_text}")
         return None
 
+def upload_excel_as_sheet(service, folder_id, name, data_bytes):
+    """Upload Excel bytes and convert to Google Sheet. Return (file_id, webViewLink) or (None, None) on failure."""
+    media = MediaIoBaseUpload(
+        io.BytesIO(data_bytes),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        resumable=True,
+    )
+    file_metadata = {
+        "name": name,
+        "parents": [folder_id],
+        "mimeType": "application/vnd.google-apps.spreadsheet",
+    }
+    try:
+        created = (
+            service.files()
+            .create(
+                body=file_metadata,
+                media_body=media,
+                fields="id, webViewLink",
+                supportsAllDrives=True,
+            )
+            .execute()
+        )
+        return created.get("id"), created.get("webViewLink")
+    except Exception as e:
+        st.error(f"Gagal upload Google Sheet: {e}")
+        return None, None
+
 def upload_or_replace(service, folder_id, name, data_bytes, mimetype="application/octet-stream"):
     """Find a file with same name in folder; if exists update, else create. Return file id or None."""
     try:
@@ -11737,6 +11765,23 @@ def page_utility():
                 output.seek(0)
                 progress_bar.progress(100)
                 status_text.success("Selesai! Siap diunduh.")
+
+                folder_id_target = st.secrets.get("drive_folder_id", FOLDER_ID_DEFAULT) if "drive_folder_id" in st.secrets else FOLDER_ID_DEFAULT
+                if st.button("📤 Upload ke Google Drive (Google Sheet)", type="primary", key="upload_db_gsheet"):
+                    try:
+                        service, _ = build_drive_service()
+                        excel_bytes = output.getvalue()
+                        fname_sheet = f"minama_database_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                        st.info("Mengunggah dan mengonversi ke Google Sheet di Drive...")
+                        fid, link = upload_excel_as_sheet(service, folder_id_target, fname_sheet, excel_bytes)
+                        if fid:
+                            st.success(f"✅ Berhasil diunggah ke Drive sebagai Google Sheet. ID: {fid}")
+                            if link:
+                                st.markdown(f"[Buka Google Sheet]({link})")
+                        else:
+                            st.error("Gagal mengunggah ke Google Drive.")
+                    except Exception as e:
+                        st.error(f"❌ Gagal mengunggah: {e}")
 
                 st.download_button(
                     label="⬇️ Download Excel Database",
