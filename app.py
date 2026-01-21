@@ -8216,18 +8216,70 @@ def page_user_setting():
                         st.subheader("Notification Preferences")
                         st.caption("Notifikasi via email. Hanya Superuser/Supervisor yang boleh mengubah pengaturan.")
 
-                        # Choose target user (admin only), else current user
+                        # Choose target user (admin only), else current user. Show email info in label.
                         target_user = u
                         if user_role in ("Superuser", "Supervisor"):
-                            users_opt = fetchall("SELECT id, COALESCE(full_name,name,login_id) AS nm FROM users WHERE approved=1 ORDER BY nm")
-                            opt_labels = {row['nm']: row['id'] for row in users_opt if row.get('nm')}
-                            selected_nm = st.selectbox("Pilih user", options=list(opt_labels.keys()), index=0 if opt_labels else None)
-                            target_id = opt_labels.get(selected_nm)
+                            users_opt = fetchall("SELECT id, COALESCE(full_name,name,login_id) AS nm, COALESCE(work_email,email) AS em FROM users WHERE approved=1 ORDER BY nm")
+                            labels = []
+                            id_map = {}
+                            for row in users_opt:
+                                label = f"{row.get('nm','')} ({row.get('em') or 'no-email'})"
+                                labels.append(label)
+                                id_map[label] = row.get('id')
+                            selected_label = st.selectbox("Pilih user", options=labels, index=0 if labels else None)
+                            target_id = id_map.get(selected_label)
                             if target_id:
                                 tu = fetchone("SELECT * FROM users WHERE id=?", (target_id,))
                                 if tu:
                                     target_user = tu
                         target_flags = _get_notification_flags(target_user)
+                        st.caption(f"User: {target_user.get('full_name') or target_user.get('name') or target_user.get('login_id')} | Email: {_get_user_email(target_user) or 'no email'}")
+
+                        # Quick status cards
+                        col_stat1, col_stat2 = st.columns(2)
+                        # Belum ditangani tracer: case dengan Case_ID ada tapi belum ada assignment tracer/agent aktif
+                        try:
+                            backlog = fetchone(
+                                """
+                                SELECT COUNT(*) AS c FROM supervisor_data s
+                                WHERE COALESCE(s.Case_ID,'')<>''
+                                  AND s.Case_ID NOT IN (
+                                    SELECT Agreement_No FROM agent_assignments WHERE active=1
+                                  )
+                                """
+                            ) or {"c": 0}
+                            with col_stat1:
+                                st.info(f"📦 Belum di-assign tracer/agent: {backlog['c']:,} case")
+                        except Exception:
+                            with col_stat1:
+                                st.info("📦 Belum di-assign tracer/agent: n/a")
+
+                        # Agent auto-return countdown
+                        try:
+                            rows_ar = fetchall(
+                                """
+                                SELECT Agreement_No, Agent_Assigned_To, auto_return_date
+                                FROM agent_assignments
+                                WHERE active=1 AND assignment_type='agent' AND auto_return_date IS NOT NULL
+                                """
+                            ) or []
+                            today_dt = today_wib()
+                            due_soon = 0
+                            overdue = 0
+                            for r in rows_ar:
+                                try:
+                                    days_left = (datetime.fromisoformat(r.get('auto_return_date')).date() - today_dt).days
+                                    if days_left < 0:
+                                        overdue += 1
+                                    elif days_left <= 2:
+                                        due_soon += 1
+                                except Exception:
+                                    continue
+                            with col_stat2:
+                                st.warning(f"⏳ Agent due<=2 hari: {due_soon:,} | Lewat: {overdue:,}")
+                        except Exception:
+                            with col_stat2:
+                                st.warning("⏳ Info auto-return: n/a")
 
                         def _cb(label, key_name):
                             return st.checkbox(label, value=bool(target_flags.get(key_name, 1)), key=f"notif_{key_name}_{target_user.get('id')}")
@@ -8260,6 +8312,25 @@ def page_user_setting():
                                     st.error(f"Gagal menyimpan: {e}")
                         else:
                             st.info("Hubungi Supervisor/Superuser untuk mengubah pengaturan notifikasi Anda.")
+
+                        st.markdown("---")
+                        st.subheader("Test Email Notification")
+                        test_col1, test_col2 = st.columns([3,1])
+                        with test_col1:
+                            test_email = st.text_input("Kirim ke email", value=_get_user_email(u) or "", placeholder="user@mail.com")
+                            test_subject = st.text_input("Subjek", value="[Test] Notification")
+                            test_body = st.text_area("Isi pesan", value="Ini email test notifikasi dari sistem.", height=100)
+                        with test_col2:
+                            st.markdown("<br>", unsafe_allow_html=True)
+                            if st.button("🚀 Send Test Email", type="primary"):
+                                if not test_email.strip():
+                                    st.warning("Isi alamat email terlebih dahulu.")
+                                else:
+                                    try:
+                                        send_email_notification([test_email.strip()], test_subject, test_body)
+                                        st.success(f"Test email dikirim ke {test_email.strip()}")
+                                    except Exception as e:
+                                        st.error(f"Gagal kirim test email: {e}")
             
             # --- Add New User Sub-tab ---
             with mgmt_tabs[2]:
