@@ -19,6 +19,8 @@ from PIL import Image
 import base64
 import webbrowser
 import urllib.parse
+import smtplib
+from email.mime.text import MIMEText
 
 # Google Drive Config
 SCOPES = ["https://www.googleapis.com/auth/drive"]
@@ -26,6 +28,20 @@ FOLDER_ID_DEFAULT = "1Y98WYhpaqWoYZ2Y5RRGW-KJPXo1nBtAp"
 
 DB_PATH = "minama.db"
 ICON_PATH = os.path.join(os.path.dirname(__file__), "icon.png")
+
+# Email Notification Config
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+EMAIL_USER = None
+EMAIL_PASS = None
+try:
+    EMAIL_USER = st.secrets.get("email_credentials", {}).get("username")
+    EMAIL_PASS = st.secrets.get("email_credentials", {}).get("app_password")
+except Exception:
+    EMAIL_USER = None
+    EMAIL_PASS = None
+EMAIL_USER = EMAIL_USER or os.getenv("EMAIL_USER") or "glimpuz@gmail.com"
+EMAIL_PASS = EMAIL_PASS or os.getenv("EMAIL_APP_PASSWORD") or "yica znoe kqca dymy"
 
 # ---------------------------------
 # Configuration Flags
@@ -365,7 +381,12 @@ def init_db():
             'nomor_rekening_bca': 'TEXT',
             'nama_rekening_bca': 'TEXT',
             'sertifikasi_drive_id': 'TEXT',
-            'sertifikasi_filename': 'TEXT'
+            'sertifikasi_filename': 'TEXT',
+            # Notification preferences (1=on, 0=off)
+            'notify_assignment': "INTEGER DEFAULT 1",
+            'notify_payment': "INTEGER DEFAULT 1",
+            'notify_approval': "INTEGER DEFAULT 1",
+            'notify_due_date': "INTEGER DEFAULT 1"
         }
         for col, dtype in new_cols.items():
             if col not in cols:
@@ -1975,6 +1996,131 @@ def get_agent_allowed_dts(user_id: int) -> list:
         return []
 
 
+# -------------------------
+# Notification Helpers
+# -------------------------
+def _get_user_by_display_name(name: str):
+    """Fetch user row by matching full_name/name/login_id (case-insensitive)."""
+    try:
+        return fetchone(
+            """
+            SELECT * FROM users
+            WHERE LOWER(COALESCE(full_name,'')) = LOWER(?)
+               OR LOWER(COALESCE(name,'')) = LOWER(?)
+               OR LOWER(COALESCE(login_id,'')) = LOWER(?)
+            LIMIT 1
+            """,
+            (name, name, name),
+        )
+    except Exception:
+        return None
+
+
+def _get_user_by_id(user_id: int):
+    try:
+        return fetchone("SELECT * FROM users WHERE id=?", (user_id,))
+    except Exception:
+        return None
+
+
+def _get_user_email(user_row: dict) -> str:
+    if not user_row:
+        return ""
+    # prefer work_email, fallback to email
+    return (user_row.get("work_email") or user_row.get("email") or "").strip()
+
+
+def _get_notification_flags(user_row: dict) -> dict:
+    defaults = {
+        "notify_assignment": 1,
+        "notify_payment": 1,
+        "notify_approval": 1,
+        "notify_due_date": 1,
+    }
+    if not user_row:
+        return defaults
+    res = {}
+    for k, v in defaults.items():
+        val = user_row.get(k)
+        res[k] = v if val is None else val
+    return res
+
+
+def send_email_notification(recipients: list, subject: str, body: str) -> None:
+    """Send plain-text email. Non-blocking on failures (logs to st.warning)."""
+    if not recipients:
+        return
+    try:
+        msg = MIMEText(body)
+        msg["Subject"] = subject
+        msg["From"] = EMAIL_USER
+        msg["To"] = ", ".join(recipients)
+
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as server:
+            server.starttls()
+            server.login(EMAIL_USER, EMAIL_PASS)
+            server.sendmail(EMAIL_USER, recipients, msg.as_string())
+    except Exception as e:
+        try:
+            st.warning(f"Gagal kirim email notifikasi: {e}")
+        except Exception:
+            pass
+
+
+def notify_event(event_key: str, subject: str, body: str, target_users: list = None, include_admin_watchers: bool = True):
+    """Route notification to users with relevant preference flag.
+
+    event_key: one of ['assignment', 'payment', 'approval', 'due_date']
+    target_users: list of user display names or user_id
+    include_admin_watchers: also notify Superuser/Supervisor with flag ON
+    """
+    target_users = target_users or []
+    col_map = {
+        "assignment": "notify_assignment",
+        "payment": "notify_payment",
+        "approval": "notify_approval",
+        "due_date": "notify_due_date",
+    }
+    flag_col = col_map.get(event_key)
+    if not flag_col:
+        return
+
+    recipient_emails = set()
+
+    # Collect from targets
+    for tu in target_users:
+        user_row = None
+        if isinstance(tu, int):
+            user_row = _get_user_by_id(tu)
+        else:
+            user_row = _get_user_by_display_name(str(tu))
+        flags = _get_notification_flags(user_row)
+        if flags.get(flag_col) == 1:
+            em = _get_user_email(user_row)
+            if em:
+                recipient_emails.add(em)
+
+    # Admin watchers
+    if include_admin_watchers:
+        try:
+            admins = fetchall(
+                f"""
+                SELECT * FROM users 
+                WHERE approved=1 AND role IN ('Superuser','Supervisor') 
+                  AND COALESCE({flag_col},1)=1
+                """
+            )
+            for adm in admins:
+                em = _get_user_email(adm)
+                if em:
+                    recipient_emails.add(em)
+        except Exception:
+            pass
+
+    if recipient_emails:
+        send_email_notification(list(recipient_emails), subject, body)
+
+
 def set_agent_allowed_dts(user_id: int, dt_list: list, created_by: str = None) -> tuple:
     """Set allowed DTs for an agent. Replaces existing restrictions.
     
@@ -2418,6 +2564,15 @@ def assign_case_to_agent(agreement_no: str, agent_name: str, assigned_by: str, p
             (Agreement_No, assigned_to, assignment_type, assigned_at, assigned_by)
             VALUES (?, ?, 'agent', ?, ?)
         """, (agreement_no, agent_name, now_iso, assigned_by))
+
+        # Notify assignee and admins
+        subj = f"[Assignment] Case {agreement_no} → Agent {agent_name}"
+        body = (
+            f"Case {agreement_no} telah di-assign ke Agent {agent_name}.\n"
+            f"Assigned by: {assigned_by}\n"
+            f"Auto-return date: {auto_return}\n"
+        )
+        notify_event("assignment", subj, body, target_users=[agent_name])
         
         return True, f"Case berhasil di-assign ke Agent {agent_name} (auto-return: {auto_return})"
         
@@ -2456,6 +2611,14 @@ def assign_case_to_tracer(agreement_no: str, tracer_name: str, assigned_by: str)
             (Agreement_No, assigned_to, assignment_type, assigned_at, assigned_by)
             VALUES (?, ?, 'tracer', ?, ?)
         """, (agreement_no, tracer_name, now_iso, assigned_by))
+
+        subj = f"[Assignment] Case {agreement_no} → Tracer {tracer_name}"
+        body = (
+            f"Case {agreement_no} telah di-assign ke Tracer {tracer_name}.\n"
+            f"Assigned by: {assigned_by}\n"
+            "Tidak ada auto-return untuk tracer."
+        )
+        notify_event("assignment", subj, body, target_users=[tracer_name])
         
         return True, f"Case berhasil di-assign ke Tracer {tracer_name}"
         
@@ -5961,6 +6124,18 @@ def page_agent():
                                     "INSERT INTO payments (Agreement_No, paid_amount, paid_date, status, source_file, uploaded_by, proof_image_drive_id, proof_image_filename, approval_status) VALUES (?,?,?,?,?,?,?,?,?)",
                                     (sel, float(paid_amount or 0), (paid_date.isoformat() if paid_date else None), scheme, None, agent_name, proof_drive_id, proof_filename, 'pending')
                                 )
+                                # Email notif payment
+                                pay_subj = f"[Payment] {sel} - {scheme}"
+                                pay_body = (
+                                    f"Payment dilaporkan.\n"
+                                    f"Case: {sel}\n"
+                                    f"Amount: {paid_amount}\n"
+                                    f"Date: {paid_date}\n"
+                                    f"Status: {scheme}\n"
+                                    f"Uploaded by: {agent_name}\n"
+                                    f"Approval: pending"
+                                )
+                                notify_event("payment", pay_subj, pay_body, target_users=[agent_name])
                                 # Audit log pembayaran
                                 try:
                                     u = current_user() or {}
@@ -6048,6 +6223,15 @@ def page_agent():
                                         cicilan_info = f" (Gagal simpan rencana PTP: {str(e)[:30]})"
 
                                 # Simpan notifikasi sukses ke session state
+                                        # Notif jadwal PTP ke agent & admin
+                                        ptp_subj = f"[PTP Plan] {sel} - {int(plan_count)} jadwal"
+                                        ptp_body = (
+                                            f"Dibuat rencana PTP untuk case {sel}.\n"
+                                            f"Agent: {agent_name}\n"
+                                            f"Total jadwal: {int(plan_count)}\n"
+                                            f"Nominal per cicil: {plan_amount}"
+                                        )
+                                        notify_event("due_date", ptp_subj, ptp_body, target_users=[agent_name])
                                 st.session_state.payment_notification = {
                                     "type": "success",
                                     "message": f"✅ Laporan pembayaran berhasil disimpan!{upload_message}{cicilan_info}"
@@ -7535,9 +7719,9 @@ def page_user_setting():
     # Tambahkan tab User Management khusus untuk Supervisor/Superuser
     user_role = u.get('role')
     if user_role in ("Superuser", "Supervisor"):
-        tabs = st.tabs(["Basic Info", "Personal Details", "Banking Info", "Certification", "User Management"])
+        tabs = st.tabs(["Basic Info", "Personal Details", "Banking Info", "Certification", "User Management", "Notification"])
     else:
-        tabs = st.tabs(["Basic Info", "Personal Details", "Banking Info", "Certification"])
+        tabs = st.tabs(["Basic Info", "Personal Details", "Banking Info", "Certification", "Notification"])
     
     # --- Basic Info Tab ---
     with tabs[0]:
@@ -8025,6 +8209,57 @@ def page_user_setting():
                                             st.rerun()
                                         except Exception as e:
                                             st.error(f"Failed to delete user: {e}")
+
+                    # --- Notification Tab ---
+                    notif_tab_idx = 5 if user_role in ("Superuser", "Supervisor") else 4
+                    with tabs[notif_tab_idx]:
+                        st.subheader("Notification Preferences")
+                        st.caption("Notifikasi via email. Hanya Superuser/Supervisor yang boleh mengubah pengaturan.")
+
+                        # Choose target user (admin only), else current user
+                        target_user = u
+                        if user_role in ("Superuser", "Supervisor"):
+                            users_opt = fetchall("SELECT id, COALESCE(full_name,name,login_id) AS nm FROM users WHERE approved=1 ORDER BY nm")
+                            opt_labels = {row['nm']: row['id'] for row in users_opt if row.get('nm')}
+                            selected_nm = st.selectbox("Pilih user", options=list(opt_labels.keys()), index=0 if opt_labels else None)
+                            target_id = opt_labels.get(selected_nm)
+                            if target_id:
+                                tu = fetchone("SELECT * FROM users WHERE id=?", (target_id,))
+                                if tu:
+                                    target_user = tu
+                        target_flags = _get_notification_flags(target_user)
+
+                        def _cb(label, key_name):
+                            return st.checkbox(label, value=bool(target_flags.get(key_name, 1)), key=f"notif_{key_name}_{target_user.get('id')}")
+
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            val_assign = _cb("Assignment", "notify_assignment")
+                            val_payment = _cb("Payment", "notify_payment")
+                        with c2:
+                            val_approval = _cb("Approval", "notify_approval")
+                            val_due = _cb("Due Date / PTP", "notify_due_date")
+
+                        if user_role in ("Superuser", "Supervisor"):
+                            if st.button("💾 Simpan Notification", type="primary"):
+                                try:
+                                    execute(
+                                        "UPDATE users SET notify_assignment=?, notify_payment=?, notify_approval=?, notify_due_date=? WHERE id=?",
+                                        (int(val_assign), int(val_payment), int(val_approval), int(val_due), target_user.get('id'))
+                                    )
+                                    try:
+                                        execute(
+                                            "INSERT INTO audit_logs (user_id, action, details) VALUES (?,?,?)",
+                                            (u.get('id'), "USER_NOTIFY_UPDATE", f"Set notif for user {target_user.get('login_id')} -> assign:{val_assign}, pay:{val_payment}, appr:{val_approval}, due:{val_due}")
+                                        )
+                                    except Exception:
+                                        pass
+                                    st.success("✅ Notification preferences updated.")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Gagal menyimpan: {e}")
+                        else:
+                            st.info("Hubungi Supervisor/Superuser untuk mengubah pengaturan notifikasi Anda.")
             
             # --- Add New User Sub-tab ---
             with mgmt_tabs[2]:
