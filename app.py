@@ -2047,11 +2047,15 @@ def _get_notification_flags(user_row: dict) -> dict:
 
 
 def send_email_notification(recipients: list, subject: str, body: str) -> None:
-    """Send plain-text email. Non-blocking on failures (logs to st.warning)."""
+    """Send plain-text email. Non-blocking on failures (logs to st.warning).
+
+    Body is appended with footer branding.
+    """
     if not recipients:
         return
     try:
-        msg = MIMEText(body)
+        footer = "\n\n--\nMinama Felonic Solution"
+        msg = MIMEText(body + footer)
         msg["Subject"] = subject
         msg["From"] = EMAIL_USER
         msg["To"] = ", ".join(recipients)

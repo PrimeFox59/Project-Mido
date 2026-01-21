@@ -42,6 +42,15 @@ Backup/Restore: export/import seluruh tabel via Excel/Drive
 - Audit Log: lacak aksi (LOGIN/UPLOAD/ASSIGN/DELETE/RESTORE) untuk compliance.
 - User Setting: kelola profil/password user (peran sesuai hak akses).
 
+## Notifikasi Email
+- Branding: setiap email otomatis ditambah footer "Minama Felonic Solution".
+- Trigger aktif:
+    - Assignment: saat case di-assign ke Agent/Tracer.
+    - Payment: saat agent submit pembayaran (status awal pending).
+    - Due Date / PTP: saat rencana cicilan/PTP dibuat.
+- Preferensi per user: flag notify_assignment / notify_payment / notify_approval / notify_due_date di tabel users; diatur via User Setting → Notification (hanya Superuser/Supervisor yang bisa ubah).
+- Test email: tersedia form kirim email uji di tab Notification.
+
 ## Role & Authority
 | Role | Akses Menu | Kewenangan Utama |
 | --- | --- | --- |
